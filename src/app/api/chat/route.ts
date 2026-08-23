@@ -3,6 +3,23 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
+
+// Supabase admin client (server-side, service role) for cloud persistence
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+async function getSupabaseAdmin() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null
+  const { createClient } = await import('@supabase/supabase-js')
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
+}
+
+/** Extracts the user ID from the request (client sends its Supabase token). */
+async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get('x-supabase-user-id')
+  if (authHeader && /^[a-zA-Z0-9-]+$/.test(authHeader)) return authHeader
+  return null
+}
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 
@@ -327,6 +344,17 @@ export async function POST(req: NextRequest) {
           title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
         },
       })
+      // Mirror to Supabase (cloud) if user is authenticated
+      const userId = await getUserIdFromRequest(req)
+      if (userId) {
+        const admin = await getSupabaseAdmin()
+        if (admin) {
+          await admin
+            .from('chat_sessions')
+            .insert({ id: session.id, user_id: userId, title: session.title, kind: 'chat' })
+            .then(r => console.log('[supabase-sync] session saved'), e => console.error('[supabase-sync] FAILED:', e.message))
+        }
+      }
     }
 
     const zai = await getZAI()
@@ -350,6 +378,18 @@ export async function POST(req: NextRequest) {
           const userMessage = await db.chatMessage.create({
             data: { sessionId: session!.id, role: 'user', content: trimmed },
           })
+          // Mirror to Supabase
+          {
+            const userId = await getUserIdFromRequest(req)
+            if (userId) {
+              const admin = await getSupabaseAdmin()
+              if (admin) {
+                admin.from('chat_messages')
+                  .insert({ id: userMessage.id, session_id: session!.id, role: 'user', content: trimmed })
+                  .then(r => console.log('[supabase-sync] user msg saved'), e => console.error('[supabase-sync] user msg FAILED:', e.message))
+              }
+            }
+          }
           send({ type: 'user', id: userMessage.id, content: trimmed })
 
           // LLM conversation: system + history + tool exchanges

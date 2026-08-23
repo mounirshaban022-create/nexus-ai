@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
             documentary: 'documentary photography, natural light, realistic',
           }
           const imgPrompt = encodeURIComponent(
-            `${scenes[i].image}, ${styleSuffix[style] ?? ''}, no text, no watermark`
+            `${scenes[i].image}, ${styleSuffix[style] ?? ''}, high quality, detailed, cinematic lighting, no text, no watermark`
           )
           const imgRes = await fetch(
             `https://image.pollinations.ai/prompt/${imgPrompt}?width=${W}&height=${H}&nologo=true&seed=${Math.floor(Math.random() * 999999)}`,

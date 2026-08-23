@@ -28,6 +28,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from './markdown'
 import { AttachmentCard, ChatToolStep } from './chat-attachments'
 import { puterChat, puterSignIn, isPuterReady } from './puter-engine'
+import { getCurrentUser } from '@/lib/supabase'
 import { ArtifactPanel, useArtifact, type Artifact } from './artifact-panel'
 import type { ChatMessageItem, ChatSessionItem, ChatEvent, ChatAttachment } from './modes'
 
@@ -194,7 +195,10 @@ export function ChatMode({ initialPrompt, onInitialPromptConsumed, headerSlot }:
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(supabaseUserIdRef.current ? { 'x-supabase-user-id': supabaseUserIdRef.current } : {}),
+          },
           body: JSON.stringify({ message: trimmed, sessionId, thinking: thinkingMode }),
           signal: abortRef.current.signal,
         })
@@ -330,6 +334,14 @@ export function ChatMode({ initialPrompt, onInitialPromptConsumed, headerSlot }:
 
   const { artifact, openArtifact, closeArtifact } = useArtifact()
   const [puterActive, setPuterActive] = useState(false)
+  const supabaseUserIdRef = useRef<string | null>(null)
+
+  // Load Supabase user ID for cloud sync
+  useEffect(() => {
+    getCurrentUser().then((u) => {
+      supabaseUserIdRef.current = u?.id ?? null
+    }).catch(() => {})
+  }, [])
 
   // Check Puter sign-in state once — hide activation banner if already active
   useEffect(() => {

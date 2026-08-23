@@ -36,13 +36,15 @@ export async function POST(req: NextRequest) {
 
     let buffer: Buffer
     if (provider === 'free') {
-      // Free open-source generation via Pollinations (no API key)
+      // Free generation via Pollinations (enhanced quality from Open-Generative-AI patterns)
       const [w, h] = chosenSize.split('x').map(Number)
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 90_000)
       try {
+        // Quality-boosted prompt (cinematic quality terms improve Pollinations output significantly)
+        const qualityPrompt = `${trimmedPrompt}, high quality, detailed, professional, sharp focus, beautiful lighting`
         const res = await fetch(
-          `https://image.pollinations.ai/prompt/${encodeURIComponent(trimmedPrompt)}?width=${w}&height=${h}&nologo=true&seed=${Math.floor(Math.random() * 1_000_000)}`,
+          `https://image.pollinations.ai/prompt/${encodeURIComponent(qualityPrompt)}?width=${w}&height=${h}&nologo=true&enhance=true&model=flux&seed=${Math.floor(Math.random() * 1_000_000)}`,
           { signal: controller.signal }
         )
         if (!res.ok) throw new Error(`Free image service responded ${res.status}`)
