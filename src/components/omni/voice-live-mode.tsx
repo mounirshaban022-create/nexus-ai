@@ -6,6 +6,7 @@ import { Mic, Phone, Settings2, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { startAsrMode, stopAsrMode } from './voice-asr-fallback'
+import { kokoroSpeak } from './kokoro-voice'
 
 /**
  * NEXUS Live Voice — rebuilt from scratch on proven foundations:
@@ -102,8 +103,44 @@ export function VoiceLiveMode() {
     } catch { /* best effort */ }
   }, [])
 
+  /** Play audio through WebAudio (unlocked during gesture). */
+  const playWebAudio = useCallback(async (arrayBuffer: ArrayBuffer): Promise<void> => {
+    unlockAudio()
+    const ctx = audioCtxRef.current
+    if (!ctx || ctx.state === 'closed') throw new Error('Audio context unavailable')
+    if (ctx.state === 'suspended') await ctx.resume().catch(() => {})
+
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+    if (sourceRef.current) {
+      try { sourceRef.current.stop() } catch { /* stopped */ }
+    }
+
+    await new Promise<void>((resolve) => {
+      const source = ctx.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(ctx.destination)
+      sourceRef.current = source
+      source.onended = () => resolve()
+      try { source.start() } catch { resolve() }
+    })
+  }, [unlockAudio])
+
   const speak = useCallback(
     async (text: string): Promise<void> => {
+      // LAYER 1: Kokoro neural voice (premium, in-browser, iframe-proof)
+      try {
+        const kokoroResult = await kokoroSpeak(text)
+        if (kokoroResult.ok && kokoroResult.blob) {
+          setStateSafe('speaking')
+          const arrayBuffer = await kokoroResult.blob.arrayBuffer()
+          await playWebAudio(arrayBuffer)
+          return
+        }
+      } catch {
+        // Kokoro not loaded yet → continue to Edge TTS
+      }
+
+      // LAYER 2: Edge TTS via API
       try {
         setStateSafe('speaking')
         const res = await fetch('/api/tts', {
@@ -115,36 +152,7 @@ export function VoiceLiveMode() {
         const blob = await res.blob()
         const arrayBuffer = await blob.arrayBuffer()
 
-        // Ensure context exists + resumed (unlocked during the tap gesture)
-        unlockAudio()
-        const ctx = audioCtxRef.current
-        if (!ctx || ctx.state === 'closed') {
-          throw new Error('Audio context unavailable')
-        }
-        if (ctx.state === 'suspended') {
-          await ctx.resume().catch(() => {})
-        }
-
-        // Decode + play through WebAudio (bypasses <audio> autoplay issues)
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-
-        // Stop any previous playback (barge-in)
-        if (sourceRef.current) {
-          try { sourceRef.current.stop() } catch { /* already stopped */ }
-        }
-
-        await new Promise<void>((resolve) => {
-          const source = ctx.createBufferSource()
-          source.buffer = audioBuffer
-          source.connect(ctx.destination)
-          sourceRef.current = source
-          source.onended = () => resolve()
-          try {
-            source.start()
-          } catch {
-            resolve()
-          }
-        })
+        await playWebAudio(arrayBuffer)
       } catch (e) {
         console.error('[voice] WebAudio failed, trying speechSynthesis:', e)
         // FALLBACK: browser built-in speechSynthesis (works in restricted contexts)
@@ -163,7 +171,7 @@ export function VoiceLiveMode() {
         }
       }
     },
-    [ttsVoice, unlockAudio, lang]
+    [ttsVoice, unlockAudio, lang, playWebAudio]
   )
 
   /* ---------- THINK (LLM turn) ---------- */

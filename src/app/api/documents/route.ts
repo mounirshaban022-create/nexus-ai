@@ -43,7 +43,7 @@ const globalForDocs = globalThis as unknown as { docStore?: Map<string, ParsedDo
 const docStore = globalForDocs.docStore ?? (globalForDocs.docStore = new Map<string, ParsedDoc>())
 
 const requestSchema = z.object({
-  file: z.string().min(50).max(15_000_000), // base64
+  file: z.string().min(20).max(15_000_000), // base64
   filename: z.string().min(1).max(200),
   format: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv']),
 })
@@ -99,10 +99,25 @@ export async function POST(req: NextRequest) {
     let tables: Array<{ caption: string; rows: string[][] }> = []
 
     if (format === 'pdf') {
-      const pdfParse = (await import('pdf-parse')).default as (b: Buffer) => Promise<{ text: string; numpages: number }>
-      const data = await pdfParse(buffer)
-      text = data.text
-      metadata.pages = data.numpages
+      // pdftotext (poppler) — battle-tested, zero JS deps
+      const { writeFile, unlink } = await import('fs/promises')
+      const { execFile } = await import('child_process')
+      const { promisify } = await import('util')
+      const execFileAsync = promisify(execFile)
+      const tmpPath = path.join((await import('os')).tmpdir(), `nexus-doc-${Date.now()}.pdf`)
+      await writeFile(tmpPath, buffer)
+      try {
+        const { stdout } = await execFileAsync('pdftotext', ['-layout', tmpPath, '-'])
+        text = stdout
+        // Count pages via pdfinfo
+        try {
+          const { stdout: info } = await execFileAsync('pdfinfo', [tmpPath])
+          const pagesMatch = info.match(/Pages:\s+(\d+)/)
+          if (pagesMatch) metadata.pages = parseInt(pagesMatch[1])
+        } catch { /* pdfinfo optional */ }
+      } finally {
+        unlink(tmpPath).catch(() => {})
+      }
     } else if (format === 'docx') {
       const { extractRawText } = await import('mammoth')
       const result = await extractRawText({ buffer })
