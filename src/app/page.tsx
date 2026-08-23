@@ -17,6 +17,7 @@ import { OfficeMode } from '@/components/omni/office-mode'
 import { DocumentsMode } from '@/components/omni/documents-mode'
 import { SettingsMode } from '@/components/omni/settings-mode'
 import { ProfileMode } from '@/components/omni/profile-mode'
+import { OnboardingOverlay } from '@/components/omni/onboarding'
 import { AiModelsMode } from '@/components/omni/ai-models-mode'
 import { CodeMode } from '@/components/omni/code-mode'
 import { VideoMode } from '@/components/omni/video-mode'
@@ -33,11 +34,12 @@ function AuroraBackground() {
   )
 }
 
+// ChatGPT IA: Chat first, then organized groups
 const GROUPS: Array<{ label: string; ids: ModeId[] }> = [
-  { label: '', ids: ['chat', 'voice-live', 'agent'] },           // Primary — no label
-  { label: 'Create', ids: ['code', 'video', 'image', 'office', 'documents'] },
+  { label: '', ids: ['chat', 'agent', 'voice-live'] },
+  { label: 'Create', ids: ['image', 'video', 'code', 'office', 'documents'] },
   { label: 'Tools', ids: ['search', 'reader', 'vision', 'voice'] },
-  { label: 'Platform', ids: ['profile', 'settings', 'models', 'connectors'] },
+  { label: 'Account', ids: ['profile', 'settings', 'models', 'connectors'] },
 ]
 
 // BUILD VERSION — visible proof of which version is running
@@ -64,6 +66,26 @@ export default function Page() {
 
   // App opens straight into Chat — ChatGPT style
   const [activeMode, setActiveMode] = useState<ModeId>('chat')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // Show onboarding for first-time users
+  const [showOnboarding, setShowOnboarding] = useState(false)
+
+  const completeOnboarding = () => {
+    localStorage.setItem('nexus-onboarded', 'true')
+    setShowOnboarding(false)
+  }
+
+  // Check onboarding after mount (deferred to avoid cascading renders)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        if (!localStorage.getItem('nexus-onboarded')) {
+          setShowOnboarding(true)
+        }
+      } catch { /* localStorage blocked */ }
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [])
   const [chatInitialPrompt, setChatInitialPrompt] = useState<string | null>(null)
 
   const openMode = useCallback((mode: ModeId, payload?: string) => {
@@ -80,30 +102,54 @@ export default function Page() {
       <AuroraBackground />
 
       <div className="flex min-h-0 flex-1">
-        {/* Desktop sidebar — organized ability list */}
-        <aside className="hidden w-[260px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar lg:flex">
-          <div className="flex items-center gap-2.5 border-b border-border/60 px-5 py-4">
-            { }
-            <img
-              src="/nexus-icon.png"
-              alt="NEXUS AI logo"
-              className="omni-glow h-9 w-9 rounded-xl"
-            />
-            <div className="leading-tight">
-              <p className="text-sm font-extrabold tracking-tight">
-                NEXUS <span className="omni-text-gradient">AI</span>
-              </p>
-              <p className="text-[11px] text-muted-foreground">Infinite connections</p>
-            </div>
+        {/* Desktop sidebar — ChatGPT style: collapsible, clean */}
+        <aside
+          className={`hidden shrink-0 flex-col border-r border-border bg-sidebar transition-all duration-300 lg:flex ${
+            sidebarCollapsed ? 'w-[60px]' : 'w-[260px]'
+          }`}
+        >
+          {/* Top: collapse toggle + new chat */}
+          <div className="flex items-center gap-2 px-3 pt-3">
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition hover:bg-secondary"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            {!sidebarCollapsed && (
+              <span className="text-sm font-bold tracking-tight">NEXUS</span>
+            )}
           </div>
 
-          <nav className="omni-scroll flex-1 overflow-y-auto p-3" aria-label="AI abilities">
+          {/* New Chat button (ChatGPT's primary action) */}
+          <div className="px-3 pt-3">
+            <button
+              onClick={() => setActiveMode('chat')}
+              className={`flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 transition hover:bg-secondary ${
+                sidebarCollapsed ? 'justify-center px-0' : 'px-3'
+              }`}
+              aria-label="New chat"
+            >
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              {!sidebarCollapsed && <span className="text-sm font-medium">New Chat</span>}
+            </button>
+          </div>
+
+          {/* Mode list — clean, no group headers when collapsed */}
+          <nav className="omni-scroll mt-3 flex-1 overflow-y-auto px-2" aria-label="AI abilities">
             {GROUPS.map((group) => (
-              <div key={group.label} className="mb-1">
-                <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-                  {group.label}
-                </p>
-                {group.ids.map((id) => {
+              <div key={group.label || 'main'} className="mb-1">
+                {!sidebarCollapsed && group.label && (
+                  <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+                    {group.label}
+                  </p>
+                )}
+                {(sidebarCollapsed ? group.ids.slice(0, 4) : group.ids).map((id) => {
                   const m = MODE_MAP[id]
                   if (!m) return null
                   const Icon = m.icon
@@ -113,34 +159,17 @@ export default function Page() {
                       key={id}
                       onClick={() => setActiveMode(id)}
                       aria-current={active ? 'page' : undefined}
-                      className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                      title={sidebarCollapsed ? m.label : undefined}
+                      className={`flex h-9 w-full items-center rounded-lg transition ${
+                        sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'
+                      } ${
                         active
-                          ? 'bg-gradient-to-r from-violet-500/18 via-fuchsia-500/10 to-transparent text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                          ? 'bg-secondary font-medium text-foreground'
+                          : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                       }`}
                     >
-                      {active && (
-                        <motion.span
-                          layoutId="mode-indicator"
-                          className="absolute inset-y-2 left-0 w-1 rounded-full bg-gradient-to-b from-violet-400 to-fuchsia-400"
-                          aria-hidden
-                        />
-                      )}
-                      <span
-                        className={`icon-tile flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition ${
-                          active
-                            ? m.accentBorder
-                            : 'border-border/50 opacity-70 group-hover:opacity-100'
-                        }`}
-                      >
-                        <Icon className={`h-4 w-4 ${active ? m.accentText : 'text-muted-foreground'}`} aria-hidden />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{m.label}</span>
-                        <span className="block truncate text-[11px] text-muted-foreground/80">
-                          {m.tagline}
-                        </span>
-                      </span>
+                      <Icon className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-primary' : ''}`} aria-hidden />
+                      {!sidebarCollapsed && <span className="truncate text-sm">{m.label}</span>}
                     </button>
                   )
                 })}
@@ -148,26 +177,35 @@ export default function Page() {
             ))}
           </nav>
 
-          <div className="p-3">
+          {/* Bottom: user profile / sign-in (ChatGPT pattern) */}
+          <div className="border-t border-border p-2">
             {user ? (
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <button
+                onClick={() => setActiveMode('profile')}
+                className={`flex h-10 w-full items-center rounded-lg transition hover:bg-secondary ${
+                  sidebarCollapsed ? 'justify-center px-0' : 'gap-2.5 px-2'
+                }`}
+                aria-label="Profile"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
                   {(user.email ?? '?')[0].toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">{user.email}</p>
-                  <button onClick={() => signOut()} className="text-[11px] text-muted-foreground hover:text-foreground">
-                    Sign out
-                  </button>
-                </div>
-              </div>
+                </span>
+                {!sidebarCollapsed && (
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="block truncate text-xs font-medium">{user.email}</span>
+                  </span>
+                )}
+              </button>
             ) : (
               <button
-                onClick={() => setShowAuth(true)}
-                className="flex w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 py-2.5 text-left transition hover:bg-secondary"
+                onClick={() => setActiveMode('settings')}
+                className={`flex h-10 w-full items-center rounded-lg transition hover:bg-secondary ${
+                  sidebarCollapsed ? 'justify-center px-0' : 'gap-2.5 px-2'
+                }`}
+                aria-label="Sign in"
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">?</span>
-                <span className="text-sm font-medium">Sign in</span>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold text-muted-foreground">?</span>
+                {!sidebarCollapsed && <span className="text-xs font-medium">Sign in</span>}
               </button>
             )}
           </div>
@@ -175,10 +213,17 @@ export default function Page() {
 
         {/* Main column */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile header: logo + ability picker */}
+          {/* Mobile header: minimal (ChatGPT pattern) */}
           <header className="flex items-center justify-between border-b border-border/50 px-4 py-2 lg:hidden">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/nexus-icon.png" alt="NEXUS AI" className="h-7 w-7 rounded-lg" />
+            <button
+              onClick={() => setActiveMode('home')}
+              className="flex items-center gap-2"
+              aria-label="NEXUS AI home"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/nexus-icon.png" alt="" className="h-7 w-7 rounded-lg" />
+              <span className="text-sm font-bold">NEXUS</span>
+            </button>
             <AbilityPicker activeMode={activeMode} onSelect={setActiveMode} />
           </header>
 
@@ -275,6 +320,9 @@ export default function Page() {
           )
         })}
       </nav>
+
+      {/* Onboarding */}
+      {showOnboarding && <OnboardingOverlay onComplete={completeOnboarding} />}
 
       {/* Auth modal — re-check user after auth attempt */}
       {showAuth && (
