@@ -20,6 +20,7 @@ Supabase fixes: multi-user accounts, cross-device sync, hosted Postgres, file st
    ```
 
 4. **Create tables**: In Supabase Dashboard → SQL Editor → New Query
+   (OR run from terminal: bun run scripts/create-tables.ts after setting SUPABASE_DB_URL)
    - Paste the entire contents of `supabase-schema.sql`
    - Click Run
    - All tables, security policies, and storage buckets are created
