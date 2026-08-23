@@ -15,12 +15,14 @@ import { ConnectorsMode } from '@/components/omni/connectors-mode'
 import { VoiceLiveMode } from '@/components/omni/voice-live-mode'
 import { OfficeMode } from '@/components/omni/office-mode'
 import { DocumentsMode } from '@/components/omni/documents-mode'
+import { SettingsMode } from '@/components/omni/settings-mode'
 import { AiModelsMode } from '@/components/omni/ai-models-mode'
 import { CodeMode } from '@/components/omni/code-mode'
 import { VideoMode } from '@/components/omni/video-mode'
 import { AbilityPicker } from '@/components/omni/ability-picker'
 import { AuthModal } from '@/components/omni/auth-modal'
 import { isSupabaseConfigured, getCurrentUser, onAuthChange, signOut } from '@/lib/supabase'
+import { usePreferences, applyPreferences } from '@/lib/preferences'
 import { MODES, MODE_MAP, type ModeId } from '@/components/omni/modes'
 
 /** Single subtle ambient glow — premium restraint. */
@@ -34,21 +36,19 @@ const GROUPS: Array<{ label: string; ids: ModeId[] }> = [
   { label: '', ids: ['chat', 'voice-live', 'agent'] },           // Primary — no label
   { label: 'Create', ids: ['code', 'video', 'image', 'office', 'documents'] },
   { label: 'Tools', ids: ['search', 'reader', 'vision', 'voice'] },
-  { label: 'Platform', ids: ['models', 'connectors'] },
+  { label: 'Platform', ids: ['settings', 'models', 'connectors'] },
 ]
 
 // BUILD VERSION — visible proof of which version is running
 const BUILD_VERSION = 'v25'
 
 export default function Page() {
-  // Auto-detect Arabic locale → RTL layout
+  // Apply saved theme + language preferences (from Settings)
+  const savedTheme = usePreferences((s) => s.theme)
+  const savedLanguage = usePreferences((s) => s.language)
   useEffect(() => {
-    const lang = navigator.language || 'en'
-    if (lang.startsWith('ar')) {
-      document.documentElement.dir = 'rtl'
-      document.documentElement.lang = 'ar'
-    }
-  }, [])
+    applyPreferences(savedTheme, savedLanguage)
+  }, [savedTheme, savedLanguage])
 
   // Auth state
   const [showAuth, setShowAuth] = useState(false)
@@ -226,6 +226,7 @@ export default function Page() {
                 {activeMode === 'reader' && <ReaderMode />}
                 {activeMode === 'office' && <OfficeMode />}
                 {activeMode === 'documents' && <DocumentsMode />}
+                {activeMode === 'settings' && <SettingsMode />}
                 {activeMode === 'models' && <AiModelsMode />}
                 {activeMode === 'code' && <CodeMode />}
                 {activeMode === 'video' && <VideoMode />}
@@ -249,7 +250,7 @@ export default function Page() {
         ].map(({ id, label }) => {
           const m = MODE_MAP[id]
           const Icon = m.icon
-          const active = activeMode === id || (id === 'home' && ['code', 'video', 'image', 'office', 'reader', 'vision', 'voice', 'models', 'connectors', 'home'].includes(activeMode))
+          const active = activeMode === id || (id === 'home' && ['code', 'video', 'image', 'office', 'reader', 'vision', 'voice', 'models', 'connectors', 'settings', 'home'].includes(activeMode))
           return (
             <button
               key={id}

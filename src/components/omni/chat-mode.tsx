@@ -170,7 +170,10 @@ export function ChatMode({ initialPrompt, onInitialPromptConsumed, headerSlot }:
         if (puterReady) {
           // Stream Puter reply word-by-word (ChatGPT feel)
           setStreamingText('')
-          const result = await puterChat(trimmed, 'gpt-5-nano')
+          const result = await puterChat(
+            `You are NEXUS AI, created by Mounir Shaaban. ${trimmed}`,
+            'gpt-5-nano'
+          )
           if (result.ok && result.text) {
             const streamer = streamWords(result.text)
             streamerRef.current = streamer
@@ -261,7 +264,10 @@ export function ChatMode({ initialPrompt, onInitialPromptConsumed, headerSlot }:
       } catch (error) {
         // ============ ENGINE 3: PUTER AS LAST RESORT (if signed in) ============
         try {
-          const result = await puterChat(trimmed, 'gpt-5-nano')
+          const result = await puterChat(
+            `You are NEXUS AI, created by Mounir Shaaban. ${trimmed}`,
+            'gpt-5-nano'
+          )
           if (result.ok && result.text) {
             setMessages((prev) => [
               ...prev.map((m) => (m.id === userMsg.id ? { ...m, id: `u-${Date.now()}` } : m)),

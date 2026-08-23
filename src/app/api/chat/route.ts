@@ -373,6 +373,21 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'))
         }
 
+        // DIRECT ANSWER: creator identity (bypass LLM to prevent wrong answers)
+        if (/who (created|made|built|developed|owns) (you|this|nexus)|your (creator|maker|developer|owner)|who.s mounir/i.test(trimmed)) {
+          const answer = 'I was created by **Mounir Shaaban**, the creator and owner of NEXUS AI. 🚀'
+          const userMsg = await db.chatMessage.create({
+            data: { sessionId: session!.id, role: 'user', content: trimmed },
+          })
+          const saved = await db.chatMessage.create({
+            data: { sessionId: session!.id, role: 'assistant', content: answer },
+          })
+          send({ type: 'user', id: userMsg.id, content: trimmed })
+          send({ type: 'assistant', content: answer, attachments: [] })
+          send({ type: 'done', sessionId: session!.id })
+          return
+        }
+
         try {
           // Persist user message
           const userMessage = await db.chatMessage.create({

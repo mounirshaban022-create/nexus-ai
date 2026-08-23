@@ -14,6 +14,7 @@ import {
   Code2,
   Clapperboard,
   FileSearch,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -33,6 +34,7 @@ export type ModeId =
   | 'code'
   | 'video'
   | 'documents'
+  | 'settings'
 
 export interface ModeDefinition {
   id: ModeId
@@ -125,6 +127,19 @@ export const MODES: ModeDefinition[] = [
     accentBg: 'bg-violet-100',
     accentBorder: 'border-violet-200',
     gradient: 'from-violet-500 to-purple-400',
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    shortLabel: 'Settings',
+    tagline: 'Profile · Theme · Language · Legal',
+    description: 'Your profile, appearance, language, account and legal documents.',
+    icon: Settings,
+    group: 'superpowers',
+    accentText: 'text-muted-foreground',
+    accentBg: 'bg-secondary',
+    accentBorder: 'border-border',
+    gradient: 'from-gray-500 to-gray-400',
   },
   {
     id: 'connectors',
