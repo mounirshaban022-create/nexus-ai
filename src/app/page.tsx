@@ -19,6 +19,8 @@ import { AiModelsMode } from '@/components/omni/ai-models-mode'
 import { CodeMode } from '@/components/omni/code-mode'
 import { VideoMode } from '@/components/omni/video-mode'
 import { AbilityPicker } from '@/components/omni/ability-picker'
+import { AuthModal } from '@/components/omni/auth-modal'
+import { isSupabaseConfigured, getCurrentUser, onAuthChange, signOut } from '@/lib/supabase'
 import { MODES, MODE_MAP, type ModeId } from '@/components/omni/modes'
 
 /** Single subtle ambient glow — premium restraint. */
@@ -46,6 +48,15 @@ export default function Page() {
       document.documentElement.dir = 'rtl'
       document.documentElement.lang = 'ar'
     }
+  }, [])
+
+  // Auth state
+  const [showAuth, setShowAuth] = useState(false)
+  const [user, setUser] = useState<{ email?: string } | null>(null)
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    getCurrentUser().then(setUser)
+    return onAuthChange(setUser)
   }, [])
 
   // App opens straight into Chat — ChatGPT style
@@ -134,16 +145,28 @@ export default function Page() {
             ))}
           </nav>
 
-          <div className="p-4">
-            <div className="flex items-center gap-2 px-1">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              </span>
-              <p className="text-[11px] text-muted-foreground/80">
-                27 connectors online
-              </p>
-            </div>
+          <div className="p-3">
+            {user ? (
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-primary">
+                  {(user.email ?? '?')[0].toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium">{user.email}</p>
+                  <button onClick={() => signOut()} className="text-[11px] text-muted-foreground hover:text-foreground">
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAuth(true)}
+                className="flex w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 py-2.5 text-left transition hover:bg-secondary"
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">?</span>
+                <span className="text-sm font-medium">Sign in</span>
+              </button>
+            )}
           </div>
         </aside>
 
@@ -247,6 +270,9 @@ export default function Page() {
           )
         })}
       </nav>
+
+      {/* Auth modal */}
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
 
       {/* Footer — desktop only (mobile has bottom nav) */}
       <footer className="mt-auto hidden shrink-0 border-t border-border/50 lg:block">
