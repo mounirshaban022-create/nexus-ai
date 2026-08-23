@@ -1,0 +1,98 @@
+'use client'
+
+import { memo, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { Check, Copy } from 'lucide-react'
+
+function CodeBlock({ language, code }: { language: string; code: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  return (
+    <div className="group/code relative">
+      <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border/60 bg-secondary/50 px-3 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          {language || 'code'}
+        </span>
+        <button
+          onClick={copy}
+          aria-label="Copy code"
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+        >
+          {copied ? (
+            <>
+              <Check className="h-3 w-3 text-emerald-400" aria-hidden /> Copied
+            </>
+          ) : (
+            <>
+              <Copy className="h-3 w-3" aria-hidden /> Copy
+            </>
+          )}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        style={oneDark}
+        language={language}
+        PreTag="div"
+        customStyle={{
+          margin: 0,
+          background: 'oklch(0.16 0.015 295)',
+          padding: '0.85rem 1rem',
+          fontSize: '0.8rem',
+          borderRadius: '0 0 0.6rem 0.6rem',
+          borderTopLeftRadius: 0,
+          borderTopRightRadius: 0,
+        }}
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
+  )
+}
+
+/**
+ * Shared Markdown renderer with GFM support, syntax-highlighted code blocks
+ * and one-click copy buttons.
+ */
+export const Markdown = memo(function Markdown({ content }: { content: string }) {
+  return (
+    <div className="omni-prose">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
+          code: (props) => {
+            const { className, children } = props as {
+              className?: string
+              children?: React.ReactNode
+            }
+            const match = /language-(\w+)/.exec(className || '')
+            const codeText = String(children ?? '').replace(/\n$/, '')
+            if (!match && !codeText.includes('\n')) {
+              return <code className={className}>{children}</code>
+            }
+            return <CodeBlock language={match?.[1] ?? 'text'} code={codeText} />
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
+})

@@ -1,0 +1,237 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { db } from '@/lib/db'
+import { getZAI } from '@/lib/zai'
+import { smartChat } from '@/lib/smart-chat'
+import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { isEdgeVoice } from '@/lib/voices'
+
+export const maxDuration = 90
+
+/**
+ * One turn of a live voice conversation:
+ * audio (base64) -> ASR -> (optional thinking) -> LLM -> TTS wav (base64)
+ * Everything the client needs to keep the conversation flowing, in one round-trip.
+ */
+
+const requestSchema = z.object({
+  audio: z.string().optional(), // base64 audio (ASR path)
+  message: z.string().max(4000).optional(), // direct transcript (Web Speech API path)
+  sessionId: z.string().max(64).optional().nullable(),
+  history: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(4000) }))
+    .max(12)
+    .optional()
+    .default([]),
+  voice: z.string().min(2).max(60).default('en-US-AriaNeural'),
+  language: z.string().min(2).max(30).optional().default('auto'),
+})
+
+/** Voice persona: natural, warm, concise — designed for spoken conversation. */
+const VOICE_SYSTEM_PROMPT = [
+  'You are NEXUS, a warm, intelligent voice companion in a real-time spoken conversation.',
+  'RULES (your reply is spoken aloud):',
+  '1. SHORT: 1-3 sentences, max ~50 words, unless detail is explicitly requested.',
+  '2. Natural spoken style: contractions, no markdown, no lists, no emoji.',
+  '3. Direct and warm — never waffle.',
+  '4. LANGUAGE: reply in the SAME language the user just spoke.',
+  '5. CURRENT TIME: it is ' + new Date().toISOString() + '. Use this for any time/date questions.',
+].join('\n')
+
+/** Strips markdown syntax so TTS speaks naturally. */
+function stripMarkdownForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' code block ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_#>`~|]/g, '')
+    .replace(/\(([^)]*)\)/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function splitTextIntoChunks(text: string, maxLength = 1000): string[] {
+  const sentences = text.match(/[^.!?\n]+[.!?]*\s*|\n+/g) || [text]
+  const chunks: string[] = []
+  let current = ''
+  for (const sentence of sentences) {
+    if (sentence.length > maxLength) {
+      if (current.trim()) chunks.push(current.trim())
+      for (let i = 0; i < sentence.length; i += maxLength) {
+        chunks.push(sentence.slice(i, i + maxLength).trim())
+      }
+      current = ''
+      continue
+    }
+    if ((current + sentence).length <= maxLength) current += sentence
+    else {
+      if (current.trim()) chunks.push(current.trim())
+      current = sentence
+    }
+  }
+  if (current.trim()) chunks.push(current.trim())
+  return chunks.filter(Boolean)
+}
+
+function wavHeader(dataLength: number, sampleRate = 24000): Buffer {
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + dataLength, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(sampleRate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(dataLength, 40)
+  return header
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const limit = rateLimit(`voice-turn:${clientKey(req)}`, 20, 60_000)
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: `Voice limit reached. Retry in ${limit.retryAfterSeconds}s.` },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }
+      )
+    }
+
+    const parsed = requestSchema.safeParse(await req.json())
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid request: audio is required.' }, { status: 400 })
+    }
+
+    const zai = await getZAI()
+    const { audio, message, voice } = parsed.data
+
+    // ---------- 1. Transcribe (skip if transcript provided via Web Speech API) ----------
+    let transcript = ''
+    if (message && message.trim()) {
+      transcript = message.trim()
+    } else if (audio && audio.length > 64) {
+      const base64Audio = audio.includes(',') && audio.startsWith('data:')
+        ? audio.split(',')[1]
+        : audio
+      if (!base64Audio) {
+        return NextResponse.json({ error: 'Audio is empty.' }, { status: 400 })
+      }
+      const asr = await zai.audio.asr.create({ file_base64: base64Audio })
+      transcript = asr.text?.trim() ?? ''
+    } else {
+      return NextResponse.json({ error: 'Either audio or message is required.' }, { status: 400 })
+    }
+    if (!transcript) {
+      return NextResponse.json({
+        transcript: '',
+        reply: '',
+        thinking: '',
+        audio: null,
+        note: 'no-speech',
+      })
+    }
+
+    // ---------- 2. Persist session ----------
+    let session = parsed.data.sessionId
+      ? await db.chatSession.findFirst({ where: { id: parsed.data.sessionId, kind: 'voice' } })
+      : null
+    if (!session) {
+      session = await db.chatSession.create({
+        data: {
+          kind: 'voice',
+          title: `Voice · ${transcript.slice(0, 50)}`,
+        },
+      })
+    }
+    await db.chatMessage.create({
+      data: { sessionId: session.id, role: 'user', content: transcript },
+    })
+
+    // ---------- 3. Reply (single fast call, no separate thinking phase) ----------
+    const historyMessages = parsed.data.history.slice(-6).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }))
+    const languageHint =
+      parsed.data.language && parsed.data.language !== 'auto'
+        ? `\n[Reply in this language: ${parsed.data.language}]`
+        : ''
+    const reply = (await smartChat(
+      [
+        { role: 'assistant', content: VOICE_SYSTEM_PROMPT + languageHint },
+        ...historyMessages,
+        { role: 'user', content: transcript },
+      ],
+      { maxTokens: 300, task: 'voice' }
+    )).trim()
+    if (!reply) {
+      return NextResponse.json({ error: 'The assistant had nothing to say. Try again.' }, { status: 500 })
+    }
+
+    await db.chatMessage.create({
+      data: { sessionId: session.id, role: 'assistant', content: reply },
+    })
+
+    // ---------- 5. Speak (TTS — NEXUS or free Microsoft neural voices) ----------
+    let audioBase64: string | null = null
+    let audioFormat = 'wav'
+    try {
+      const speechText = stripMarkdownForSpeech(reply).slice(0, 3000)
+
+      if (isEdgeVoice(voice)) {
+        const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
+        const tts = new MsEdgeTTS()
+        await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+        const { audioStream } = tts.toStream(speechText)
+        const chunks: Buffer[] = []
+        for await (const chunk of audioStream) {
+          chunks.push(chunk as Buffer)
+        }
+        const mp3 = Buffer.concat(chunks)
+        if (mp3.length > 100) {
+          audioBase64 = mp3.toString('base64')
+          audioFormat = 'mp3'
+        }
+      } else {
+        const chunks = splitTextIntoChunks(speechText)
+        const buffers: Buffer[] = []
+        for (const chunk of chunks) {
+          const ttsRes = await zai.audio.tts.create({
+            input: chunk,
+            voice,
+            speed: 1.0,
+            response_format: 'wav',
+            stream: false,
+          })
+          const arrayBuffer = await ttsRes.arrayBuffer()
+          buffers.push(Buffer.from(new Uint8Array(arrayBuffer)))
+        }
+        if (buffers.length > 0) {
+          const pcmParts = buffers.map((b) => b.subarray(44))
+          const pcmLength = pcmParts.reduce((sum, p) => sum + p.length, 0)
+          const merged = Buffer.concat([wavHeader(pcmLength), ...pcmParts])
+          audioBase64 = merged.toString('base64')
+        }
+      }
+    } catch (err) {
+      console.error('[api/voice/turn] TTS failed:', err)
+      // Reply text still usable — client will show it silently
+    }
+
+    return NextResponse.json({
+      sessionId: session.id,
+      transcript,
+      reply,
+      audio: audioBase64,
+      audioFormat,
+    })
+  } catch (error) {
+    console.error('[api/voice/turn] POST error:', error)
+    const message = error instanceof Error ? error.message : 'Voice turn failed. Please try again.'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}

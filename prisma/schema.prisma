@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ChatSession {
+  id        String        @id @default(cuid())
+  title     String        @default("New conversation")
+  kind      String        @default("chat") // "chat" | "agent"
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String       @id @default(cuid())
+  sessionId String
+  session   ChatSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String // "user" | "assistant" | "tool"
+  content   String
+  thinking  String? // assistant reasoning shown in the thinking panel
+  toolName  String? // when role=tool: which connector ran
+  toolData  String? // when role=tool: JSON { args, result }
+  createdAt DateTime     @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+model GeneratedImage {
+  id        String   @id @default(cuid())
+  prompt    String
+  size      String
+  url       String
+  provider  String   @default("nexus")
+  createdAt DateTime @default(now())
+}
+
+model EmailAccount {
+  id            String    @id @default(cuid())
+  label         String
+  email         String
+  fromName      String    @default("")
+  imapHost      String
+  imapPort      Int       @default(993)
+  smtpHost      String
+  smtpPort      Int       @default(465)
+  smtpSecure    Boolean   @default(true)
+  username      String
+  passwordEnc   String
+  status        String    @default("unverified") // unverified | connected | error
+  statusMessage String    @default("")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model AiProvider {
+  id           String   @id @default(cuid())
+  providerId   String   @unique // "openrouter" | "groq" | "gemini" | "mistral" | "cerebras" | "together"
+  label        String
+  apiKeyEnc    String
+  baseUrl      String
+  defaultModel String
+  status       String   @default("unverified") // unverified | connected | error
+  statusMessage String  @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
