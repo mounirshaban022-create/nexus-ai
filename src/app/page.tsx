@@ -271,8 +271,16 @@ export default function Page() {
         })}
       </nav>
 
-      {/* Auth modal */}
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      {/* Auth modal — re-check user after auth attempt */}
+      {showAuth && (
+        <AuthModal
+          onClose={() => {
+            setShowAuth(false)
+            // Re-check auth state after modal closes (sign-in may have completed)
+            getCurrentUser().then(setUser).catch(() => {})
+          }}
+        />
+      )}
 
       {/* Footer — desktop only (mobile has bottom nav) */}
       <footer className="mt-auto hidden shrink-0 border-t border-border/50 lg:block">
