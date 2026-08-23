@@ -35,7 +35,7 @@ export function AbilityPicker({ activeMode, onSelect }: AbilityPickerProps) {
     { label: 'Converse', ids: ['chat', 'voice-live', 'agent'] },
     { label: 'Create', ids: ['code', 'video', 'image', 'office', 'documents'] },
     { label: 'Tools', ids: ['voice', 'search', 'reader', 'vision'] },
-    { label: 'Platform', ids: ['settings', 'models', 'connectors', 'home'] },
+    { label: 'Platform', ids: ['profile', 'settings', 'models', 'connectors', 'home'] },
   ]
 
   return (

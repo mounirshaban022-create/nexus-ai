@@ -83,13 +83,15 @@ export function SettingsMode() {
           </div>
 
           {user ? (
-            <Button
-              onClick={async () => { await signOut(); setUser(null); toast({ title: L === 'ar' ? 'تم تسجيل الخروج' : 'Signed out' }) }}
-              variant="outline"
-              className="mt-4 w-full gap-2 rounded-xl"
-            >
-              <LogOut className="h-4 w-4" /> {labels.signOut}
-            </Button>
+            <div className="mt-4 flex gap-2">
+              <Button
+                onClick={async () => { await signOut(); setUser(null); toast({ title: L === 'ar' ? 'تم تسجيل الخروج' : 'Signed out' }) }}
+                variant="outline"
+                className="flex-1 gap-2 rounded-xl"
+              >
+                <LogOut className="h-4 w-4" /> {labels.signOut}
+              </Button>
+            </div>
           ) : (
             <Button
               onClick={() => setShowAuth(true)}

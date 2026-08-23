@@ -16,6 +16,7 @@ import { VoiceLiveMode } from '@/components/omni/voice-live-mode'
 import { OfficeMode } from '@/components/omni/office-mode'
 import { DocumentsMode } from '@/components/omni/documents-mode'
 import { SettingsMode } from '@/components/omni/settings-mode'
+import { ProfileMode } from '@/components/omni/profile-mode'
 import { AiModelsMode } from '@/components/omni/ai-models-mode'
 import { CodeMode } from '@/components/omni/code-mode'
 import { VideoMode } from '@/components/omni/video-mode'
@@ -36,7 +37,7 @@ const GROUPS: Array<{ label: string; ids: ModeId[] }> = [
   { label: '', ids: ['chat', 'voice-live', 'agent'] },           // Primary — no label
   { label: 'Create', ids: ['code', 'video', 'image', 'office', 'documents'] },
   { label: 'Tools', ids: ['search', 'reader', 'vision', 'voice'] },
-  { label: 'Platform', ids: ['settings', 'models', 'connectors'] },
+  { label: 'Platform', ids: ['profile', 'settings', 'models', 'connectors'] },
 ]
 
 // BUILD VERSION — visible proof of which version is running
@@ -50,14 +51,16 @@ export default function Page() {
     applyPreferences(savedTheme, savedLanguage)
   }, [savedTheme, savedLanguage])
 
-  // Auth state
+  // Auth state — reactive to sign-in/out anywhere in the app
   const [showAuth, setShowAuth] = useState(false)
   const [user, setUser] = useState<{ email?: string } | null>(null)
   useEffect(() => {
     if (!isSupabaseConfigured) return
-    getCurrentUser().then(setUser)
-    return onAuthChange(setUser)
+    getCurrentUser().then(setUser).catch(() => {})
+    const unsubscribe = onAuthChange((u) => setUser(u))
+    return unsubscribe
   }, [])
+
 
   // App opens straight into Chat — ChatGPT style
   const [activeMode, setActiveMode] = useState<ModeId>('chat')
@@ -227,6 +230,7 @@ export default function Page() {
                 {activeMode === 'office' && <OfficeMode />}
                 {activeMode === 'documents' && <DocumentsMode />}
                 {activeMode === 'settings' && <SettingsMode />}
+                {activeMode === 'profile' && <ProfileMode />}
                 {activeMode === 'models' && <AiModelsMode />}
                 {activeMode === 'code' && <CodeMode />}
                 {activeMode === 'video' && <VideoMode />}

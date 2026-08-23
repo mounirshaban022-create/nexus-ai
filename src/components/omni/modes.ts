@@ -15,6 +15,7 @@ import {
   Clapperboard,
   FileSearch,
   Settings,
+  UserCircle2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -35,6 +36,7 @@ export type ModeId =
   | 'video'
   | 'documents'
   | 'settings'
+  | 'profile'
 
 export interface ModeDefinition {
   id: ModeId
@@ -127,6 +129,19 @@ export const MODES: ModeDefinition[] = [
     accentBg: 'bg-violet-100',
     accentBorder: 'border-violet-200',
     gradient: 'from-violet-500 to-purple-400',
+  },
+  {
+    id: 'profile',
+    label: 'Profile',
+    shortLabel: 'Profile',
+    tagline: 'Your account',
+    description: 'Your NEXUS AI account, membership and security.',
+    icon: UserCircle2,
+    group: 'superpowers',
+    accentText: 'text-primary',
+    accentBg: 'bg-secondary',
+    accentBorder: 'border-border',
+    gradient: 'from-orange-500 to-rose-500',
   },
   {
     id: 'settings',

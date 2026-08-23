@@ -43,7 +43,7 @@ const globalForDocs = globalThis as unknown as { docStore?: Map<string, ParsedDo
 const docStore = globalForDocs.docStore ?? (globalForDocs.docStore = new Map<string, ParsedDoc>())
 
 const requestSchema = z.object({
-  file: z.string().min(20).max(15_000_000), // base64
+  file: z.string().min(20).max(35_000_000), // base64
   filename: z.string().min(1).max(200),
   format: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv']),
 })
@@ -107,14 +107,53 @@ export async function POST(req: NextRequest) {
       const tmpPath = path.join((await import('os')).tmpdir(), `nexus-doc-${Date.now()}.pdf`)
       await writeFile(tmpPath, buffer)
       try {
-        const { stdout } = await execFileAsync('pdftotext', ['-layout', tmpPath, '-'])
+        // Validate it's actually a PDF before parsing
+        if (!buffer.slice(0, 5).toString().startsWith('%PDF-')) {
+          throw new Error('This file is not a valid PDF. It may be corrupted or in a different format.')
+        }
+        const { stdout } = await execFileAsync('pdftotext', ['-layout', tmpPath, '-'], { timeout: 30000 })
         text = stdout
+        
+        // OCR fallback for scanned PDFs (docling pattern: when text extraction finds nothing)
+        if (!text.trim()) {
+          try {
+            // Convert first 5 pages to images then OCR them
+            const imgDir = (await import('os')).tmpdir()
+            const baseName = `nexus-ocr-${Date.now()}`
+            await execFileAsync('pdftoppm', ['-png', '-r', '200', '-l', '5', tmpPath, `${imgDir}/${baseName}`], { timeout: 60000 })
+            const { readdir } = await import('fs/promises')
+            const files = (await readdir(imgDir)).filter(f => f.startsWith(baseName)).sort()
+            let ocrText = ''
+            for (const f of files.slice(0, 5)) {
+              try {
+                const { stdout: pageText } = await execFileAsync('tesseract', [`${imgDir}/${f}`, '-', '-l', 'eng'], { timeout: 30000 })
+                ocrText += pageText + '\n\n'
+              } catch { /* page OCR failed, skip */ }
+              // Cleanup image
+              unlink(`${imgDir}/${f}`).catch(() => {})
+            }
+            if (ocrText.trim()) {
+              text = ocrText
+            } else {
+              throw new Error('No text could be extracted. This PDF appears to be image-only with no readable text.')
+            }
+          } catch (ocrErr) {
+            if (ocrErr instanceof Error && ocrErr.message.includes('No text could be extracted')) throw ocrErr
+            throw new Error('No text found in this PDF (scanned documents with OCR are processed page-by-page — try a smaller file).')
+          }
+        }
         // Count pages via pdfinfo
         try {
           const { stdout: info } = await execFileAsync('pdfinfo', [tmpPath])
           const pagesMatch = info.match(/Pages:\s+(\d+)/)
           if (pagesMatch) metadata.pages = parseInt(pagesMatch[1])
         } catch { /* pdfinfo optional */ }
+      } catch (pdfError) {
+        // Convert technical errors to user-friendly messages
+        const msg = pdfError instanceof Error ? pdfError.message : ''
+        if (msg.includes('not a valid PDF')) throw pdfError
+        if (msg.includes('No text could be extracted')) throw pdfError
+        throw new Error('Could not read this PDF. It may be corrupted, password-protected, or too complex. Try a different file.')
       } finally {
         unlink(tmpPath).catch(() => {})
       }
@@ -222,9 +261,12 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error('[api/documents] POST error:', error)
+    const msg = error instanceof Error ? error.message : 'Upload failed.'
+    // User-friendly errors → 400; technical failures → 500
+    const isUserError = /not a valid|No text|Could not read|corrupted|password|scanned/i.test(msg)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Upload failed.' },
-      { status: 500 }
+      { error: msg },
+      { status: isUserError ? 400 : 500 }
     )
   }
 }

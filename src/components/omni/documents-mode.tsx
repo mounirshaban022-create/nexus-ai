@@ -70,8 +70,8 @@ export function DocumentsMode() {
         toast({ title: 'Unsupported format', description: 'PDF, Word, Excel, PowerPoint, TXT, MD, CSV', variant: 'destructive' })
         return
       }
-      if (file.size > 12 * 1024 * 1024) {
-        toast({ title: 'File too large', description: 'Max 12MB.', variant: 'destructive' })
+      if (file.size > 25 * 1024 * 1024) {
+        toast({ title: 'File too large', description: 'Max 25MB.', variant: 'destructive' })
         return
       }
       setParsing(true)
@@ -183,7 +183,7 @@ export function DocumentsMode() {
               <>
                 <UploadCloud className="mb-3 h-8 w-8 text-muted-foreground/70" aria-hidden />
                 <p className="text-sm font-medium">Drop a document here, or click to browse</p>
-                <p className="mt-1 text-xs text-muted-foreground">PDF · Word · Excel · PowerPoint · TXT · MD · CSV</p>
+                <p className="mt-1 text-xs text-muted-foreground">PDF · Word · Excel · PowerPoint · TXT · MD · CSV · Max 25MB</p>
                 <p className="mt-2 text-xs text-muted-foreground/60">Ask questions · Edit · Export — like Claude</p>
               </>
             )}
