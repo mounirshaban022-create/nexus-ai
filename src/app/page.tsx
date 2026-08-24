@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Compass,
@@ -248,7 +249,14 @@ function NexusApp() {
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-[260px] shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
           <div className="px-4 pt-5 pb-2">
-            <span className="text-base font-bold">Nexus</span>
+            <Image
+              src="/nexus-header-logo.png"
+              alt="Nexus"
+              width={120}
+              height={40}
+              priority
+              className="h-8 w-auto"
+            />
           </div>
           <div className="px-3 pt-2">
             <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
@@ -280,7 +288,14 @@ function NexusApp() {
         <main className="flex min-w-0 flex-1 flex-col">
           {/* Mobile header */}
           <header className="flex items-center justify-between px-4 py-2.5 lg:hidden">
-            <span className="text-base font-bold">Nexus</span>
+            <Image
+              src="/nexus-header-logo.png"
+              alt="Nexus"
+              width={112}
+              height={37}
+              priority
+              className="h-7 w-auto"
+            />
             <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
               {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
               <span className="capitalize">{intelligence}</span>
