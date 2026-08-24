@@ -15,6 +15,13 @@ model ChatSession {
   // Non-null = owned by a specific authenticated user; only that user may resume.
   userId    String?
   user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Phase 1 P3: optional project binding. When set, the session belongs to a
+  // specific Project — the project's custom instructions + files are injected
+  // into the system prompt for every message in this session. null = a loose
+  // chat not tied to any project. SetNull on project delete keeps the session
+  // history accessible (the session just loses its project context).
+  projectId String?
+  project   Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   messages  ChatMessage[]
@@ -100,6 +107,7 @@ model User {
   documents     GeneratedDocument[]
   sessions      ChatSession[]   // Phase 0 Bug 3: back-relation for ownership
   memories      UserMemory[]    // Phase 1 P1: per-user durable memory
+  projects      Project[]       // Phase 1 P3: per-user persistent projects
 }
 
 model EmailAccount {
@@ -150,4 +158,53 @@ model UserMemory {
   updatedAt       DateTime @updatedAt
 
   @@index([userId, createdAt])
+}
+
+// Phase 1 — Priority 3: persistent projects with multi-session + files +
+// custom instructions. A Project is a durable "folder of work" owned by a
+// user. Chat sessions optionally bind to a project via ChatSession.projectId;
+// when bound, the project's customInstructions + ProjectFile contents are
+// injected into the chat system prompt so NEXUS has persistent context for
+// every conversation in that project. Files are stored as text content
+// (≤ 200KB per file, capped at API layer) — sufficient for source code,
+// markdown notes, JSON configs, CSVs, and small reference docs.
+model Project {
+  id                 String   @id @default(cuid())
+  userId             String   // owner (required — projects are user-scoped)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name               String   // display name (≤ 100 chars enforced at API)
+  description        String   @default("")  // short blurb (≤ 500 chars)
+  color              String   @default("amber") // gradient key for the UI
+  // Persistent custom instructions for this project (≤ 4000 chars). Injected
+  // into the system prompt for every chat session bound to this project.
+  // Example: "Always answer in the context of mobile app dev. Use TypeScript.
+  // The target audience is the senior eng team."
+  customInstructions String   @default("")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  sessions  ChatSession[]   // back-relation for project-scoped sessions
+  files     ProjectFile[]   // back-relation for project reference files
+
+  @@index([userId, updatedAt])
+}
+
+// Phase 1 P3: a reference file attached to a Project. Content is stored as
+// text in SQLite (capped at 200KB per file, max 50 files per project, both
+// enforced at the API layer). Sufficient for source code, markdown, JSON,
+// CSVs, plain-text notes. Binary file support (PDFs, docx, images) is out
+// of scope for V1 — the chat route injects file text into the system prompt
+// so NEXUS has durable, project-scoped knowledge of these files.
+model ProjectFile {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  filename   String   // user-facing name (≤ 200 chars)
+  mimeType   String   @default("text/plain")
+  size       Int      @default(0) // byte length of `content`
+  content    String   @default("") // text content (≤ 200KB enforced at API)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId, createdAt])
 }

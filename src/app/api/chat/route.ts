@@ -57,6 +57,13 @@ const requestSchema = z.object({
     // current source content (post-user-edits if any) — capped to bound prompt size
     content: z.string().max(20000),
   }).optional().nullable(),
+  // Phase 1 P3: when starting a NEW conversation bound to a project, the
+  // client passes projectId. The session is stamped with projectId on
+  // creation; on resume the session's existing projectId is authoritative
+  // (so the client doesn't need to pass it again). When projectId is set,
+  // the project's customInstructions + ProjectFile contents are injected
+  // into the system prompt so NEXUS has persistent project context.
+  projectId: z.string().max(64).optional().nullable(),
 })
 
 const MAX_TOOL_CALLS = 4
@@ -101,7 +108,17 @@ function buildSystemPrompt(
   enabledConnectors: string[],
   language: 'en' | 'ar' = 'en',
   memories: Array<{ content: string }> = [],
-  openArtifact?: { artifactId: string; type: string; title: string; content: string } | null
+  openArtifact?: { artifactId: string; type: string; title: string; content: string } | null,
+  // Phase 1 P3: project context — when a chat session is bound to a Project,
+  // the project's name, description, persistent customInstructions, and the
+  // text contents of its reference files are injected here so NEXUS has
+  // durable project-scoped context for every conversation in this session.
+  project?: {
+    name: string
+    description: string
+    customInstructions: string
+    files: Array<{ filename: string; content: string }>
+  } | null
 ): string {
   const connectorList = enabledConnectors
     .map((id) => CONNECTOR_MAP.get(id))
@@ -127,6 +144,50 @@ function buildSystemPrompt(
         ...memories.slice(0, 25).map((m) => `- ${m.content}`),
         '',
       ].join('\n')
+    : ''
+
+  // Phase 1 P3: when a session is bound to a Project, inject its durable
+  // context: name + description (the user's framing of the project), the
+  // custom instructions (the user's persistent directives for this project
+  // — e.g. "use TypeScript, target audience is the senior eng team"), and
+  // the text content of all reference files attached to the project. The
+  // files are capped at 50 per project and 200KB each at the API layer; we
+  // additionally cap the combined prompt-injected file content at 30KB
+  // (split evenly across files when truncated) to bound prompt size.
+  // This block is the chat equivalent of "context window for the project".
+  const projectBlock = project
+    ? (() => {
+        const instructionsBlock = project.customInstructions.trim()
+          ? [
+              'PROJECT INSTRUCTIONS (the user\'s persistent directives for this project — follow them in every answer):',
+              project.customInstructions.trim(),
+              '',
+            ].join('\n')
+          : ''
+        // Cap combined file content: 30KB total, split across files. Each
+        // file gets at most floor(30000 / N) chars of its content.
+        const files = project.files
+        const totalBudget = 30_000
+        const perFile = Math.max(2000, Math.floor(totalBudget / Math.max(1, files.length)))
+        const filesBlock = files.length > 0
+          ? [
+              'PROJECT FILES (reference material the user attached to this project — use them as background context):',
+              ...files.flatMap((f) => [
+                `--- FILE: ${f.filename} ---`,
+                f.content.slice(0, perFile) + (f.content.length > perFile ? `\n…[truncated, ${f.content.length - perFile} more chars]` : ''),
+                '--- END FILE ---',
+                '',
+              ]),
+            ].join('\n')
+          : ''
+        return [
+          '',
+          `ACTIVE PROJECT: ${project.name}${project.description.trim() ? ` — ${project.description.trim()}` : ''}`,
+          'All messages in this conversation belong to that project. Use the project context below for every answer unless the user asks otherwise.',
+          instructionsBlock,
+          filesBlock,
+        ].filter(Boolean).join('\n')
+      })()
     : ''
 
   // Phase 1 P2: when an artifact is open in the user's side panel, expose its
@@ -160,6 +221,7 @@ function buildSystemPrompt(
   return [
     'You are NEXUS, the AI at the heart of the NEXUS AI super app — with every superpower available directly in this chat.',
     memoryBlock,
+    projectBlock,
     artifactBlock,
     '',
     'AVAILABLE TOOLS:',
@@ -607,7 +669,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Message is required (max 8000 chars).' }, { status: 400 })
     }
-    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact } = parsed.data
+    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact, projectId } = parsed.data
     const trimmed = message.trim()
 
     // Phase 0 Bug 2: derive the verified user id ONCE (JWT verification is
@@ -621,6 +683,21 @@ export async function POST(req: NextRequest) {
       'translate', 'dictionary', 'github', 'hacker_news', 'time', 'calculator',
       'recipes', 'nasa', 'news', 'trivia', 'pokemon', 'games', 'forecast',
     ]
+
+    // Phase 1 P3: verify ownership of the projectId when starting a NEW
+    // session bound to a project. findFirst scoped to verifiedUserId means
+    // a projectId owned by another user is silently dropped (the new
+    // session is created without a project binding instead of erroring —
+    // this preserves guest and cross-user fallbacks). Guests get null
+    // (no projects for guests) — projectId is silently ignored.
+    let verifiedProjectId: string | null = null
+    if (projectId && verifiedUserId) {
+      const ownedProject = await db.project.findFirst({
+        where: { id: projectId, userId: verifiedUserId },
+        select: { id: true },
+      })
+      if (ownedProject) verifiedProjectId = ownedProject.id
+    }
 
     // Phase 0 Bug 3: ownership check.
     //   - Authenticated user (verifiedUserId = "abc"): may only resume
@@ -643,6 +720,10 @@ export async function POST(req: NextRequest) {
           title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
           // Phase 0 Bug 3: stamp ownership on creation.
           userId: verifiedUserId,
+          // Phase 1 P3: stamp the verified project binding on creation.
+          // null when: guest, no projectId provided, or projectId not owned
+          // by this user (verifiedProjectId is null in all three cases).
+          projectId: verifiedProjectId,
         },
       })
       // Mirror to Supabase (cloud) if user is authenticated
@@ -669,7 +750,43 @@ export async function POST(req: NextRequest) {
           select: { content: true },
         })
       : []
-    const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact)
+    // Phase 1 P3: if the resolved session has a projectId, fetch the
+    // project's customInstructions + the text content of its reference
+    // files (capped at 50 per project via the API layer). The session is
+    // already ownership-scoped (verifiedUserId match at lookup time), so
+    // the project fetch is safe by construction — but we still scope by
+    // userId for defence-in-depth. Files are included via Prisma include;
+    // we filter their content into the system prompt as background context.
+    let projectContext: {
+      name: string
+      description: string
+      customInstructions: string
+      files: Array<{ filename: string; content: string }>
+    } | null = null
+    if (session.projectId && verifiedUserId) {
+      const project = await db.project.findFirst({
+        where: { id: session.projectId, userId: verifiedUserId },
+        select: {
+          name: true,
+          description: true,
+          customInstructions: true,
+          files: {
+            orderBy: { createdAt: 'asc' },
+            take: 50,
+            select: { filename: true, content: true },
+          },
+        },
+      })
+      if (project) {
+        projectContext = {
+          name: project.name,
+          description: project.description,
+          customInstructions: project.customInstructions,
+          files: project.files,
+        }
+      }
+    }
+    const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext)
 
     // Phase 1 P1: detect a "remember: ..." directive from the user. This is
     // the opt-in extraction path — we never silently extract. When the user

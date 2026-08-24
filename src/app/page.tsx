@@ -174,6 +174,21 @@ function NexusApp() {
   const [streamingActive, setStreamingActive] = useState(false)
   const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
 
+  // Phase 1 P3: project binding + session continuity.
+  //   - activeProjectId: when set, the NEXT chat POST includes this projectId,
+  //     so the new session is stamped with the project binding on creation.
+  //     Cleared when the user starts a "loose" new chat (no project binding).
+  //   - currentChatSessionId: tracks the sessionId returned by the most recent
+  //     /api/chat `done` event. Passed in the next message's POST body so the
+  //     server resumes the existing session (with its message history +
+  //     project context) instead of creating a new one each turn. This fixes
+  //     the pre-existing chat-continuity gap (previously every message created
+  //     a new session, so follow-up questions lost context).
+  //   - activeProjectName: derived from the project list for the chat badge UI.
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [activeProjectName, setActiveProjectName] = useState<string | null>(null)
+  const [currentChatSessionId, setCurrentChatSessionId] = useState<string | null>(null)
+
   // Phase 1 P2: artifact panel state — tracks the currently-open document/code
   // artifact and queues AI-applied patches (ARTIFACT_PATCH events from the
   // chat stream) so the ArtifactPanel can apply them to the open artifact.
@@ -239,10 +254,23 @@ function NexusApp() {
             content: (openArtifactState.content ?? '').slice(0, 20000),
           }
         : null
+      // Phase 1 P3: include the session id (for continuity) and the active project
+      // id (for new sessions being created inside a project). When resuming an
+      // existing session, sessionId is set and projectId is omitted — the
+      // server reads session.projectId as the authoritative binding. When
+      // starting a new conversation in a project, sessionId is null and
+      // projectId is set — the server creates a new session bound to that
+      // project.
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, language, openArtifact: openArtifactPayload }),
+        body: JSON.stringify({
+          message: msg,
+          language,
+          sessionId: currentChatSessionId,
+          projectId: activeProjectId,
+          openArtifact: openArtifactPayload,
+        }),
       })
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
@@ -321,6 +349,13 @@ function NexusApp() {
               replace: e.replace,
               note: e.note,
             })
+          } else if (e.type === 'done') {
+            // Phase 1 P3: capture the sessionId returned by the server so the
+            // next message resumes this session (with its message history +
+            // project context) instead of creating a new one each turn.
+            if (typeof e.sessionId === 'string' && e.sessionId) {
+              setCurrentChatSessionId(e.sessionId)
+            }
           }
         } catch {}
       }
@@ -349,7 +384,7 @@ function NexusApp() {
       setSending(false)
       setStreamingActive(false)
     }
-  }, [input, sending, toolEngine, openArtifactState, enqueuePatch])
+  }, [input, sending, toolEngine, openArtifactState, enqueuePatch, currentChatSessionId, activeProjectId])
 
   const tr = t[language]
   const TABS: Array<{ id: TabId; label: string; icon: any }> = [
@@ -530,7 +565,7 @@ function NexusApp() {
             />
           </div>
           <div className="px-3 pt-2">
-            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
+            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
               <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Plus className="h-3.5 w-3.5" />
               </span>
@@ -736,6 +771,34 @@ function NexusApp() {
               {/* ====== COMPOSER ====== */}
               <div className="border-t border-border bg-background">
                 <form className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send() }}>
+                  {/* Phase 1 P3: active-project banner — shows when the user is
+                      chatting inside a project. Click X to start a loose chat
+                      (clears the project binding; the NEXT message creates a
+                      new session without a project). The current session's
+                      project binding is preserved server-side on the session
+                      row, so resuming it later still applies the project
+                      context. */}
+                  {activeProjectId && activeProjectName && (
+                    <div className="flex items-center gap-2 self-start rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
+                      <FolderKanban className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                      <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{activeProjectName}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Clear the binding for the NEXT message. Doesn't
+                          // affect the current session's existing project
+                          // binding (server-side). Just stops future new
+                          // sessions from inheriting the project context.
+                          setActiveProjectId(null)
+                          setActiveProjectName(null)
+                        }}
+                        className="ml-0.5 rounded-full p-0.5 text-amber-700/70 transition hover:bg-amber-500/20 hover:text-amber-700 dark:text-amber-300/70 dark:hover:text-amber-300"
+                        aria-label="Clear project binding"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
                   {/* Pending tool banner */}
                   {pendingToolDef && (
                     <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5">
@@ -888,7 +951,25 @@ function NexusApp() {
 
           {/* Projects */}
           {activeTab === 'projects' && (
-            <ProjectsMode />
+            <ProjectsMode
+              language={language}
+              isAuthenticated={!!user}
+              onSignIn={() => openAuth('signin')}
+              onStartProjectChat={(projectId, projectName) => {
+                // Phase 1 P3: starting a new conversation inside a project.
+                // Set the project binding so the next /api/chat POST stamps
+                // projectId on the new session. Clear the session id (new
+                // session) and the messages (fresh chat). Then switch to
+                // the chat tab — the user types their first message and
+                // the project context is injected server-side.
+                setActiveProjectId(projectId)
+                setActiveProjectName(projectName)
+                setCurrentChatSessionId(null)
+                setMessages([])
+                toolEngine.clear()
+                setActiveTab('chat')
+              }}
+            />
           )}
 
           {/* Library */}
@@ -902,7 +983,7 @@ function NexusApp() {
               onEditProfile={() => setProfileEditOpen(true)}
               onSignIn={() => openAuth('signin')}
               onSignUp={() => openAuth('signup')}
-              onOpenChat={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }}
+              onOpenChat={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }}
               onOpenConnect={() => setConnectOpen(true)}
               onToggleTheme={toggleTheme}
               onToggleLanguage={toggleLanguage}
