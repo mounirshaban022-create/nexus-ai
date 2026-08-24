@@ -170,6 +170,7 @@ function NexusApp() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [streamingActive, setStreamingActive] = useState(false)
   const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
 
   // Tool engine — routes the next message to the right /api/* route
@@ -219,26 +220,84 @@ function NexusApp() {
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let buf = ''
+      let streamingId: string | null = null
+
+      // Helper: process one NDJSON line. Returns true if a streaming bubble
+      // was opened (so the caller can hide the shimmer placeholder).
+      const handleLine = (line: string) => {
+        const trimmed = line.trim()
+        if (!trimmed) return
+        try {
+          const e = JSON.parse(trimmed)
+          // Streaming chat protocol: assistant_start opens a bubble, deltas append, end finalizes.
+          if (e.type === 'assistant_start') {
+            streamingId = `a-${Date.now()}`
+            setStreamingActive(true)
+            setMessages(prev => [...prev, { id: streamingId!, role: 'assistant', content: '', attachments: [] }])
+          } else if (e.type === 'assistant_delta') {
+            const delta = e.delta ?? ''
+            if (!delta) return
+            setMessages(prev => {
+              if (!streamingId) return prev
+              const next = [...prev]
+              const idx = next.findIndex(m => m.id === streamingId)
+              if (idx >= 0) {
+                const m = next[idx]
+                next[idx] = { ...m, content: (m.content || '') + delta }
+              }
+              return next
+            })
+          } else if (e.type === 'assistant_end') {
+            if (streamingId) {
+              const atts = e.attachments ?? []
+              setStreamingActive(false)
+              setMessages(prev => {
+                const next = [...prev]
+                const idx = next.findIndex(m => m.id === streamingId)
+                if (idx >= 0) {
+                  const m = next[idx]
+                  // Drop an empty-content bubble if no deltas arrived AND no attachments
+                  // (e.g. when the model only emitted a TOOL_CALL with no prelude)
+                  if (!m.content && atts.length === 0) {
+                    next.splice(idx, 1)
+                  } else {
+                    next[idx] = { ...m, attachments: atts }
+                  }
+                }
+                return next
+              })
+              streamingId = null
+            }
+          } else if (e.type === 'assistant') {
+            // Legacy non-streamed path (creator-identity shortcut, etc.)
+            setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: e.content, attachments: e.attachments }])
+          }
+        } catch {}
+      }
+
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const e = JSON.parse(line)
-            if (e.type === 'assistant') {
-              setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: e.content, attachments: e.attachments }])
-            }
-          } catch {}
-        }
+        buf = lines.pop() ?? '' // keep the last (possibly partial) line for next chunk
+        for (const line of lines) handleLine(line)
       }
+      // FLUSH: the reader's final chunk often contains a partial line (no
+      // trailing '\n' because the stream was closed) AND the TextDecoder
+      // may still hold an incomplete UTF-8 sequence (common with Arabic,
+      // where chars are 2+ bytes). Both need to be flushed here, otherwise
+      // the last 1-2 tokens (e.g. "تك اليوم؟" in an Arabic reply) get lost
+      // and the assistant message looks truncated mid-word.
+      buf += decoder.decode() // flush remaining UTF-8 bytes
+      if (buf.trim()) handleLine(buf)
+      buf = ''
     } catch (err: any) {
+      setStreamingActive(false)
       setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: `⚠️ ${err.message || 'Something went wrong.'}` }])
     } finally {
       setSending(false)
+      setStreamingActive(false)
     }
   }, [input, sending, toolEngine])
 
@@ -587,12 +646,15 @@ function NexusApp() {
                         ) : (
                           <div className="max-w-[90%]">
                             <Markdown content={m.content} />
+                            {streamingActive && m.id === messages[messages.length - 1]?.id && (
+                              <span className="nexus-caret align-middle" aria-hidden />
+                            )}
                             {m.attachments?.map((a, i) => <AttachmentCard key={i} attachment={a} />)}
                           </div>
                         )}
                       </div>
                     ))}
-                    {(sending || toolRunningLabel) && (
+                    {((sending && !streamingActive) || toolRunningLabel) && (
                       <div className="flex items-center gap-2 px-1">
                         {toolRunningLabel ? (
                           <>
@@ -795,22 +857,23 @@ function NexusApp() {
         </main>
       </div>
 
-      {/* ====== MOBILE BOTTOM NAV ====== */}
+      {/* ====== MOBILE BOTTOM NAV ======
+          Clean, no framer-motion springs, no shared layoutId pill (those
+          caused janky repaints on low-end phones and visual messiness).
+          Active state is just: top indicator bar + colored icon/label. */}
       <nav className="flex items-stretch justify-around border-t border-border bg-background lg:hidden" aria-label="Primary">
         {TABS.map(tab => {
           const Icon = tab.icon
           const active = activeTab === tab.id
           return (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} aria-current={active ? 'page' : undefined}
-              className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2.5"
+              className={`relative flex min-w-0 flex-1 flex-col items-center gap-1 pb-2.5 pt-3 transition-colors ${active ? 'text-primary' : 'text-muted-foreground'}`}
             >
               {active && (
-                <motion.span layoutId="nav-active" className="absolute inset-x-2 inset-y-1 -z-10 rounded-full bg-primary/15 ring-1 ring-inset ring-primary/20 dark:bg-primary/20 dark:ring-primary/30" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
+                <span aria-hidden className="absolute top-0 h-0.5 w-7 rounded-full bg-primary" />
               )}
-              <motion.div animate={{ scale: active ? 1.15 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
-                <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
-              </motion.div>
-              <span className={`text-[10px] ${active ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{tab.label}</span>
+              <Icon className="h-[22px] w-[22px] transition-transform" aria-hidden />
+              <span className={`text-[11px] leading-none transition-colors ${active ? 'font-semibold text-primary' : 'text-muted-foreground'}`}>{tab.label}</span>
             </button>
           )
         })}
