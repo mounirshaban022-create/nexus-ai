@@ -559,11 +559,13 @@ function NexusApp() {
 
   const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
 
-  /** Unified tab switch — also closes the Intelligence dropdown so it
-   *  never floats over a different tab after navigation (nav glitch). */
+  /** Unified tab switch — closes every overlay (Intelligence dropdown,
+   *  tool bottom-sheet, ...) so nothing can orphan on top of the target
+   *  tab and block navigation (the "stuck nav" glitch). */
   const switchTab = useCallback((tab: TabId) => {
     setActiveTab(tab)
     setIntelOpen(false)
+    setToolMenuOpen(false)
   }, [])
 
   return (

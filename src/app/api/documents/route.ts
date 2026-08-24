@@ -241,9 +241,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         document: {
           id: doc.id,
+          filename: doc.filename,
+          format: doc.format,
           title: doc.title,
+          text: doc.text,
           metadata: doc.metadata,
-          sections: doc.sections.map((s) => ({ heading: s.heading, preview: s.content.slice(0, 150) })),
+          // Full content (not previews) — the Studio import builds an
+          // editable document from these sections.
+          sections: doc.sections.map((s) => ({ heading: s.heading, content: s.content })),
           tables: doc.tables,
         },
       })

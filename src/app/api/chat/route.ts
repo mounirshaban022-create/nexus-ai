@@ -34,6 +34,7 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat } from '@/lib/ai-providers'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
+import { zaiOnCooldown, markZaiFailure, markZaiSuccess } from '@/lib/zai'
 
 export const maxDuration = 120
 
@@ -857,9 +858,13 @@ export async function POST(req: NextRequest) {
                 if (zaiStreamFailed) {
                   throw new Error('Z.ai skipped — failed earlier in this request')
                 }
+                if (zaiOnCooldown()) {
+                  throw new Error('Z.ai skipped — circuit breaker cooldown')
+                }
                 content = await streamZaiChat(llmMessages, (delta) => {
                   send({ type: 'assistant_delta', delta })
                 })
+                markZaiSuccess()
               } catch (streamErr) {
                 // Z.ai stream failed (typically the global 429 rate limit).
                 // STREAMING anonymous fallback chain: LLM7.io → OVHcloud →
@@ -867,7 +872,9 @@ export async function POST(req: NextRequest) {
                 // no API key and have their OWN rate-limit budgets. The user
                 // keeps seeing token-by-token output — no visible difference.
                 zaiStreamFailed = true
-                if (!(streamErr instanceof Error && streamErr.message.startsWith('Z.ai skipped'))) {
+                const isSkip = streamErr instanceof Error && streamErr.message.startsWith('Z.ai skipped')
+                if (!isSkip) {
+                  markZaiFailure()
                   console.error(
                     '[api/chat] Z.ai stream failed, trying anonymous streaming fallback:',
                     streamErr instanceof Error ? streamErr.message : streamErr

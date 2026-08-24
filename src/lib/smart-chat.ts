@@ -1,5 +1,5 @@
 import { getActiveAiProvider, externalChatCompletion, anonymousFallbackChat, type ExternalChatMessage } from './ai-providers'
-import { getZAI } from './zai'
+import { getZAI, zaiOnCooldown, markZaiFailure, markZaiSuccess } from './zai'
 
 /**
  * SMART AI ROUTER — task-aware, multi-provider.
@@ -201,20 +201,27 @@ export async function smartChat(
     }
   }
 
-  // Built-in Z.ai engine (our quota)
-  try {
-    const zai = await getZAI()
-    const completion = await zai.chat.completions.create({
-      messages: messages.map((m) => ({ role: m.role as any, content: m.content })),
-      thinking: { type: 'disabled' },
-    })
-    const content = completion.choices[0]?.message?.content
-    if (content?.trim()) return content
-  } catch (err) {
-    // Z.ai failed (typically a global 429 rate-limit storm). Fall through
-    // to the anonymous free-LLM chain — those providers have their own
-    // independent rate-limit budgets so they bypass the Z.ai 429 entirely.
-    console.error('[smartChat] Z.ai engine failed, trying anonymous fallbacks:', err instanceof Error ? err.message : err)
+  // Built-in Z.ai engine (our quota) — circuit breaker skips it while the
+  // rate-limit cooldown is active so requests don't pay the failed-attempt
+  // latency on every turn during a 429 storm.
+  if (!zaiOnCooldown()) {
+    try {
+      const zai = await getZAI()
+      const completion = await zai.chat.completions.create({
+        messages: messages.map((m) => ({ role: m.role as any, content: m.content })),
+        thinking: { type: 'disabled' },
+      })
+      const content = completion.choices[0]?.message?.content
+      if (content?.trim()) {
+        markZaiSuccess()
+        return content
+      }
+    } catch (err) {
+      markZaiFailure()
+      console.error('[smartChat] Z.ai engine failed, trying anonymous fallbacks:', err instanceof Error ? err.message : err)
+    }
+  } else {
+    console.log('[smartChat] Z.ai on cooldown — going straight to anonymous fallbacks')
   }
 
   // ANONYMOUS FREE-LLM FALLBACK CHAIN (NEW 2026-09)

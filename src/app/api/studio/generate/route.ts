@@ -23,14 +23,16 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 export const maxDuration = 120
 
 const requestSchema = z.object({
-  action: z.enum(['write', 'enhance', 'summarize', 'translate', 'continue', 'canvas_plan']),
+  action: z.enum(['write', 'enhance', 'summarize', 'translate', 'continue', 'canvas_plan', 'ask_doc']),
   prompt: z.string().min(1).max(4000),
-  /** The text to enhance/summarize/translate/continue (optional). */
+  /** The text to enhance/summarize/translate/continue/ask about. */
   text: z.string().max(60000).optional(),
   /** Target language for translate. */
   language: z.string().max(40).optional(),
   /** Document kind hint for write (report, letter, blog, deck...). */
   kind: z.string().max(60).optional(),
+  /** Chat history for ask_doc: [question, answer, question...]. */
+  history: z.array(z.string().max(6000)).max(20).optional(),
 })
 
 const SYSTEM_PROMPTS: Record<string, string> = {
@@ -58,6 +60,13 @@ const SYSTEM_PROMPTS: Record<string, string> = {
     'and optionally "points" for arrows as [[x,y],[x,y]] relative offsets. ' +
     'Create a sensible layout: title text at top, 3-6 shape/text groups arranged left-to-right or as a flow with arrows connecting them. ' +
     'Keep text labels under 6 words. Respond ONLY with the JSON array, no fences, no prose.',
+  ask_doc:
+    'You are NEXUS Studio\'s document intelligence assistant. You answer questions STRICTLY from the document the user ' +
+    'has open in the editor. Rules:\n' +
+    '- Quote or reference the exact part of the document that answers.\n' +
+    '- If the document does not contain the answer, say so plainly ("The document doesn\'t cover that") — never invent.\n' +
+    '- Answer in Markdown, concise but complete. If asked for data, extract it exactly (tables, numbers, names).\n' +
+    '- Reply in the language of the question.',
 }
 
 export async function POST(req: NextRequest) {
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid studio request.' }, { status: 400 })
     }
-    const { action, prompt, text, language, kind } = parsed.data
+    const { action, prompt, text, language, kind, history } = parsed.data
 
     const system = SYSTEM_PROMPTS[action]
     let userContent = ''
@@ -89,6 +98,16 @@ export async function POST(req: NextRequest) {
       case 'canvas_plan':
         userContent = prompt
         break
+      case 'ask_doc': {
+        // Build the conversation: document + prior Q&A turns + new question
+        const doc = (text ?? '').slice(0, 50000)
+        const hist = history ?? []
+        const histBlock = hist.length
+          ? '\n\nPrevious conversation:\n' + hist.map((h, i) => `${i % 2 === 0 ? 'Q' : 'A'}: ${h}`).join('\n')
+          : ''
+        userContent = `DOCUMENT:\n"""\n${doc}\n"""\n${histBlock}\n\nQuestion: ${prompt}`
+        break
+      }
       default:
         userContent = `${text ?? prompt}`
     }
@@ -98,7 +117,7 @@ export async function POST(req: NextRequest) {
         { role: 'assistant', content: system },
         { role: 'user', content: userContent.slice(0, 60000) },
       ],
-      { maxTokens: action === 'canvas_plan' ? 1200 : 4000, task: 'documents' }
+      { maxTokens: action === 'canvas_plan' ? 1200 : action === 'ask_doc' ? 2000 : 4000, task: action === 'ask_doc' ? 'chat' : 'documents' }
     )
 
     // canvas_plan: extract the JSON array (models sometimes wrap in fences)

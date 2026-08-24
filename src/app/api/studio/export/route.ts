@@ -6,15 +6,15 @@ import { randomUUID } from 'crypto'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 /**
- * STUDIO EXPORT — turns the BlockNote editor's Markdown into a real
- * formatted .docx (Word) file. Replaces the old office pipeline for
- * documents: one editor, one export path, full formatting fidelity.
+ * STUDIO EXPORT — converts the BlockNote editor's Markdown into real
+ * files: DOCX (Word), PDF (pdfkit), HTML, Markdown and TXT. One editor,
+ * every format — the convert engine for the unified Studio.
  */
 
 export const maxDuration = 60
 
 const requestSchema = z.object({
-  format: z.enum(['docx', 'md']),
+  format: z.enum(['docx', 'pdf', 'html', 'md', 'txt']),
   title: z.string().min(1).max(200),
   markdown: z.string().min(1).max(120000),
 })
@@ -111,6 +111,138 @@ export async function POST(req: NextRequest) {
       await writeFile(filePath, markdown, 'utf-8')
       return NextResponse.json({
         file: { url: `/api/office/file/${id}`, format, title, filename, size: Buffer.byteLength(markdown) },
+      })
+    }
+
+    if (format === 'txt') {
+      const lines = parseMarkdown(markdown)
+      const txt = lines
+        .map((l) => {
+          if (l.kind === 'h1') return `${l.text.toUpperCase()}\n${'='.repeat(Math.min(60, l.text.length))}`
+          if (l.kind === 'h2' || l.kind === 'h3') return `\n${l.text}\n${'-'.repeat(Math.min(50, l.text.length))}`
+          if (l.kind === 'bullet') return `  • ${l.text}`
+          if (l.kind === 'numbered') return `  ${l.text}`
+          if (l.kind === 'quote') return `  | ${l.text}`
+          if (l.kind === 'hr') return '─'.repeat(40)
+          return l.text
+        })
+        .join('\n')
+      const full = `${title}\n\n${txt}`
+      await writeFile(filePath, full, 'utf-8')
+      return NextResponse.json({
+        file: { url: `/api/office/file/${id}`, format, title, filename, size: Buffer.byteLength(full) },
+      })
+    }
+
+    if (format === 'html') {
+      const lines = parseMarkdown(markdown)
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const inline = (s: string) =>
+        esc(s)
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+          .replace(/`([^`]+)`/g, '<code>$1</code>')
+      const body = lines
+        .map((l) => {
+          if (l.kind === 'h1') return `<h1>${inline(l.text)}</h1>`
+          if (l.kind === 'h2') return `<h2>${inline(l.text)}</h2>`
+          if (l.kind === 'h3') return `<h3>${inline(l.text)}</h3>`
+          if (l.kind === 'bullet') return `<li>${inline(l.text)}</li>`
+          if (l.kind === 'numbered') return `<li>${inline(l.text)}</li>`
+          if (l.kind === 'quote') return `<blockquote>${inline(l.text)}</blockquote>`
+          if (l.kind === 'hr') return '<hr/>'
+          return `<p>${inline(l.text)}</p>`
+        })
+        .join('\n')
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${esc(title)}</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 760px; margin: 48px auto; padding: 0 24px; line-height: 1.65; color: #1c1917; }
+  h1 { font-size: 2rem; border-bottom: 3px solid #D97706; padding-bottom: 8px; }
+  h2 { font-size: 1.45rem; margin-top: 2em; color: #92400E; }
+  h3 { font-size: 1.15rem; margin-top: 1.6em; }
+  blockquote { border-left: 4px solid #D97706; margin: 1em 0; padding: 0.4em 1em; color: #57534E; background: #FFFBEB; }
+  code { font-family: Consolas, monospace; background: #F5F5F4; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  hr { border: none; border-top: 1px solid #E7E5E4; margin: 2em 0; }
+  li { margin: 0.3em 0; }
+</style>
+</head>
+<body>
+${body}
+</body>
+</html>`
+      await writeFile(filePath, html, 'utf-8')
+      return NextResponse.json({
+        file: { url: `/api/office/file/${id}`, format, title, filename, size: Buffer.byteLength(html) },
+      })
+    }
+
+    if (format === 'pdf') {
+      // Real PDF via pdfkit — headings, lists, quotes with page breaks.
+      const PDFDocument = (await import('pdfkit')).default
+      const lines = parseMarkdown(markdown)
+      const buffers: Buffer[] = []
+      const doc = new PDFDocument({ size: 'A4', margins: { top: 64, bottom: 64, left: 64, right: 64 } })
+      doc.on('data', (c: Buffer) => buffers.push(c))
+      const done = new Promise<void>((resolve) => doc.on('end', () => resolve()))
+
+      const BRAND: [number, number, number] = [0x9a, 0x34, 0x12] // warm amber-900 (no blue)
+      let first = true
+      for (const line of lines) {
+        if (first) {
+          doc.fontSize(22).fillColor(BRAND).font('Helvetica-Bold').text(line.kind === 'h1' ? line.text : title, { align: 'left' })
+          doc.moveDown(0.4)
+          doc.moveTo(64, doc.y).lineTo(531, doc.y).lineWidth(2).strokeColor(BRAND).stroke()
+          doc.moveDown(1)
+          if (line.kind === 'h1') {
+            first = false
+            continue
+          }
+          first = false
+        }
+        const clean = line.text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/`([^`]+)`/g, '$1')
+        switch (line.kind) {
+          case 'h1':
+          case 'h2':
+            doc.fontSize(15).fillColor(BRAND).font('Helvetica-Bold').text(clean)
+            doc.moveDown(0.5)
+            break
+          case 'h3':
+            doc.fontSize(12.5).fillColor(0x44, 0x40, 0x3c).font('Helvetica-Bold').text(clean)
+            doc.moveDown(0.4)
+            break
+          case 'bullet':
+            doc.fontSize(10.5).fillColor(0x1c, 0x19, 0x17).font('Helvetica').text(`•  ${clean}`, { indent: 18 })
+            break
+          case 'numbered':
+            doc.fontSize(10.5).fillColor(0x1c, 0x19, 0x17).font('Helvetica').text(`1. ${clean}`, { indent: 18 })
+            break
+          case 'quote':
+            doc.fontSize(10.5).fillColor(0x57, 0x53, 0x4e).font('Helvetica-Oblique').text(clean, { indent: 24 })
+            doc.moveDown(0.3)
+            break
+          case 'hr':
+            doc.moveDown(0.4)
+            doc.moveTo(64, doc.y).lineTo(531, doc.y).lineWidth(0.75).strokeColor(0xd6, 0xd3, 0xd1).stroke()
+            doc.moveDown(0.6)
+            break
+          default:
+            doc.fontSize(10.5).fillColor(0x1c, 0x19, 0x17).font('Helvetica').text(clean, { lineGap: 3 })
+            doc.moveDown(0.55)
+        }
+        // Page-break safety
+        if (doc.y > 700) doc.addPage()
+      }
+      doc.end()
+      await done
+      const buffer = Buffer.concat(buffers)
+      await writeFile(filePath, buffer)
+      return NextResponse.json({
+        file: { url: `/api/office/file/${id}`, format, title, filename, size: buffer.byteLength },
       })
     }
 

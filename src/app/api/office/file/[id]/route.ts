@@ -9,6 +9,9 @@ const MIME_TYPES: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   md: 'text/markdown; charset=utf-8',
+  pdf: 'application/pdf',
+  html: 'text/html; charset=utf-8',
+  txt: 'text/plain; charset=utf-8',
 }
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -21,7 +24,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     }
 
     // Find the file regardless of extension
-    for (const ext of ['docx', 'xlsx', 'pptx', 'md']) {
+    for (const ext of ['docx', 'xlsx', 'pptx', 'md', 'pdf', 'html', 'txt']) {
       try {
         const filePath = path.join(FILES_DIR, `${id}.${ext}`)
         const buffer = await readFile(filePath)
