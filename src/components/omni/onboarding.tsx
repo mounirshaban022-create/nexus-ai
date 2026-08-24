@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Sparkles,
@@ -79,9 +80,33 @@ export function Onboarding() {
                 exit={{ opacity: 0, y: -12 }}
                 className="text-center"
               >
-                <div className="mx-auto mb-7 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 shadow-lg">
-                  <Sparkles className="h-8 w-8 text-white" />
-                </div>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 120, damping: 16 }}
+                  className="relative mx-auto mb-7"
+                >
+                  <motion.div
+                    animate={{ y: [0, -6, 0] }}
+                    transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+                    className="relative"
+                  >
+                    <Image
+                      src="/nexus-onboarding-hero.png"
+                      alt="Nexus"
+                      width={220}
+                      height={147}
+                      priority
+                      className="h-36 w-auto rounded-2xl shadow-2xl shadow-primary/20 ring-1 ring-border/50"
+                    />
+                  </motion.div>
+                  <motion.span
+                    aria-hidden
+                    className="absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 via-rose-500/10 to-transparent blur-2xl"
+                    animate={{ opacity: [0.5, 0.8, 0.5] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </motion.div>
                 <h1 className="text-3xl font-semibold tracking-tight">Welcome to Nexus</h1>
                 <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-muted-foreground">
                   One assistant for everything you do — research, writing, code, images, and more.
@@ -202,9 +227,25 @@ export function Onboarding() {
                 exit={{ opacity: 0, y: -12 }}
                 className="text-center"
               >
-                <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 shadow-lg">
-                  <Sparkles className="h-8 w-8 text-white" />
-                </div>
+                <motion.div
+                  animate={{ y: [0, -5, 0] }}
+                  transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+                  className="relative mx-auto mb-6"
+                >
+                  <Image
+                    src="/nexus-onboarding-hero.png"
+                    alt="Nexus"
+                    width={180}
+                    height={120}
+                    className="h-28 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50"
+                  />
+                  <motion.span
+                    aria-hidden
+                    className="absolute -inset-2 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 to-transparent blur-2xl"
+                    animate={{ opacity: [0.4, 0.7, 0.4] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </motion.div>
                 <h1 className="text-3xl font-semibold tracking-tight">
                   {name.trim() ? `Welcome, ${name.trim().split(' ')[0]}` : "You're all set"}
                 </h1>

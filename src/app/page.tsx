@@ -42,7 +42,8 @@ import { Onboarding } from '@/components/omni/onboarding'
 import { ProjectsMode } from '@/components/omni/projects-mode'
 import { LibraryMode } from '@/components/omni/library-mode'
 import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
-import { VoiceChatButton } from '@/components/omni/voice-chat'
+import { VoiceModeOverlay } from '@/components/omni/voice-mode-overlay'
+import { Headphones, Mic } from 'lucide-react'
 
 // ============ TYPES ============
 type TabId = 'chat' | 'projects' | 'explore' | 'library' | 'profile'
@@ -78,6 +79,7 @@ function NexusApp() {
   // Real auth
   const { user, signOut, fetchMe } = useAuth()
   const [authOpen, setAuthOpen] = useState(false)
+  const [voiceOpen, setVoiceOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
 
   // Navigation
@@ -197,6 +199,21 @@ function NexusApp() {
     ]},
   ]
 
+  // Premium gradient per tool — warm, cohesive, no blue/indigo.
+  const TOOL_GRADIENT: Record<string, string> = {
+    image:      'from-rose-500 to-orange-500',
+    video:      'from-orange-500 to-amber-500',
+    office:     'from-pink-500 to-rose-500',
+    upload:     'from-teal-500 to-emerald-500',
+    vision:     'from-cyan-500 to-teal-500',
+    documents:  'from-emerald-500 to-green-500',
+    search:     'from-amber-500 to-yellow-500',
+    agent:      'from-fuchsia-500 to-pink-500',
+    code:       'from-emerald-500 to-teal-500',
+    connectors: 'from-rose-500 to-red-500',
+    email:      'from-orange-500 to-amber-500',
+  }
+
   const SUGGESTIONS = [
     'Research something',
     'Analyze a file',
@@ -223,14 +240,6 @@ function NexusApp() {
     }, 50)
   }
 
-  // Voice chat: when transcript arrives, put it in the input (so user can edit) and auto-send
-  const handleVoiceTranscript = useCallback((text: string) => {
-    setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: text }])
-  }, [])
-  const handleVoiceAssistant = useCallback((text: string) => {
-    setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: text }])
-  }, [])
-
   const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
 
   return (
@@ -244,6 +253,8 @@ function NexusApp() {
       />
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
+
+      <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
 
       {/* ====== DESKTOP SIDEBAR ====== */}
       <div className="flex min-h-0 flex-1">
@@ -266,13 +277,18 @@ function NexusApp() {
           <nav className="flex-1 space-y-1 p-3" aria-label="Navigation">
             {TABS.map(t => {
               const Icon = t.icon
+              const active = activeTab === t.id
               return (
-                <button key={t.id} onClick={() => setActiveTab(t.id)}
-                  className={`flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left transition ${activeTab === t.id ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary/60'}`}
+                <motion.button
+                  key={t.id}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`relative flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left transition ${active ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary/60'}`}
                 >
-                  <Icon className="h-[18px] w-[18px]" aria-hidden />
+                  {active && <motion.span layoutId="side-active" className="absolute left-0 h-5 w-1 rounded-full bg-primary" style={{ top: '50%', transform: 'translateY(-50%)' }} transition={{ type: 'spring', stiffness: 500, damping: 35 }} />}
+                  <Icon className={`h-[18px] w-[18px] ${active ? 'text-primary' : ''}`} aria-hidden />
                   <span className="text-sm">{t.label}</span>
-                </button>
+                </motion.button>
               )
             })}
           </nav>
@@ -296,11 +312,18 @@ function NexusApp() {
               priority
               className="h-7 w-auto"
             />
-            <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
-              {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
-              <span className="capitalize">{intelligence}</span>
-              <ChevronDown className="h-3 w-3" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary/50 text-primary transition hover:bg-secondary"
+              >
+                <Headphones className="h-4 w-4" />
+              </button>
+              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
+                {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+                <span className="capitalize">{intelligence}</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </div>
           </header>
 
           {activeTab === 'chat' && (
@@ -309,6 +332,12 @@ function NexusApp() {
                 {intelligence === 'auto' ? <Sparkles className="h-4 w-4" /> : intelligence === 'reasoning' ? <Brain className="h-4 w-4" /> : intelligence === 'vision' ? <Eye className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
                 <span className="capitalize">Nexus {intelligence}</span>
                 <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
+                className="flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-secondary"
+              >
+                <Headphones className="h-3.5 w-3.5" />
+                <span>Voice</span>
               </button>
             </div>
           )}
@@ -347,18 +376,33 @@ function NexusApp() {
                   {/* Empty state */}
                   {messages.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-16">
-                      <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 shadow-lg">
-                        <Sparkles className="h-7 w-7 text-white" />
-                      </div>
-                      <h1 className="text-2xl font-semibold">
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        transition={{ type: 'spring', stiffness: 120, damping: 16 }}
+                        className="relative mb-6"
+                      >
+                        <motion.div animate={{ y: [0, -5, 0] }} transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}>
+                          <Image src="/nexus-onboarding-hero.png" alt="Nexus" width={140} height={93} className="h-20 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50" />
+                        </motion.div>
+                        <motion.span aria-hidden className="absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 to-transparent blur-2xl" animate={{ opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 3, repeat: Infinity }} />
+                      </motion.div>
+                      <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-2xl font-semibold">
                         {displayName !== 'Guest' ? `Hi ${displayName.split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
-                      </h1>
-                      <p className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</p>
+                      </motion.h1>
+                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</motion.p>
                       <div className="mt-8 flex flex-wrap justify-center gap-2">
-                        {SUGGESTIONS.map(s => (
-                          <button key={s} onClick={() => send(s)}
-                            className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition hover:bg-secondary"
-                          >{s}</button>
+                        {SUGGESTIONS.map((s, i) => (
+                          <motion.button
+                            key={s}
+                            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            transition={{ delay: 0.2 + i * 0.06 }}
+                            whileHover={{ scale: 1.04, y: -1 }}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => send(s)}
+                            className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+                          >{s}</motion.button>
                         ))}
                       </div>
                     </div>
@@ -438,10 +482,12 @@ function NexusApp() {
                       className="max-h-40 min-h-[48px] flex-1 resize-none border-0 bg-transparent px-1 py-3 text-[15px] focus-visible:ring-0"
                     />
                     <div className="flex items-center pr-1.5 pb-1">
-                      <VoiceChatButton
-                        onUserMessage={handleVoiceTranscript}
-                        onAssistantReply={handleVoiceAssistant}
-                      />
+                      <button type="button" onClick={() => setVoiceOpen(true)}
+                        aria-label="Open voice mode"
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-primary"
+                      >
+                        <Mic className="h-[18px] w-[18px]" />
+                      </button>
                       <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile) || sending || !!toolRunningLabel} aria-label="Send"
                         className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-110 disabled:opacity-30"
                       >
@@ -470,15 +516,25 @@ function NexusApp() {
                           <div key={cat.category} className="mb-4">
                             <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">{cat.category}</p>
                             <div className="flex flex-wrap gap-2">
-                              {cat.items.map(item => {
+                              {cat.items.map((item, idx) => {
                                 const Icon = item.icon
+                                const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
                                 return (
-                                  <button key={`${cat.category}-${item.tool}-${item.label}`} onClick={() => handleToolPick(item.tool, item.label)}
-                                    className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:bg-secondary"
+                                  <motion.button
+                                    key={`${cat.category}-${item.tool}-${item.label}`}
+                                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    transition={{ delay: idx * 0.03, duration: 0.25 }}
+                                    whileHover={{ scale: 1.04 }}
+                                    whileTap={{ scale: 0.97 }}
+                                    onClick={() => handleToolPick(item.tool, item.label)}
+                                    className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
                                   >
-                                    <Icon className="h-3.5 w-3.5" aria-hidden />
+                                    <span className={`flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${grad} text-white`}>
+                                      <Icon className="h-3 w-3" aria-hidden />
+                                    </span>
                                     {item.label}
-                                  </button>
+                                  </motion.button>
                                 )
                               })}
                             </div>
@@ -496,25 +552,39 @@ function NexusApp() {
           {activeTab === 'explore' && (
             <div className="omni-scroll flex-1 overflow-y-auto">
               <div className="mx-auto max-w-2xl px-4 py-8">
-                <h1 className="text-2xl font-semibold">Explore Nexus</h1>
-                <p className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</p>
-                {TOOL_MENU.map(cat => (
-                  <section key={cat.category} className="mt-6">
-                    <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">{cat.category}</h2>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {cat.items.map(item => {
+                <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-semibold">Explore Nexus</motion.h1>
+                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</motion.p>
+                {TOOL_MENU.map((cat, ci) => (
+                  <motion.section
+                    key={cat.category}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 + ci * 0.06 }}
+                    className="mt-6"
+                  >
+                    <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">{cat.category}</h2>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {cat.items.map((item, idx) => {
                         const Icon = item.icon
+                        const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
                         return (
-                          <button key={`${cat.category}-${item.tool}-${item.label}`} onClick={() => { setActiveTab('chat'); handleToolPick(item.tool, item.label) }}
-                            className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-3 text-left transition hover:bg-secondary"
+                          <motion.button
+                            key={`${cat.category}-${item.tool}-${item.label}`}
+                            whileHover={{ y: -3, scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                            onClick={() => { setActiveTab('chat'); handleToolPick(item.tool, item.label) }}
+                            className="group relative flex flex-col items-start gap-2.5 overflow-hidden rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
                           >
-                            <Icon className="h-5 w-5" aria-hidden />
-                            <span className="text-sm font-medium">{item.label}</span>
-                          </button>
+                            <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${grad} text-white shadow-md`}>
+                              <Icon className="h-5 w-5" aria-hidden />
+                            </span>
+                            <span className="text-sm font-semibold">{item.label}</span>
+                          </motion.button>
                         )
                       })}
                     </div>
-                  </section>
+                  </motion.section>
                 ))}
               </div>
             </div>
@@ -598,15 +668,20 @@ function NexusApp() {
       </div>
 
       {/* ====== MOBILE BOTTOM NAV ====== */}
-      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 backdrop-blur lg:hidden" aria-label="Primary">
+      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Primary">
         {TABS.map(t => {
           const Icon = t.icon
           const active = activeTab === t.id
           return (
             <button key={t.id} onClick={() => setActiveTab(t.id)} aria-current={active ? 'page' : undefined}
-              className="flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2"
+              className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2.5"
             >
-              <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
+              {active && (
+                <motion.span layoutId="nav-active" className="absolute -top-px h-0.5 w-10 rounded-full bg-primary" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
+              )}
+              <motion.div animate={{ scale: active ? 1.08 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
+                <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
+              </motion.div>
               <span className={`text-[10px] ${active ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{t.label}</span>
             </button>
           )

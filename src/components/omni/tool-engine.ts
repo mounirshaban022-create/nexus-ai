@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { safeJsonFetch } from '@/lib/safe-fetch'
 
 /**
  * Unified tool dispatcher for the Nexus composer.
@@ -116,18 +117,18 @@ export function useToolEngine(
 
       switch (pendingTool) {
         case 'image': {
-          const res = await fetch('/api/image', {
+          // Image generation can take 30-90s; allow generous timeout.
+          const r = await safeJsonFetch('/api/image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt }),
-          })
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error || 'Image generation failed.')
+          }, { timeoutMs: 150_000, label: 'Image generation' })
+          if (!r.ok || !r.data?.image?.url) throw new Error(r.error || 'Image generation failed. Please try again.')
           result = {
             content: `Here's the image I generated for: "${prompt}"`,
             attachments: [{
               type: 'image',
-              url: data.image.url,
+              url: r.data.image.url,
               title: prompt,
             }],
           }
@@ -135,29 +136,33 @@ export function useToolEngine(
         }
         case 'video': {
           // Kick off async job and poll
-          const startRes = await fetch('/api/video/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, scenes: '4' }),
-          })
-          const startData = await startRes.json()
-          if (!startRes.ok) throw new Error(startData.error || 'Video creation failed.')
-          const jobId = startData.jobId
+          const startRes = await safeJsonFetch<{ jobId?: string }>(
+            '/api/video/create',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ prompt, scenes: '4' }),
+            },
+            { timeoutMs: 60_000, label: 'Video creation' }
+          )
+          if (!startRes.ok || !startRes.data?.jobId) throw new Error(startRes.error || 'Video creation failed. Please try again.')
+          const jobId = startRes.data.jobId
           // Poll until done (max ~5 minutes)
           let job: any = { status: 'planning', progress: 5, message: 'Planning…' }
-          for (let i = 0; i < 300; i++) {
+          for (let i = 0; i < 100; i++) {
             await new Promise(r => setTimeout(r, 3000))
-            const s = await fetch(`/api/video/status/${jobId}`)
-            if (!s.ok) continue
-            job = await s.json()
+            const s = await safeJsonFetch<any>(`/api/video/status/${jobId}`, {}, { timeoutMs: 20_000, label: 'Video status' })
+            if (!s.ok || !s.data) continue
+            job = s.data
             onToolRunning(true, `Video · ${job.message ?? 'working…'} ${job.progress ?? 0}%`)
             if (job.status === 'done' || job.status === 'error') break
           }
           if (job.status === 'error') throw new Error(job.error || 'Video rendering failed.')
+          if (!job.url) throw new Error('Video is still rendering — check your Library shortly.')
           result = {
             content: `Here's the video I created for: "${prompt}"`,
             attachments: [{
-              type: 'image', // reuse image attachment for video preview
+              type: 'video',
               url: job.url,
               title: `Video: ${prompt.slice(0, 60)}`,
             }],
@@ -165,40 +170,38 @@ export function useToolEngine(
           break
         }
         case 'code': {
-          const res = await fetch('/api/code/run', {
+          const r = await safeJsonFetch<any>('/api/code/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               language: detectLanguage(prompt),
               code: prompt,
             }),
-          })
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error || 'Code execution failed.')
-          const r = data.result
+          }, { timeoutMs: 60_000, label: 'Code execution' })
+          if (!r.ok || !r.data?.result) throw new Error(r.error || 'Code execution failed.')
+          const res = r.data.result
           result = {
-            content: `I ran your ${r.language} code in the sandbox:`,
+            content: `I ran your ${res.language} code in the sandbox:`,
             attachments: [{
               type: 'code',
-              language: r.language,
-              stdout: r.stdout,
-              stderr: r.stderr,
-              exitCode: r.exitCode,
+              language: res.language,
+              stdout: res.stdout,
+              stderr: res.stderr,
+              exitCode: res.exitCode,
             }],
           }
           break
         }
         case 'vision': {
           if (!pendingFile) throw new Error('Please attach an image first.')
-          const res = await fetch('/api/vision', {
+          const r = await safeJsonFetch<any>('/api/vision', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: pendingFile.dataUrl, prompt }),
-          })
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error || 'Vision analysis failed.')
+          }, { timeoutMs: 90_000, label: 'Vision analysis' })
+          if (!r.ok || !r.data?.analysis) throw new Error(r.error || 'Vision analysis failed.')
           result = {
-            content: data.analysis,
+            content: r.data.analysis,
             attachments: [],
           }
           break
@@ -207,7 +210,7 @@ export function useToolEngine(
         case 'documents': {
           if (!pendingFile) throw new Error('Please attach a file first.')
           // Step 1: upload + parse
-          const upRes = await fetch('/api/documents', {
+          const upRes = await safeJsonFetch<any>('/api/documents', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -215,17 +218,19 @@ export function useToolEngine(
               filename: pendingFile.name,
               format: detectFormat(pendingFile.name),
             }),
-          })
-          const upData = await upRes.json()
-          if (!upRes.ok) throw new Error(upData.error || 'Upload failed.')
-          const doc = upData.document
+          }, { timeoutMs: 120_000, label: 'Document upload' })
+          if (!upRes.ok || !upRes.data?.document) throw new Error(upRes.error || 'Could not read that file. Please try a different file.')
+          const doc = upRes.data.document
           // Step 2: if user has a question, ask it
           if (prompt.trim()) {
-            const qRes = await fetch(`/api/documents?id=${encodeURIComponent(doc.id)}&q=${encodeURIComponent(prompt)}`)
-            const qData = await qRes.json()
-            if (!qRes.ok) throw new Error(qData.error || 'Document query failed.')
+            const qRes = await safeJsonFetch<any>(
+              `/api/documents?id=${encodeURIComponent(doc.id)}&q=${encodeURIComponent(prompt)}`,
+              {},
+              { timeoutMs: 60_000, label: 'Document analysis' }
+            )
+            if (!qRes.ok || !qRes.data?.answer) throw new Error(qRes.error || 'Could not answer that about the document.')
             result = {
-              content: qData.answer || 'Document processed.',
+              content: qRes.data.answer,
               attachments: [],
             }
           } else {
@@ -238,17 +243,16 @@ export function useToolEngine(
         }
         case 'search': {
           // Use the existing search route
-          const res = await fetch('/api/search', {
+          const r = await safeJsonFetch<any>('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: prompt }),
-          })
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error || 'Search failed.')
-          const results = (data.results || []).slice(0, 6).map((r: any) => ({
-            title: r.title || r.name || 'Untitled',
-            url: r.url || r.link || '#',
-            snippet: r.snippet || r.description || '',
+          }, { timeoutMs: 60_000, label: 'Web search' })
+          if (!r.ok || !r.data?.results) throw new Error(r.error || 'Search failed.')
+          const results = (r.data.results || []).slice(0, 6).map((rr: any) => ({
+            title: rr.title || rr.name || 'Untitled',
+            url: rr.url || rr.link || '#',
+            snippet: rr.snippet || rr.description || '',
           }))
           result = {
             content: `Here's what I found on the web for: "${prompt}"`,
@@ -258,22 +262,20 @@ export function useToolEngine(
         }
         case 'office': {
           // Plan first
-          const planRes = await fetch('/api/office/plan', {
+          const planRes = await safeJsonFetch<any>('/api/office/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt }),
-          })
-          const planData = await planRes.json()
-          if (!planRes.ok) throw new Error(planData.error || 'Planning failed.')
+          }, { timeoutMs: 60_000, label: 'Document planning' })
+          if (!planRes.ok || !planRes.data?.plan) throw new Error(planRes.error || 'Planning failed.')
           // Then create
-          const createRes = await fetch('/api/office/create', {
+          const createRes = await safeJsonFetch<any>('/api/office/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, plan: planData.plan }),
-          })
-          const createData = await createRes.json()
-          if (!createRes.ok) throw new Error(createData.error || 'Document creation failed.')
-          const a = createData.attachment
+            body: JSON.stringify({ prompt, plan: planRes.data.plan }),
+          }, { timeoutMs: 120_000, label: 'Document creation' })
+          if (!createRes.ok || !createRes.data?.attachment) throw new Error(createRes.error || 'Document creation failed.')
+          const a = createRes.data.attachment
           result = {
             content: `I drafted a ${a?.format?.toUpperCase() || 'document'} for you. Download below:`,
             attachments: [{

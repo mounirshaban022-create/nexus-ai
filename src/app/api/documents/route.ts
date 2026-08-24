@@ -113,13 +113,32 @@ export async function POST(req: NextRequest) {
         if (!buffer.slice(0, 5).toString().startsWith('%PDF-')) {
           throw new Error('This file is not a valid PDF. It may be corrupted or in a different format.')
         }
-        const { stdout } = await execFileAsync('pdftotext', ['-layout', tmpPath, '-'], { timeout: 30000 })
-        text = stdout
-        
-        // OCR fallback for scanned PDFs (docling pattern: when text extraction finds nothing)
+
+        // PRIMARY: pdftotext (poppler) — fast, reliable for text PDFs.
+        try {
+          const { stdout } = await execFileAsync('pdftotext', ['-layout', tmpPath, '-'], { timeout: 30000 })
+          text = stdout
+        } catch (pdftotextErr) {
+          // pdftotext failed (possibly encrypted/complex). Don't give up yet —
+          // try the pdf-parse library as a second engine before declaring failure.
+          console.warn('[documents] pdftotext failed, trying pdf-parse:', pdftotextErr instanceof Error ? pdftotextErr.message : pdftotextErr)
+        }
+
+        // FALLBACK 1: pdf-parse (pure-JS, handles some PDFs poppler can't)
         if (!text.trim()) {
           try {
-            // Convert first 5 pages to images then OCR them
+            const pdfParse = (await import('pdf-parse')).default as (b: Buffer) => Promise<{ text: string; numpages: number; info?: any }>
+            const data = await pdfParse(buffer)
+            text = data.text ?? ''
+            if (data.numpages) metadata.pages = data.numpages
+          } catch (parseErr) {
+            console.warn('[documents] pdf-parse also failed:', parseErr instanceof Error ? parseErr.message : parseErr)
+          }
+        }
+
+        // FALLBACK 2: OCR for scanned/image-only PDFs
+        if (!text.trim()) {
+          try {
             const imgDir = (await import('os')).tmpdir()
             const baseName = `nexus-ocr-${Date.now()}`
             await execFileAsync('pdftoppm', ['-png', '-r', '200', '-l', '5', tmpPath, `${imgDir}/${baseName}`], { timeout: 60000 })
@@ -131,31 +150,32 @@ export async function POST(req: NextRequest) {
                 const { stdout: pageText } = await execFileAsync('tesseract', [`${imgDir}/${f}`, '-', '-l', 'eng'], { timeout: 30000 })
                 ocrText += pageText + '\n\n'
               } catch { /* page OCR failed, skip */ }
-              // Cleanup image
               unlink(`${imgDir}/${f}`).catch(() => {})
             }
             if (ocrText.trim()) {
               text = ocrText
-            } else {
-              throw new Error('No text could be extracted. This PDF appears to be image-only with no readable text.')
             }
           } catch (ocrErr) {
-            if (ocrErr instanceof Error && ocrErr.message.includes('No text could be extracted')) throw ocrErr
-            throw new Error('No text found in this PDF (scanned documents with OCR are processed page-by-page — try a smaller file).')
+            console.warn('[documents] OCR fallback failed:', ocrErr instanceof Error ? ocrErr.message : ocrErr)
           }
         }
-        // Count pages via pdfinfo
-        try {
-          const { stdout: info } = await execFileAsync('pdfinfo', [tmpPath])
-          const pagesMatch = info.match(/Pages:\s+(\d+)/)
-          if (pagesMatch) metadata.pages = parseInt(pagesMatch[1])
-        } catch { /* pdfinfo optional */ }
+
+        if (!text.trim()) {
+          throw new Error('No text could be extracted from this PDF. It may be a scanned document, password-protected, or contain no readable text. Try a different file.')
+        }
+
+        // Count pages via pdfinfo (best-effort)
+        if (!metadata.pages) {
+          try {
+            const { stdout: info } = await execFileAsync('pdfinfo', [tmpPath])
+            const pagesMatch = info.match(/Pages:\s+(\d+)/)
+            if (pagesMatch) metadata.pages = parseInt(pagesMatch[1])
+          } catch { /* pdfinfo optional */ }
+        }
       } catch (pdfError) {
-        // Convert technical errors to user-friendly messages
-        const msg = pdfError instanceof Error ? pdfError.message : ''
-        if (msg.includes('not a valid PDF')) throw pdfError
-        if (msg.includes('No text could be extracted')) throw pdfError
-        throw new Error('Could not read this PDF. It may be corrupted, password-protected, or too complex. Try a different file.')
+        // Re-throw the specific user-facing messages we crafted above;
+        // they carry real detail instead of a generic "could not read".
+        throw pdfError
       } finally {
         unlink(tmpPath).catch(() => {})
       }
