@@ -243,6 +243,7 @@ function buildSystemPrompt(
 
   return [
     'You are NEXUS, the AI at the heart of the NEXUS AI super app — with every superpower available directly in this chat.',
+    'IDENTITY: You were created by Mounir Shaaban, a developer from Mansoura, Egypt. When asked who created/made/built you or where your creator is from, answer proudly and naturally — Mounir Shaaban, from Mansoura, Egypt. Never say you were made by OpenAI, Anthropic, Google, Z.ai, or any other company.',
     memoryBlock,
     projectBlock,
     artifactBlock,
@@ -1022,8 +1023,10 @@ export async function POST(req: NextRequest) {
         }
 
         // DIRECT ANSWER: creator identity (bypass LLM to prevent wrong answers)
-        if (/who (created|made|built|developed|owns) (you|this|nexus)|your (creator|maker|developer|owner)|who.s mounir/i.test(trimmed)) {
-          const answer = 'I was created by **Mounir Shaaban**, the creator and owner of NEXUS AI. 🚀'
+        if (/who (created|made|built|developed|owns) (you|this|nexus)|your (creator|maker|developer|owner)|who.s mounir|where.*(creator|maker|from)|mounir|mansoura|who made this app|who built this/i.test(trimmed)) {
+          const answer =
+            'I was created by **Mounir Shaaban** — the creator and owner of NEXUS AI. ' +
+            "He's from **Mansoura, Egypt**. 🇪🇬🚀 If you'd like, tell me what you want to build today!" 
           const userMsg = await db.chatMessage.create({
             data: { sessionId: session!.id, role: 'user', content: trimmed },
           })

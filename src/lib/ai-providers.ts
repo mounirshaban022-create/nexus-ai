@@ -453,10 +453,14 @@ export const ANONYMOUS_FREE_LLM_FALLBACKS: AnonymousProvider[] = [
     label: 'Kilo Code',
     baseUrl: 'https://api.kilo.ai/api/gateway',
     models: [
-      'openrouter/free',                       // verified live: auto-router
-      'cohere/north-mini-code:free',           // code specialist
-      'liquid/lfm-2.5-2.6b:free',              // tiny instant
-      'nvidia/nemotron-3-ultra-550b-a55b:free', // 1M context reasoning
+      // QUALITY FIRST (benchmark-verified 2026-08):
+      // nemotron-3-super-120b: 1.4s avg, strong general answers
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      // fallbacks — every one has its own quota
+      'nvidia/nemotron-3.5-lightning:free',     // fast reasoning
+      'poolside/laguna-s-2.1:free',             // clean conversational
+      'cohere/north-mini-code:free',            // code specialist
+      'liquid/lfm-2.5-2.6b:free',               // tiny instant
     ],
     rpmNote: '200 req/h per IP — no API key needed',
   },
@@ -543,11 +547,13 @@ function chainOrderForTask(task?: AiTask): AnonymousProvider[] {
     case 'reasoning':
     case 'documents':
     case 'code':
-      return [kilo, llm7, ovh] // big-model engines first
+      return [kilo, llm7, ovh] // big-model engines first (120B/550B)
     case 'fast':
-      return [ovh, llm7, kilo] // tiny instant engines first
+      return [llm7, ovh, kilo] // small instant engines first
     default:
-      return [llm7, kilo, ovh] // conversational first
+      // CHAT: quality-first — Kilo's nemotron-120B answers in ~1.4s with
+      // markedly better quality than the small conversational models.
+      return [kilo, llm7, ovh]
   }
 }
 
