@@ -1,5 +1,6 @@
 import { createDecipheriv, scryptSync } from 'crypto'
 import { db } from '@/lib/db'
+import { consumeSSEWithPeek } from './llm-stream'
 
 /* ------------------------------------------------------------------ */
 /* Free AI provider registry (all OpenAI-compatible chat APIs)          */
@@ -539,7 +540,7 @@ export async function anonymousFallbackChat(
   for (const provider of ANONYMOUS_FREE_LLM_FALLBACKS) {
     for (const model of provider.models) {
       try {
-        const content = await anonymousChatCompletion(provider, messages, {
+        const content = await anonymousChatCompletion(provider, normalizeSystemRole(messages), {
           model,
           maxTokens: opts.maxTokens,
           timeoutMs: opts.timeoutMs,
@@ -561,4 +562,113 @@ export async function anonymousFallbackChat(
     }
   }
   throw lastError ?? new Error('All anonymous free-LLM fallbacks failed.')
+}
+
+/* ------------------------------------------------------------------ */
+/* STREAMING anonymous fallbacks (SSE token-by-token)                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The chat route builds llmMessages with the system prompt as an
+ * ASSISTANT-role first message (Z.ai convention). Most OpenAI-compatible
+ * providers behave better with a proper SYSTEM role — convert index 0
+ * when it's the system prompt. Subsequent assistant messages (tool
+ * exchanges, history) are left untouched.
+ */
+function normalizeSystemRole(
+  messages: ExternalChatMessage[]
+): ExternalChatMessage[] {
+  if (messages.length > 0 && messages[0].role === 'assistant') {
+    return messages.map((m, i) => (i === 0 ? { ...m, role: 'system' as const } : m))
+  }
+  return messages
+}
+
+/**
+ * Streams a completion from ONE anonymous provider (SSE, token-by-token),
+ * emitting deltas through onDelta as they arrive. Falls back to the
+ * non-streaming endpoint if the provider rejects stream:true.
+ */
+async function streamAnonymousCompletion(
+  provider: AnonymousProvider,
+  messages: ExternalChatMessage[],
+  onDelta: (delta: string) => void,
+  opts: { model?: string; maxTokens?: number; timeoutMs?: number } = {}
+): Promise<string> {
+  const model = opts.model ?? provider.models[0]
+  const timeoutMs = opts.timeoutMs ?? 60_000
+  const res = await fetch(`${provider.baseUrl}/chat/completions`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://nexus-ai.app',
+      'X-Title': 'NEXUS AI',
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      temperature: 0.7,
+      max_tokens: opts.maxTokens ?? 800,
+    }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+    throw new Error(body.error?.message || `Provider ${provider.id} responded ${res.status}`)
+  }
+  if (!res.body) throw new Error(`No stream from ${provider.id}`)
+  return consumeSSEWithPeek(res.body.getReader(), onDelta)
+}
+
+/**
+ * STREAMING anonymous fallback chain — the rate-limit bypass for the
+ * main chat route. When Z.ai's stream fails (typically a 429 storm),
+ * this keeps the chat experience IDENTICAL for the user: token-by-token
+ * streaming from LLM7.io → OVHcloud → Kilo Code, no API key needed.
+ *
+ * Retry safety: if a provider fails BEFORE any delta was emitted, the
+ * chain moves to the next provider/model. If it fails MID-STREAM (deltas
+ * already visible to the user), retrying would duplicate text on screen
+ * — so we return the partial content that was already shown.
+ */
+export async function streamAnonymousFallbackChat(
+  messages: ExternalChatMessage[],
+  onDelta: (delta: string) => void,
+  opts: { maxTokens?: number; timeoutMs?: number } = {}
+): Promise<{ content: string; providerId: string; model: string }> {
+  const normalized = normalizeSystemRole(messages)
+  let lastError: unknown = null
+  for (const provider of ANONYMOUS_FREE_LLM_FALLBACKS) {
+    for (const model of provider.models) {
+      let emitted = ''
+      try {
+        const full = await streamAnonymousCompletion(
+          provider,
+          normalized,
+          (d) => {
+            emitted += d
+            onDelta(d)
+          },
+          { model, maxTokens: opts.maxTokens, timeoutMs: opts.timeoutMs }
+        )
+        if (full.trim()) {
+          return { content: full, providerId: provider.id, model }
+        }
+      } catch (err) {
+        lastError = err
+        // Mid-stream failure after emitting deltas: the user already saw
+        // this text — return it as the (truncated) answer instead of
+        // retrying and duplicating content on screen.
+        if (emitted.trim()) {
+          console.error(
+            `[streamAnonymousFallback] ${provider.id}/${model} failed mid-stream — keeping partial output (${emitted.length} chars)`
+          )
+          return { content: emitted, providerId: provider.id, model }
+        }
+        continue
+      }
+    }
+  }
+  throw lastError ?? new Error('All anonymous streaming fallbacks failed.')
 }

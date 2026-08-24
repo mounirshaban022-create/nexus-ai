@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -174,6 +174,39 @@ function NexusApp() {
   const [streamingActive, setStreamingActive] = useState(false)
   const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
 
+  // AUTO-SCROLL (streaming UX): follow the assistant's output as it
+  // streams in — unless the user deliberately scrolled up to read.
+  //   - conversationRef: the chat's overflow-y-auto container
+  //   - userScrolledUp: set true when >100px above the bottom; the next
+  //     user-sent message resets it so we always jump to the fresh reply.
+  const conversationRef = useRef<HTMLDivElement>(null)
+  const userScrolledUp = useRef(false)
+
+  const scrollToBottom = useCallback((force = false) => {
+    const el = conversationRef.current
+    if (!el) return
+    if (force || !userScrolledUp.current) {
+      el.scrollTo({ top: el.scrollHeight })
+    }
+  }, [])
+
+  const handleConversationScroll = useCallback(() => {
+    const el = conversationRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    userScrolledUp.current = distanceFromBottom > 100
+  }, [])
+
+  // Follow the stream: every new message / delta / tool status updates
+  // the DOM — this effect runs after commit and keeps the view pinned to
+  // the bottom (when the user hasn't scrolled away).
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      const el = conversationRef.current
+      if (el) el.scrollTo({ top: el.scrollHeight })
+    }
+  }, [messages, streamingActive, toolRunningLabel])
+
   // Phase 1 P3: project binding + session continuity.
   //   - activeProjectId: when set, the NEXT chat POST includes this projectId,
   //     so the new session is stamped with the project binding on creation.
@@ -231,6 +264,9 @@ function NexusApp() {
     if (userDisplay) {
       setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: userDisplay }])
     }
+    // The user just sent a message — always jump to the bottom and resume
+    // following the incoming reply (even if they had scrolled up before).
+    userScrolledUp.current = false
     setInput('')
     setSending(true)
     try {
@@ -513,6 +549,13 @@ function NexusApp() {
 
   const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
 
+  /** Unified tab switch — also closes the Intelligence dropdown so it
+   *  never floats over a different tab after navigation (nav glitch). */
+  const switchTab = useCallback((tab: TabId) => {
+    setActiveTab(tab)
+    setIntelOpen(false)
+  }, [])
+
   return (
     <div className="nexus-shell bg-background">
       {/* Hidden file input for tool uploads — uses the tool engine's ref */}
@@ -565,7 +608,7 @@ function NexusApp() {
             />
           </div>
           <div className="px-3 pt-2">
-            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
+            <button onClick={() => { switchTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
               <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Plus className="h-3.5 w-3.5" />
               </span>
@@ -581,7 +624,7 @@ function NexusApp() {
                 <motion.button
                   key={tab.id}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => switchTab(tab.id)}
                   className={`relative flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left transition ${active ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary/60'}`}
                 >
                   {active && <motion.span layoutId="side-active" className="absolute left-0 h-5 w-1 rounded-full bg-primary" style={{ top: '50%', transform: 'translateY(-50%)' }} transition={{ type: 'spring', stiffness: 500, damping: 35 }} />}
@@ -592,7 +635,7 @@ function NexusApp() {
             })}
           </nav>
           <div className="border-t border-border p-3">
-            <button onClick={() => setActiveTab('profile')} className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 transition hover:bg-secondary hover:ring-1 hover:ring-border">
+            <button onClick={() => switchTab('profile')} className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 transition hover:bg-secondary hover:ring-1 hover:ring-border">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-gradient text-xs font-bold text-primary-foreground ring-2 ring-border">{displayInitial}</span>
               <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
                 <span className="truncate text-sm font-medium">{displayName}</span>
@@ -633,8 +676,12 @@ function NexusApp() {
             </div>
           </header>
 
-          {activeTab === 'chat' && (
-            <div className="hidden items-center justify-between border-b border-border/50 px-5 py-2 lg:flex">
+          {/* Desktop chat sub-header — stays mounted (hidden when the chat tab
+              is inactive) so switching tabs doesn't cause a 41px layout jump. */}
+          <div
+            className="hidden items-center justify-between border-b border-border/50 px-5 py-2 lg:flex"
+            style={activeTab === 'chat' ? undefined : { display: 'none' }}
+          >
               <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium transition hover:bg-secondary">
                 {intelligence === 'auto' ? <Sparkles className="h-4 w-4" /> : intelligence === 'reasoning' ? <Brain className="h-4 w-4" /> : intelligence === 'vision' ? <Eye className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
                 <span className="capitalize">Nexus {intelligence}</span>
@@ -646,8 +693,7 @@ function NexusApp() {
                 <Headphones className="h-3.5 w-3.5" />
                 <span>Voice</span>
               </button>
-            </div>
-          )}
+          </div>
 
           <AnimatePresence>
             {intelOpen && (
@@ -682,10 +728,21 @@ function NexusApp() {
           </div>
 
           {/* ====== CONTENT AREA ====== */}
-          {activeTab === 'chat' && (
-            <div className="flex flex-1 flex-col min-h-0">
-              {/* Conversation area */}
-              <div className="omni-scroll flex-1 overflow-y-auto">
+          {/* The chat tab stays MOUNTED (display:none when inactive) instead of
+              unmounting — switching to Projects/Explore/Profile and back used to
+              reset the conversation scroll position to the top (navigation
+              glitch) and re-run entrance animations. Keeping it in the DOM
+              preserves scroll, composer text, and streaming state. */}
+          <div
+            className="flex flex-1 flex-col min-h-0"
+            style={activeTab === 'chat' ? undefined : { display: 'none' }}
+          >
+            {/* Conversation area */}
+            <div
+              ref={conversationRef}
+              onScroll={handleConversationScroll}
+              className="omni-scroll flex-1 overflow-y-auto"
+            >
                 <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:py-6">
                   {/* Empty state — compact on mobile so the bottom nav stays
                       visible without the page scrolling past the viewport. */}
@@ -739,8 +796,19 @@ function NexusApp() {
                           <div className="max-w-[85%] rounded-3xl rounded-tr-lg bg-secondary px-4 py-2.5 text-[15px]">{m.content}</div>
                         ) : (
                           <div className="max-w-[90%]">
-                            <Markdown content={m.content} />
-                            {streamingActive && m.id === messages[messages.length - 1]?.id && (
+                            {streamingActive && !m.content && m.id === messages[messages.length - 1]?.id ? (
+                              /* Typing indicator — bridges the gap between the bubble
+                                 opening and the first token arriving (Z.ai latency or
+                                 anonymous-fallback handoff). */
+                              <span className="inline-flex items-center gap-1 py-2" aria-label="Assistant is typing">
+                                <span className="nexus-typing-dot" />
+                                <span className="nexus-typing-dot" />
+                                <span className="nexus-typing-dot" />
+                              </span>
+                            ) : (
+                              <Markdown content={m.content} />
+                            )}
+                            {streamingActive && m.id === messages[messages.length - 1]?.id && !!m.content && (
                               <span className="nexus-caret align-middle" aria-hidden />
                             )}
                             {m.attachments?.map((a, i) => <AttachmentCard key={i} attachment={a} onOpenArtifact={openArtifact} />)}
@@ -905,7 +973,6 @@ function NexusApp() {
                 )}
               </AnimatePresence>
             </div>
-          )}
 
           {/* Explore page */}
           {activeTab === 'explore' && (
@@ -913,12 +980,12 @@ function NexusApp() {
               <div className="mx-auto max-w-2xl px-4 py-8">
                 <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-semibold">Explore Nexus</motion.h1>
                 <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</motion.p>
-                {TOOL_MENU.map((cat, ci) => (
+                {TOOL_MENU.map(cat => (
                   <motion.section
                     key={cat.category}
-                    initial={{ opacity: 0, y: 12 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 + ci * 0.06 }}
+                    transition={{ duration: 0.18 }}
                     className="mt-6"
                   >
                     <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">{cat.category}</h2>
@@ -932,7 +999,7 @@ function NexusApp() {
                             whileHover={{ y: -3, scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                            onClick={() => { setActiveTab('chat'); handleToolPick(item.tool, item.label) }}
+                            onClick={() => { switchTab('chat'); handleToolPick(item.tool, item.label) }}
                             className="group relative flex flex-col items-start gap-2.5 overflow-hidden rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
                           >
                             <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${grad} text-white shadow-md`}>
@@ -967,7 +1034,7 @@ function NexusApp() {
                 setCurrentChatSessionId(null)
                 setMessages([])
                 toolEngine.clear()
-                setActiveTab('chat')
+                switchTab('chat')
               }}
             />
           )}
@@ -983,7 +1050,7 @@ function NexusApp() {
               onEditProfile={() => setProfileEditOpen(true)}
               onSignIn={() => openAuth('signin')}
               onSignUp={() => openAuth('signup')}
-              onOpenChat={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }}
+              onOpenChat={() => { switchTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }}
               onOpenConnect={() => setConnectOpen(true)}
               onToggleTheme={toggleTheme}
               onToggleLanguage={toggleLanguage}
@@ -1006,7 +1073,7 @@ function NexusApp() {
           const Icon = tab.icon
           const active = activeTab === tab.id
           return (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} aria-current={active ? 'page' : undefined}
+            <button key={tab.id} onClick={() => switchTab(tab.id)} aria-current={active ? 'page' : undefined}
               className={`relative flex min-w-0 flex-1 flex-col items-center gap-1 pb-2.5 pt-3 transition-colors ${active ? 'text-primary' : 'text-muted-foreground'}`}
             >
               {active && (

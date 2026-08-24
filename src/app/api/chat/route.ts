@@ -32,6 +32,8 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 }
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
+import { streamAnonymousFallbackChat } from '@/lib/ai-providers'
+import { consumeSSEWithPeek } from '@/lib/llm-stream'
 
 export const maxDuration = 120
 
@@ -256,20 +258,16 @@ function buildSystemPrompt(
 /** Streams a chat completion from the built-in ZAI engine, calling `onDelta`
  *  with each token-chunk as it arrives. Returns the full accumulated content.
  *
- *  PEEK LOGIC — avoids showing a half-formed TOOL_CALL to the user:
- *    1. We buffer the first ~24 chars locally before emitting any delta.
- *    2. If the buffered text starts to look like a TOOL_CALL, we keep
- *       buffering (no deltas) until the stream ends, then return the full
- *       content for tool-call parsing.
- *    3. Otherwise, we flush the peeked prefix as a single delta, then emit
- *       subsequent chunks as they arrive.
+ *  The SSE parsing + peek buffer (hide half-formed TOOL_CALLs, flush short
+ *  answers at end-of-stream) now lives in the shared consumeSSEWithPeek()
+ *  helper (src/lib/llm-stream.ts) so the Z.ai engine and the anonymous
+ *  free-LLM fallback chain behave identically.
  *
  *  This is what makes the AI "feel fast" — the user sees the first token
  *  within ~200ms instead of waiting 4-20s for the full response. */
 async function streamZaiChat(
   messages: Array<{ role: string; content: string }>,
-  onDelta: (delta: string) => void,
-  signal?: { aborted: boolean }
+  onDelta: (delta: string) => void
 ): Promise<string> {
   const zai = await getZAI()
   const streamBody = await zai.chat.completions.create({
@@ -289,67 +287,10 @@ async function streamZaiChat(
     return content
   }
 
-  const reader = (streamBody as ReadableStream<Uint8Array>).getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  let fullContent = ''
-  // Phase 1 P2: 'tool' mode also covers ARTIFACT_PATCH — we buffer the
-  // directive silently so the user doesn't see raw JSON streaming in, then
-  // parse it after the stream completes (same shape as TOOL_CALL).
-  let mode: 'peeking' | 'streaming' | 'tool' = 'peeking'
-  const PEEK_LEN = 24
-
-  while (true) {
-    if (signal?.aborted) break
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-
-    // SSE: lines starting with "data:"
-    const lines = buf.split('\n')
-    buf = lines.pop() ?? ''
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed.startsWith('data:')) continue
-      const data = trimmed.slice(5).trim()
-      if (!data || data === '[DONE]') continue
-      let deltaText = ''
-      try {
-        const json = JSON.parse(data)
-        deltaText = json?.choices?.[0]?.delta?.content ?? ''
-      } catch {
-        // Some providers send plain-text chunks; treat the line itself as delta
-        if (data && !data.startsWith('{')) deltaText = data
-      }
-      if (!deltaText) continue
-      fullContent += deltaText
-
-      if (mode === 'peeking') {
-        // Check if this looks like a tool-call OR artifact-patch forming
-        if (
-          fullContent.startsWith('TOOL_CALL') ||
-          fullContent.includes('TOOL_CALL') ||
-          fullContent.startsWith('ARTIFACT_PATCH') ||
-          fullContent.includes('ARTIFACT_PATCH')
-        ) {
-          mode = 'tool'
-          // Don't emit deltas — wait for the full content to parse as a directive
-        } else if (fullContent.length >= PEEK_LEN) {
-          // Safe to assume this is a final answer — flush the peeked prefix
-          mode = 'streaming'
-          onDelta(fullContent)
-        }
-        // else: keep peeking
-      } else if (mode === 'streaming') {
-        // Emit just the new chunk (prefix already flushed)
-        onDelta(deltaText)
-      }
-      // mode === 'tool': silently accumulate
-    }
-  }
-
-  return fullContent
+  return consumeSSEWithPeek(
+    (streamBody as ReadableStream<Uint8Array>).getReader(),
+    onDelta
+  )
 }
 
 interface ParsedToolCall {
@@ -897,6 +838,10 @@ export async function POST(req: NextRequest) {
           // Determine if we can stream from the built-in ZAI engine
           // (when a user provider is connected, smartChat handles it non-streamed)
           const hasUserProvider = !!(await getActiveAiProvider())
+          // Circuit breaker: once Z.ai fails in this request (typically a
+          // global 429 storm), skip it for subsequent tool-loop steps —
+          // each retry costs a full round-trip to a rate-limited endpoint.
+          let zaiStreamFailed = false
 
           for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
             const isLast = step === MAX_TOOL_CALLS
@@ -909,25 +854,52 @@ export async function POST(req: NextRequest) {
               // Open a new assistant message bubble on the client
               send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
               try {
+                if (zaiStreamFailed) {
+                  throw new Error('Z.ai skipped — failed earlier in this request')
+                }
                 content = await streamZaiChat(llmMessages, (delta) => {
                   send({ type: 'assistant_delta', delta })
                 })
               } catch (streamErr) {
-                // Z.ai streaming failed (typically the global 429 rate
-                // limit). Fall back to smartChat — which now chains:
-                // user provider → Z.ai non-streamed → anonymous free-LLM
-                // gateways (LLM7.io / OVHcloud / Kilo Code). The result
-                // arrives as one chunk; the bubble is already open.
-                console.error(
-                  '[api/chat] Z.ai stream failed, falling back to smart chat:',
-                  streamErr instanceof Error ? streamErr.message : streamErr
-                )
-                content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
-                // Emit only the visible prelude (text before any
-                // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
-                // peek-buffer behaviour of the normal streaming path.
-                const prelude = stripToolCall(content)
-                if (prelude) send({ type: 'assistant_delta', delta: prelude })
+                // Z.ai stream failed (typically the global 429 rate limit).
+                // STREAMING anonymous fallback chain: LLM7.io → OVHcloud →
+                // Kilo Code — all OpenAI-compatible SSE endpoints that need
+                // no API key and have their OWN rate-limit budgets. The user
+                // keeps seeing token-by-token output — no visible difference.
+                zaiStreamFailed = true
+                if (!(streamErr instanceof Error && streamErr.message.startsWith('Z.ai skipped'))) {
+                  console.error(
+                    '[api/chat] Z.ai stream failed, trying anonymous streaming fallback:',
+                    streamErr instanceof Error ? streamErr.message : streamErr
+                  )
+                }
+                let anonServed = false
+                try {
+                  const r = await streamAnonymousFallbackChat(
+                    llmMessages,
+                    (delta) => send({ type: 'assistant_delta', delta }),
+                    { maxTokens: 4000, timeoutMs: 60_000 }
+                  )
+                  content = r.content
+                  anonServed = true
+                  console.log(`[api/chat] anonymous streaming fallback served: ${r.providerId}/${r.model}`)
+                } catch (anonErr) {
+                  console.error(
+                    '[api/chat] anonymous streaming fallback failed:',
+                    anonErr instanceof Error ? anonErr.message : anonErr
+                  )
+                }
+                if (!anonServed) {
+                  // Last resort: non-streamed smartChat (user provider →
+                  // Z.ai → anonymous chain) and emit the visible prelude
+                  // as one chunk.
+                  content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
+                  // Emit only the visible prelude (text before any
+                  // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
+                  // peek-buffer behaviour of the normal streaming path.
+                  const prelude = stripToolCall(content)
+                  if (prelude) send({ type: 'assistant_delta', delta: prelude })
+                }
               }
               didStream = true
               if (!content.trim()) throw new Error('Empty model response.')
