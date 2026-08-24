@@ -19,10 +19,7 @@ const SUGGESTIONS = [
   'Plan a 3-day trip to Dubai on a budget',
   'Draft a polite follow-up email for a job application',
 ]
-const AGENT_MISSIONS = [
-  "Check Dubai's weather and today's top Hacker News story",
-  'Compare the 3 most-starred AI chatbot repos on GitHub',
-]
+const AGENT_MISSIONS: string[] = []
 
 export function HomeMode({ onOpenMode }: HomeModeProps) {
   const [prompt, setPrompt] = useState('')

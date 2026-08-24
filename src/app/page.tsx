@@ -17,7 +17,6 @@ import { OfficeMode } from '@/components/omni/office-mode'
 import { DocumentsMode } from '@/components/omni/documents-mode'
 import { SettingsMode } from '@/components/omni/settings-mode'
 import { ProfileMode } from '@/components/omni/profile-mode'
-import { OnboardingOverlay } from '@/components/omni/onboarding'
 import { AiModelsMode } from '@/components/omni/ai-models-mode'
 import { CodeMode } from '@/components/omni/code-mode'
 import { VideoMode } from '@/components/omni/video-mode'
@@ -34,7 +33,22 @@ function AuroraBackground() {
   )
 }
 
-// ChatGPT IA: Chat first, then organized groups
+// Instagram/Facebook IA: 5 primary destinations, everything else secondary
+const PRIMARY_TABS: Array<{ id: ModeId; label: string }> = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'voice-live', label: 'Voice' },
+  { id: 'search', label: 'Search' },
+  { id: 'home', label: 'More' },
+]
+
+const SECONDARY_MODES: ModeId[] = [
+  'image', 'video', 'code', 'office', 'documents',
+  'reader', 'vision', 'voice',
+  'profile', 'settings', 'models', 'connectors',
+]
+
+// Desktop sidebar groups (cleaner)
 const GROUPS: Array<{ label: string; ids: ModeId[] }> = [
   { label: '', ids: ['chat', 'agent', 'voice-live'] },
   { label: 'Create', ids: ['image', 'video', 'code', 'office', 'documents'] },
@@ -285,45 +299,27 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Mobile bottom tab bar — ChatGPT pattern (4 primary + menu) */}
-      <nav
-        className="flex items-stretch justify-around border-t border-border/50 bg-background/95 backdrop-blur lg:hidden"
-        aria-label="Primary"
-      >
-        {[
-          { id: 'chat' as ModeId, label: 'Chat' },
-          { id: 'voice-live' as ModeId, label: 'Voice' },
-          { id: 'agent' as ModeId, label: 'Agent' },
-          { id: 'search' as ModeId, label: 'Search' },
-          { id: 'home' as ModeId, label: 'More' },
-        ].map(({ id, label }) => {
+      {/* Mobile bottom tabs — Instagram/Facebook pattern: 5 primary destinations */}
+      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 backdrop-blur lg:hidden" aria-label="Primary">
+        {PRIMARY_TABS.map(({ id, label }) => {
           const m = MODE_MAP[id]
           const Icon = m.icon
-          const active = activeMode === id || (id === 'home' && ['code', 'video', 'image', 'office', 'reader', 'vision', 'voice', 'models', 'connectors', 'settings', 'home'].includes(activeMode))
+          const active = activeMode === id || (id === 'home' && SECONDARY_MODES.includes(activeMode as any))
           return (
             <button
               key={id}
               onClick={() => setActiveMode(id)}
               aria-current={active ? 'page' : undefined}
-              className="flex min-w-0 flex-1 flex-col items-center gap-0.5 px-1 pb-2 pt-2.5"
+              className="flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2"
             >
-              <Icon
-                className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`}
-                aria-hidden
-              />
-              <span
-                className={`text-[10px] font-medium ${active ? 'text-primary' : 'text-muted-foreground'}`}
-              >
-                {label}
-              </span>
+              <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
+              <span className={`text-[10px] ${active ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{label}</span>
             </button>
           )
         })}
       </nav>
 
       {/* Onboarding */}
-      {showOnboarding && <OnboardingOverlay onComplete={completeOnboarding} />}
-
       {/* Auth modal — re-check user after auth attempt */}
       {showAuth && (
         <AuthModal
