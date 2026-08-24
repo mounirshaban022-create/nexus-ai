@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Library,
@@ -61,7 +61,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export function LibraryMode() {
+export function LibraryMode({ active = true }: { active?: boolean }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterId>('all')
   const [view, setView] = useState<'grid' | 'list'>('grid')
@@ -71,8 +71,10 @@ export function LibraryMode() {
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
-  const fetchLibrary = useCallback(async () => {
-    setLoading(true)
+  const fetchLibrary = useCallback(async (silent = false) => {
+    // `silent`: keep-alive background refresh — don't flash the skeleton
+    // over existing items (only initial load shows the loading grid).
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/library', { cache: 'no-store' })
@@ -90,6 +92,17 @@ export function LibraryMode() {
   useEffect(() => {
     void fetchLibrary()
   }, [fetchLibrary])
+
+  // Keep-alive refresh: when the tab becomes active again after being
+  // away, silently refetch so items created elsewhere (e.g. images from
+  // chat) appear without a manual refresh or skeleton flash.
+  const prevActive = useRef(active)
+  useEffect(() => {
+    if (active && prevActive.current === false) {
+      void fetchLibrary(true)
+    }
+    prevActive.current = active
+  }, [active, fetchLibrary])
 
   const handleDelete = useCallback(async (item: LibItem) => {
     setDeleting(item.id)

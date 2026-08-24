@@ -161,6 +161,15 @@ function NexusApp() {
 
   // Navigation
   const [activeTab, setActiveTab] = useState<TabId>('chat')
+  /** Tabs the user has VISITED — mounted once, then kept in the DOM with
+   *  display:none. This is the fix for the "glitchy navigation": every
+   * tab switch used to fully unmount/remount the mode (re-fetching data,
+   * flashing loading spinners, losing scroll and form state). Now the
+   * first visit mounts a tab lazily and it stays alive forever. */
+  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(() => new Set(['chat']))
+  const mountTab = useCallback((tab: TabId) => {
+    setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)))
+  }, [])
 
   // Intelligence selector
   const [intelligence, setIntelligence] = useState<Intelligence>('auto')
@@ -561,12 +570,14 @@ function NexusApp() {
 
   /** Unified tab switch — closes every overlay (Intelligence dropdown,
    *  tool bottom-sheet, ...) so nothing can orphan on top of the target
-   *  tab and block navigation (the "stuck nav" glitch). */
+   *  tab and block navigation (the "stuck nav" glitch). Also marks the
+   *  tab as mounted (keep-alive). */
   const switchTab = useCallback((tab: TabId) => {
     setActiveTab(tab)
     setIntelOpen(false)
     setToolMenuOpen(false)
-  }, [])
+    mountTab(tab)
+  }, [mountTab])
 
   return (
     <div className="nexus-shell bg-background">
@@ -992,31 +1003,25 @@ function NexusApp() {
               </AnimatePresence>
             </div>
 
-          {/* Explore page */}
-          {activeTab === 'explore' && (
-            <div className="omni-scroll flex-1 overflow-y-auto">
+          {/* Explore page — keep-alive: mounts on first visit, stays mounted */}
+          {mountedTabs.has('explore') && (
+            <div
+              className="omni-scroll flex-1 overflow-y-auto"
+              style={activeTab === 'explore' ? undefined : { display: 'none' }}
+            >
               <div className="mx-auto max-w-2xl px-4 py-8">
-                <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-semibold">Explore Nexus</motion.h1>
-                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</motion.p>
+                <h1 className="text-2xl font-semibold">Explore Nexus</h1>
+                <p className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</p>
                 {TOOL_MENU.map(cat => (
-                  <motion.section
-                    key={cat.category}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18 }}
-                    className="mt-6"
-                  >
+                  <section key={cat.category} className="mt-6">
                     <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">{cat.category}</h2>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {cat.items.map((item, idx) => {
+                      {cat.items.map((item) => {
                         const Icon = item.icon
                         const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
                         return (
-                          <motion.button
+                          <button
                             key={`${cat.category}-${item.tool}-${item.label}`}
-                            whileHover={{ y: -3, scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                             onClick={() => { switchTab('chat'); handleToolPick(item.tool, item.label) }}
                             className="group relative flex flex-col items-start gap-2.5 overflow-hidden rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
                           >
@@ -1024,60 +1029,76 @@ function NexusApp() {
                               <Icon className="h-5 w-5" aria-hidden />
                             </span>
                             <span className="text-sm font-semibold">{item.label}</span>
-                          </motion.button>
+                          </button>
                         )
                       })}
                     </div>
-                  </motion.section>
+                  </section>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Projects */}
-          {activeTab === 'projects' && (
-            <ProjectsMode
-              language={language}
-              isAuthenticated={!!user}
-              onSignIn={() => openAuth('signin')}
-              onStartProjectChat={(projectId, projectName) => {
-                // Phase 1 P3: starting a new conversation inside a project.
-                // Set the project binding so the next /api/chat POST stamps
-                // projectId on the new session. Clear the session id (new
-                // session) and the messages (fresh chat). Then switch to
-                // the chat tab — the user types their first message and
-                // the project context is injected server-side.
-                setActiveProjectId(projectId)
-                setActiveProjectName(projectName)
-                setCurrentChatSessionId(null)
-                setMessages([])
-                toolEngine.clear()
-                switchTab('chat')
-              }}
-            />
+          {/* Projects — keep-alive: mounts on first visit, stays mounted */}
+          {mountedTabs.has('projects') && (
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              style={activeTab === 'projects' ? undefined : { display: 'none' }}
+            >
+              <ProjectsMode
+                language={language}
+                isAuthenticated={!!user}
+                active={activeTab === 'projects'}
+                onSignIn={() => openAuth('signin')}
+                onStartProjectChat={(projectId, projectName) => {
+                  // Phase 1 P3: starting a new conversation inside a project.
+                  // Set the project binding so the next /api/chat POST stamps
+                  // projectId on the new session. Clear the session id (new
+                  // session) and the messages (fresh chat). Then switch to
+                  // the chat tab — the user types their first message and
+                  // the project context is injected server-side.
+                  setActiveProjectId(projectId)
+                  setActiveProjectName(projectName)
+                  setCurrentChatSessionId(null)
+                  setMessages([])
+                  toolEngine.clear()
+                  switchTab('chat')
+                }}
+              />
+            </div>
           )}
 
-          {/* Library */}
-          {activeTab === 'library' && (
-            <LibraryMode />
+          {/* Library — keep-alive: mounts on first visit, stays mounted */}
+          {mountedTabs.has('library') && (
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              style={activeTab === 'library' ? undefined : { display: 'none' }}
+            >
+              <LibraryMode active={activeTab === 'library'} />
+            </div>
           )}
 
-          {/* Profile */}
-          {activeTab === 'profile' && (
-            <ProfilePage
-              onEditProfile={() => setProfileEditOpen(true)}
-              onSignIn={() => openAuth('signin')}
-              onSignUp={() => openAuth('signup')}
-              onOpenChat={() => { switchTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }}
-              onOpenConnect={() => setConnectOpen(true)}
-              onToggleTheme={toggleTheme}
-              onToggleLanguage={toggleLanguage}
-              onRerunOnboarding={() => { resetOnboarding(); usePreferences.getState().setGuestMode(false) }}
-              onOpenPrivacy={() => setLegalPage('privacy')}
-              onOpenTerms={() => setLegalPage('terms')}
-              theme={theme}
-              language={language}
-            />
+          {/* Profile — keep-alive: mounts on first visit, stays mounted */}
+          {mountedTabs.has('profile') && (
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              style={activeTab === 'profile' ? undefined : { display: 'none' }}
+            >
+              <ProfilePage
+                onEditProfile={() => setProfileEditOpen(true)}
+                onSignIn={() => openAuth('signin')}
+                onSignUp={() => openAuth('signup')}
+                onOpenChat={() => { switchTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }}
+                onOpenConnect={() => setConnectOpen(true)}
+                onToggleTheme={toggleTheme}
+                onToggleLanguage={toggleLanguage}
+                onRerunOnboarding={() => { resetOnboarding(); usePreferences.getState().setGuestMode(false) }}
+                onOpenPrivacy={() => setLegalPage('privacy')}
+                onOpenTerms={() => setLegalPage('terms')}
+                theme={theme}
+                language={language}
+              />
+            </div>
           )}
         </main>
       </div>

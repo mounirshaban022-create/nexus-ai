@@ -270,6 +270,10 @@ function formatBytes(n: number, lang: Lang): string {
 // ----- main component -----
 export interface ProjectsModeProps {
   language?: Lang
+  /** Whether this tab is currently active (keep-alive pattern — the tab
+   *  stays mounted when hidden; data refetches when it becomes active
+   *  again). */
+  active?: boolean
   /** Called when the user clicks "Start conversation in this project". The
    *  parent (page.tsx) wires this to: setActiveProjectId(projectId),
    *  setCurrentChatSessionId(null), setMessages([]), toolEngine.clear(),
@@ -288,6 +292,7 @@ export function ProjectsMode({
   onStartProjectChat,
   onSignIn,
   isAuthenticated = true,
+  active = true,
 }: ProjectsModeProps) {
   const tr = T[language]
   const [projects, setProjects] = useState<ProjectListItem[]>([])
@@ -322,6 +327,16 @@ export function ProjectsMode({
     if (isAuthenticated) fetchProjects()
     else setLoading(false)
   }, [fetchProjects, isAuthenticated])
+
+  // Keep-alive refresh: refetch when the tab becomes active again after
+  // being away (projects may have changed via chat sessions bound to them).
+  const prevActive = useRef(active)
+  useEffect(() => {
+    if (active && prevActive.current === false && isAuthenticated) {
+      fetchProjects()
+    }
+    prevActive.current = active
+  }, [active, fetchProjects, isAuthenticated])
 
   // Guest CTA — projects are user-scoped, no anonymous path.
   if (!isAuthenticated) {
