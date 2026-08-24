@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -252,8 +252,14 @@ export function AnswerCard({
  * citation markers so they become clickable superscript badges linking
  * to the matching source. We transform `[N]` -> `[N](sourceUrl)` and
  * use a custom `a` renderer that detects single-number children.
+ *
+ * Memoized: AnswerCard re-renders on every streaming token (because its
+ * parent re-renders when the assistant message grows). Without memo,
+ * CitationMarkdown re-parsed the citation substitution AND re-tokenized
+ * the whole markdown tree on every token. With memo, it only re-renders
+ * when `content` or `sourceMap` actually changes.
  */
-function CitationMarkdown({
+const CitationMarkdown = memo(function CitationMarkdown({
   content,
   sourceMap,
 }: {
@@ -320,7 +326,7 @@ function CitationMarkdown({
       </ReactMarkdown>
     </div>
   )
-}
+})
 
 /**
  * Email-sent confirmation card.

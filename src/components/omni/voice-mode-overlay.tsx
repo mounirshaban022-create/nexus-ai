@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast'
 import { startAsrMode, stopAsrMode } from './voice-asr-fallback'
 import { EDGE_VOICES, NEXUS_VOICES, isEdgeVoice, type VoiceOption } from '@/lib/voices'
 import { safeJsonFetch } from '@/lib/safe-fetch'
+import { usePreferences } from '@/lib/preferences'
 
 /**
  * NEXUS Premium Voice Mode — ChatGPT-style full-screen voice conversation.
@@ -57,6 +58,10 @@ const LANGUAGES = [
 
 export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast()
+  // UI language from global preferences — passed as `?lang=en|ar` to /api/tts
+  // and as a `lang` field to /api/voice/turn so the server can swap to a
+  // high-quality Arabic neural voice when the user is in Arabic mode.
+  const prefLang = usePreferences((s) => s.language)
   const [state, setState] = useState<VoiceState>('idle')
   const [iframeBlocked, setIframeBlocked] = useState(false)
   const [audioUnlocked, setAudioUnlocked] = useState(false)
@@ -156,7 +161,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
     // Layer 1: Edge neural TTS via our API (server-side Microsoft neural voices)
     try {
       setStateSafe('speaking')
-      const r = await safeJsonFetch('/api/tts', {
+      const r = await safeJsonFetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
@@ -175,7 +180,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
         arrayBuffer = bytes.buffer
       } else {
         // Fallback: fetch as blob directly
-        const blobRes = await fetch('/api/tts', {
+        const blobRes = await fetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
@@ -197,7 +202,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
         })
       } catch {}
     }
-  }, [ttsVoice, lang, playWebAudio, setStateSafe])
+  }, [ttsVoice, lang, prefLang, playWebAudio, setStateSafe])
 
   /* ---------- THINK (one LLM turn via /api/voice/turn) ---------- */
   // Bug A: returns the full server payload so the client can play server-generated
@@ -217,6 +222,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
         history: historyRef.current.slice(-6),
         language: lang.split('-')[0],
         voice: ttsVoice,
+        lang: prefLang,
         audio: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=',
       }),
       signal: controllerRef.current?.signal, // Bug K: cancel on close
@@ -227,7 +233,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
       audio: r.data.audio ?? null,
       audioFormat: r.data.audioFormat ?? 'wav',
     }
-  }, [lang, ttsVoice])
+  }, [lang, ttsVoice, prefLang])
 
   /* ---------- HANDLE FINAL TRANSCRIPT ---------- */
   const handleUtterance = useCallback(async (text: string) => {

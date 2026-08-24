@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { isEdgeVoice } from '@/lib/voices'
+import { DEFAULT_VOICE, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
 
 export const maxDuration = 90
 
@@ -23,8 +23,11 @@ const requestSchema = z.object({
     .max(12)
     .optional()
     .default([]),
-  voice: z.string().min(2).max(60).default('en-US-AriaNeural'),
+  voice: z.string().min(2).max(60).default(DEFAULT_VOICE),
   language: z.string().min(2).max(30).optional().default('auto'),
+  // UI language: 'en' | 'ar'. When 'ar' and the chosen voice isn't Arabic,
+  // we override to a high-quality Arabic neural voice so TTS matches the UI.
+  lang: z.enum(['en', 'ar']).optional().default('en'),
 })
 
 /** Voice persona: natural, warm, concise — designed for spoken conversation. */
@@ -110,7 +113,15 @@ export async function POST(req: NextRequest) {
     }
 
     const zai = await getZAI()
-    const { audio, message, voice } = parsed.data
+    const { audio, message, voice, lang } = parsed.data
+
+    // Language override (mirrors /api/tts): if the caller is in Arabic UI
+    // mode but the chosen voice isn't Arabic, swap to an Arabic neural voice
+    // so the spoken reply matches the UI language.
+    const effectiveVoice =
+      lang === 'ar' && !voice.toLowerCase().startsWith('ar-')
+        ? pickVoiceForLanguage('ar')
+        : voice
 
     // ---------- 1. Transcribe (skip if transcript provided via Web Speech API) ----------
     let transcript = ''
@@ -185,10 +196,11 @@ export async function POST(req: NextRequest) {
     try {
       const speechText = stripMarkdownForSpeech(reply).slice(0, 3000)
 
-      if (isEdgeVoice(voice)) {
+      if (isEdgeVoice(effectiveVoice)) {
         const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
         const tts = new MsEdgeTTS()
-        await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+        // 96kbit/s MP3 — 2× bitrate vs the old 48kbit/s default for clearer speech.
+        await tts.setMetadata(effectiveVoice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
         const { audioStream } = tts.toStream(speechText)
         const chunks: Buffer[] = []
         for await (const chunk of audioStream) {
@@ -206,7 +218,7 @@ export async function POST(req: NextRequest) {
           chunks.map(async (chunk) => {
             const ttsRes = await zai.audio.tts.create({
               input: chunk,
-              voice,
+              voice: effectiveVoice,
               speed: 1.0,
               response_format: 'wav',
               stream: false,

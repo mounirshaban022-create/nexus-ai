@@ -47,6 +47,7 @@ export const EDGE_VOICES: VoiceOption[] = [
   // Arabic
   { id: 'ar-EG-SalmaNeural', label: 'Salma', language: 'Arabic (Egypt) · female', provider: 'edge' },
   { id: 'ar-SA-ZariyahNeural', label: 'Zariyah', language: 'Arabic (Saudi) · female', provider: 'edge' },
+  { id: 'ar-SA-HamedNeural', label: 'Hamed', language: 'Arabic (Saudi) · male', provider: 'edge' },
   { id: 'ar-AE-FatimaNeural', label: 'Fatima', language: 'Arabic (UAE) · female', provider: 'edge' },
   { id: 'ar-AE-HamdanNeural', label: 'Hamdan', language: 'Arabic (UAE) · male', provider: 'edge' },
   // European
@@ -69,6 +70,19 @@ export const EDGE_VOICES: VoiceOption[] = [
 ]
 
 export const ALL_VOICES: VoiceOption[] = [...NEXUS_VOICES, ...EDGE_VOICES]
+
+/**
+ * The default voice used by every endpoint that synthesizes speech
+ * (/api/tts, /api/voice/turn). Microsoft neural voices are FREE and
+ * higher quality than the bundled ZAI defaults (e.g. `tongtong`).
+ */
+export const DEFAULT_VOICE = 'en-US-AriaNeural'
+
+/** Maps a UI language ('en' | 'ar') to a high-quality default Microsoft neural voice. */
+export function pickVoiceForLanguage(lang: 'en' | 'ar'): string {
+  if (lang === 'ar') return 'ar-SA-HamedNeural'
+  return DEFAULT_VOICE
+}
 
 export function resolveVoice(voiceId: string): VoiceOption | null {
   return ALL_VOICES.find((v) => v.id === voiceId) ?? null

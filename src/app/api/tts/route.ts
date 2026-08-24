@@ -2,13 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getZAI } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { isEdgeVoice } from '@/lib/voices'
+import { DEFAULT_VOICE, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
 
 const requestSchema = z.object({
   text: z.string().min(1).max(6000),
-  voice: z.string().min(2).max(60).default('tongtong'),
+  // Default voice is now a high-quality FREE Microsoft neural voice (was `tongtong`).
+  // The route still accepts any voice id, including the legacy ZAI voices.
+  voice: z.string().min(2).max(60).default(DEFAULT_VOICE),
   speed: z.number().min(0.5).max(2.0).default(1.0),
 })
+
+/** Validates and normalizes the `lang` query param (?lang=en|ar). Defaults to 'en'. */
+function readLangParam(req: NextRequest): 'en' | 'ar' {
+  const raw = req.nextUrl.searchParams.get('lang') ?? 'en'
+  return raw.toLowerCase().startsWith('ar') ? 'ar' : 'en'
+}
 
 /**
  * Splits long text into <=1000-char chunks on sentence boundaries
@@ -61,7 +69,10 @@ function wavHeader(dataLength: number, sampleRate = 24000, channels = 1, bitsPer
 async function edgeTts(text: string, voice: string, speed: number): Promise<Buffer> {
   const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
   const tts = new MsEdgeTTS()
-  await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+  // 96kbit/s MP3 — msedge-tts only exposes 24kHz MP3 + WebM/Opus formats.
+  // 96kbit/s nearly doubles the bitrate vs the old 48kbit/s default for
+  // audibly clearer speech (same sample rate, but fewer compression artifacts).
+  await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
 
   // Rate: convert 0.5-2.0 speed multiplier to percentage string
   const rate = `${Math.round((speed - 1) * 100)}%`
@@ -94,15 +105,26 @@ export async function POST(req: NextRequest) {
     }
 
     const { text, voice, speed } = parsed.data
+    const lang = readLangParam(req)
+
+    // Language override: if the caller asks for Arabic (?lang=ar) but
+    // sent a non-Arabic voice id (e.g. legacy default or an English voice),
+    // swap to a high-quality Arabic neural voice so the audio matches the
+    // UI language. Arabic voice ids start with "ar-".
+    const effectiveVoice =
+      lang === 'ar' && !voice.toLowerCase().startsWith('ar-')
+        ? pickVoiceForLanguage('ar')
+        : voice
+
     const chunks = splitTextIntoChunks(text.trim())
     if (chunks.length === 0) {
       return NextResponse.json({ error: 'Text is required.' }, { status: 400 })
     }
 
     /* ---------- Provider: free Microsoft neural voices ---------- */
-    if (isEdgeVoice(voice)) {
+    if (isEdgeVoice(effectiveVoice)) {
       // Bug G: synthesize every chunk in parallel (was sequential for-loop).
-      const buffers = await Promise.all(chunks.map((c) => edgeTts(c, voice, speed)))
+      const buffers = await Promise.all(chunks.map((c) => edgeTts(c, effectiveVoice, speed)))
       const merged = Buffer.concat(buffers)
       return new NextResponse(new Uint8Array(merged), {
         status: 200,
@@ -121,7 +143,7 @@ export async function POST(req: NextRequest) {
       chunks.map(async (chunk) => {
         const response = await zai.audio.tts.create({
           input: chunk,
-          voice,
+          voice: effectiveVoice,
           speed,
           response_format: 'wav',
           stream: false,

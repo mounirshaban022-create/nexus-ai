@@ -20,6 +20,9 @@ interface PreferencesState {
   // Appearance
   theme: 'light' | 'dark'
   language: 'en' | 'ar'
+  // Auth gate (Task 13): once user clicks "Continue as guest" on the auth landing,
+  // skip it until they sign out (which clears this).
+  guestMode: boolean
   // Actions: onboarding
   completeOnboarding: (data: {
     name: string
@@ -31,6 +34,8 @@ interface PreferencesState {
     avatarUrl?: string
   }) => void
   resetOnboarding: () => void
+  // Actions: auth gate
+  setGuestMode: (v: boolean) => void
   // Actions: appearance
   toggleTheme: () => void
   setTheme: (t: 'light' | 'dark') => void
@@ -51,6 +56,7 @@ export const usePreferences = create<PreferencesState>()(
       avatarUrl: '',
       theme: 'light',
       language: 'en',
+      guestMode: false,
       completeOnboarding: ({ name, interests, commStyle, bio, location, timezone, avatarUrl }) =>
         set({
           name,
@@ -72,7 +78,9 @@ export const usePreferences = create<PreferencesState>()(
           location: '',
           timezone: '',
           avatarUrl: '',
+          guestMode: false,
         }),
+      setGuestMode: (guestMode) => set({ guestMode }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
       setTheme: (theme) => set({ theme }),
       toggleLanguage: () => set((s) => ({ language: s.language === 'en' ? 'ar' : 'en' })),
@@ -94,22 +102,75 @@ export function applyPreferences(theme: string, language: string) {
 export const t = {
   en: {
     chat: 'Chat', voice: 'Voice', agent: 'Agent', search: 'Search', more: 'More',
+    projects: 'Projects', explore: 'Explore', library: 'Library',
     settings: 'Settings', profile: 'Profile', appearance: 'Appearance',
     language: 'Language', light: 'Light', dark: 'Dark', english: 'English', arabic: 'العربية',
     account: 'Account', signIn: 'Sign in', signOut: 'Sign out', signUp: 'Create account',
     email: 'Email', password: 'Password', legal: 'Legal', privacyPolicy: 'Privacy Policy',
     termsOfService: 'Terms of Service', creator: 'Creator',
     askAnything: 'How can I help you today?', send: 'Send',
+    newChat: 'New Chat', tools: 'Tools', close: 'Close',
+    messageNexus: 'Message Nexus...',
+    emptyTitleGuest: 'What can',
+    emptyTitleUser: 'Hi',
+    emptyHelp: 'Ask anything, create something, or give Nexus a task.',
+    suggestResearch: 'Research something',
+    suggestResearchSub: 'Deep dive into any topic',
+    suggestAnalyze: 'Analyze a file',
+    suggestAnalyzeSub: 'PDFs, docs, code & more',
+    suggestCreate: 'Create something',
+    suggestCreateSub: 'Images, videos & writing',
+    suggestCode: 'Help me code',
+    suggestCodeSub: 'Write, debug, or explain',
+    intel: 'Intelligence', intelAuto: 'Auto', intelFast: 'Fast',
+    intelReasoning: 'Reasoning', intelVision: 'Vision',
+    intelAutoDesc: 'Best model for the task',
+    intelFastDesc: 'Quick everyday conversations',
+    intelReasoningDesc: 'Complex analysis & hard problems',
+    intelVisionDesc: 'Images & visual understanding',
+    personalization: 'Personalization',
+    emailApps: 'Email & apps', theme: 'Theme', rerunOnboarding: 'Re-run onboarding',
+    yourInterests: 'Your interests', memberSince: 'Member since',
+    style: 'style', guestMode: 'Guest mode', editProfile: 'Edit profile',
+    allSystemsOperational: 'All systems operational', version: 'v1.0',
+    privacy: 'Privacy', terms: 'Terms',
   },
   ar: {
     chat: 'محادثة', voice: 'صوت', agent: 'وكيل', search: 'بحث', more: 'المزيد',
+    projects: 'المشاريع', explore: 'استكشاف', library: 'المكتبة',
     settings: 'الإعدادات', profile: 'الملف الشخصي', appearance: 'المظهر',
     language: 'اللغة', light: 'فاتح', dark: 'داكن', english: 'English', arabic: 'العربية',
     account: 'الحساب', signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signUp: 'إنشاء حساب',
     email: 'البريد الإلكتروني', password: 'كلمة المرور', legal: 'قانوني', privacyPolicy: 'سياسة الخصوصية',
     termsOfService: 'شروط الاستخدام', creator: 'المبتكر',
     askAnything: 'كيف يمكنني مساعدتك اليوم؟', send: 'إرسال',
+    newChat: 'محادثة جديدة', tools: 'الأدوات', close: 'إغلاق',
+    messageNexus: 'راسل Nexus...',
+    emptyTitleGuest: 'بمَ يمكن لـ',
+    emptyTitleUser: 'مرحبًا',
+    emptyHelp: 'اسأل أي شيء، أنشئ شيئًا، أو كلِف Nexus بمهمة.',
+    suggestResearch: 'ابحث عن شيء',
+    suggestResearchSub: 'تعمّق في أي موضوع',
+    suggestAnalyze: 'حلل ملفًا',
+    suggestAnalyzeSub: 'ملفات PDF والمستندات والكود',
+    suggestCreate: 'أنشئ شيئًا',
+    suggestCreateSub: 'الصور والفيديو والكتابة',
+    suggestCode: 'ساعدني في البرمجة',
+    suggestCodeSub: 'اكتب أو صحح أو اشرح',
+    intel: 'الذكاء', intelAuto: 'تلقائي', intelFast: 'سريع',
+    intelReasoning: 'استدلال', intelVision: 'رؤية',
+    intelAutoDesc: 'أفضل نموذج للمهمة',
+    intelFastDesc: 'محادثات يومية سريعة',
+    intelReasoningDesc: 'تحليل معقّد ومشاكل صعبة',
+    intelVisionDesc: 'الصور والفهم البصري',
+    personalization: 'التخصيص',
+    emailApps: 'البريد والتطبيقات', theme: 'السمة', rerunOnboarding: 'إعادة التهيئة',
+    yourInterests: 'اهتماماتك', memberSince: 'عضو منذ',
+    style: 'أسلوب', guestMode: 'وضع الضيف', editProfile: 'تعديل الملف',
+    allSystemsOperational: 'كل الأنظمة تعمل', version: 'إصدار 1.0',
+    privacy: 'الخصوصية', terms: 'الشروط',
   },
 } as const
 
 export type Locale = keyof typeof t
+export type TranslationKey = keyof (typeof t)['en']

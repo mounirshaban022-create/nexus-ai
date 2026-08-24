@@ -35,6 +35,7 @@ const requestSchema = z.object({
   message: z.string().min(1).max(8000),
   sessionId: z.string().max(64).optional().nullable(),
   thinking: z.boolean().optional().default(false),
+  language: z.enum(['en', 'ar']).optional().default('en'),
 })
 
 const MAX_TOOL_CALLS = 4
@@ -75,7 +76,7 @@ const CHAT_TOOL_DEFS: Array<{
   },
 ]
 
-function buildSystemPrompt(enabledConnectors: string[]): string {
+function buildSystemPrompt(enabledConnectors: string[], language: 'en' | 'ar' = 'en'): string {
   const connectorList = enabledConnectors
     .map((id) => CONNECTOR_MAP.get(id))
     .filter(Boolean)
@@ -84,6 +85,10 @@ function buildSystemPrompt(enabledConnectors: string[]): string {
     .join('\n')
 
   const chatTools = CHAT_TOOL_DEFS.map((t) => `- ${t.id}: ${t.description} Params: ${t.params}`).join('\n')
+
+  const languageInstruction = language === 'ar'
+    ? '6. LANGUAGE: ALWAYS respond in Arabic (العربية). Use Arabic for all explanations, headings, and prose. Keep code, file names, and tool IDs in their original form. Do NOT switch to English unless the user explicitly asks.'
+    : '6. LANGUAGE: respond in the user\'s language (default English).'
 
   return [
     'You are NEXUS, the AI at the heart of the NEXUS AI super app — with every superpower available directly in this chat.',
@@ -104,7 +109,7 @@ function buildSystemPrompt(enabledConnectors: string[]): string {
     '3. When done (or no tool needed), give your final answer in clean Markdown. Never write "TOOL_CALL" in a final answer.',
     '4. When you created something (image/document/code), reference it naturally: "Here\'s the image:" / "I\'ve prepared the document — download it below:" and include the exact URL from the result.',
     '5. TONE: warm, precise, confident. Lead with the answer. Markdown formatting.',
-    '6. LANGUAGE: respond in the user\'s language.',
+    languageInstruction,
     '7. THINK BEFORE ACTING: for multi-step requests, plan which tools to use in which order.',
   ].join('\n')
 }
@@ -324,7 +329,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Message is required (max 8000 chars).' }, { status: 400 })
     }
-    const { message, sessionId, thinking: thinkingEnabled } = parsed.data
+    const { message, sessionId, thinking: thinkingEnabled, language } = parsed.data
     const trimmed = message.trim()
 
     // Default enabled: abilities + key connectors
@@ -358,7 +363,7 @@ export async function POST(req: NextRequest) {
     }
 
     const zai = await getZAI()
-    const systemPrompt = buildSystemPrompt(enabledConnectors)
+    const systemPrompt = buildSystemPrompt(enabledConnectors, language)
 
     // Build message history
     const history = await db.chatMessage.findMany({
@@ -451,6 +456,23 @@ export async function POST(req: NextRequest) {
               toolCallsUsed += 1
               send({ type: 'tool_start', tool: toolCall.tool, args: toolCall.args, index: toolCallsUsed })
 
+              // Heartbeat: image generation can take 60s+ on the upstream
+              // provider. Without intermediate events the user perceives a
+              // freeze ("the app freezes with every action"). Emit a
+              // tool_progress ping every 5s while the tool is running so the
+              // client knows the stream is alive and can show "still working".
+              const toolStartedAt = Date.now()
+              const heartbeat = setInterval(() => {
+                const elapsedMs = Date.now() - toolStartedAt
+                send({
+                  type: 'tool_progress',
+                  tool: toolCall.tool,
+                  index: toolCallsUsed,
+                  elapsedMs,
+                  message: `Still working on ${toolCall.tool}… ${Math.round(elapsedMs / 1000)}s`,
+                })
+              }, 5000)
+
               let ok = true
               let result: unknown
               let attachment: Record<string, unknown> | undefined
@@ -461,6 +483,8 @@ export async function POST(req: NextRequest) {
               } catch (error) {
                 ok = false
                 result = { error: error instanceof Error ? error.message : 'Tool failed.' }
+              } finally {
+                clearInterval(heartbeat)
               }
 
               if (attachment) attachments.push(attachment)

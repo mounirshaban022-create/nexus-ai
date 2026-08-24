@@ -1,16 +1,24 @@
 'use client'
 
-import { memo, useState } from 'react'
+import { memo, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+// PrismAsync lazy-loads language grammars on demand — keeps the initial
+// bundle small AND avoids re-tokenizing every language on each streaming
+// token. (Was: `Prism` from 'react-syntax-highlighter' which bundles all
+// grammars synchronously — ~500KB upfront and re-tokenizes per render.)
+import { PrismAsyncLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Check, Copy } from 'lucide-react'
 
-function CodeBlock({ language, code }: { language: string; code: string }) {
+// Memoized CodeBlock — during streaming, `Markdown` re-renders on every
+// token. Without memo, every render re-tokenized the code block (expensive
+// regex parse + DOM diff). With memo, CodeBlock only re-renders when its
+// own `language` or `code` props actually change.
+const CodeBlock = memo(function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false)
 
-  const copy = async () => {
+  const copy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(code)
       setCopied(true)
@@ -18,7 +26,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
     } catch {
       /* clipboard unavailable */
     }
-  }
+  }, [code])
 
   return (
     <div className="group/code relative">
@@ -44,7 +52,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
       </div>
       <SyntaxHighlighter
         style={oneDark}
-        language={language}
+        language={language || 'text'}
         PreTag="div"
         customStyle={{
           margin: 0,
@@ -60,7 +68,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
       </SyntaxHighlighter>
     </div>
   )
-}
+})
 
 /**
  * Shared Markdown renderer with GFM support, syntax-highlighted code blocks
