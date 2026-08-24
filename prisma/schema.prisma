@@ -3,10 +3,9 @@ generator client {
 }
 
 datasource db {
-  // Supabase Postgres — the SAME database for local dev AND production.
-  // Local dev: point DATABASE_URL at your Supabase connection string too
-  // (from Supabase Dashboard → Settings → Database → Connection string).
-  provider = "postgresql"
+  // LOCAL DEV: SQLite (fast, no network). VERCEL: Supabase Postgres.
+  // The provider is chosen by the build script based on DATABASE_URL.
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
