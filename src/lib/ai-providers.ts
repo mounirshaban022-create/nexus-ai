@@ -1,6 +1,7 @@
 import { createDecipheriv, scryptSync } from 'crypto'
 import { db } from '@/lib/db'
 import { consumeSSEWithPeek } from './llm-stream'
+import type { AiTask } from './smart-chat-types'
 
 /* ------------------------------------------------------------------ */
 /* Free AI provider registry (all OpenAI-compatible chat APIs)          */
@@ -523,21 +524,40 @@ export async function anonymousChatCompletion(
 }
 
 /**
- * Runs the full anonymous fallback chain. Tries each provider in order
- * (LLM7 → OVHcloud → Kilo Code). For each, tries each model in order.
+ * Runs the full free multi-AI chain, ROUTED BY TASK. Every provider has
+ * its own rate-limit budget, and the chain order puts the best engine
+ * for the task first:
+ *   chat/voice     → LLM7 first (fast conversational models)
+ *   reasoning/docs → Kilo first (550B reasoning / strong writers)
+ *   code           → Kilo first (north-mini-code), then Qwen on OVH
+ *   fast           → OVH first (tiny instant models)
  * Returns the first non-empty assistant text. Throws the last error if
  * every provider fails.
- *
- * Used by smart-chat.ts as the final layer after the user's connected
- * provider AND the built-in Z.ai engine have both failed (typically
- * because of a global 429 rate-limit storm).
  */
+function chainOrderForTask(task?: AiTask): AnonymousProvider[] {
+  const byId = new Map(ANONYMOUS_FREE_LLM_FALLBACKS.map((p) => [p.id, p]))
+  const llm7 = byId.get('llm7')!
+  const ovh = byId.get('ovhcloud')!
+  const kilo = byId.get('kilocode')!
+  switch (task) {
+    case 'reasoning':
+    case 'documents':
+    case 'code':
+      return [kilo, llm7, ovh] // big-model engines first
+    case 'fast':
+      return [ovh, llm7, kilo] // tiny instant engines first
+    default:
+      return [llm7, kilo, ovh] // conversational first
+  }
+}
+
 export async function anonymousFallbackChat(
   messages: ExternalChatMessage[],
-  opts: { maxTokens?: number; timeoutMs?: number } = {}
+  opts: { maxTokens?: number; timeoutMs?: number; task?: AiTask } = {}
 ): Promise<{ content: string; providerId: string; model: string }> {
+  const chain = chainOrderForTask(opts.task)
   let lastError: unknown = null
-  for (const provider of ANONYMOUS_FREE_LLM_FALLBACKS) {
+  for (const provider of chain) {
     for (const model of provider.models) {
       try {
         const content = await anonymousChatCompletion(provider, normalizeSystemRole(messages), {
@@ -635,11 +655,12 @@ async function streamAnonymousCompletion(
 export async function streamAnonymousFallbackChat(
   messages: ExternalChatMessage[],
   onDelta: (delta: string) => void,
-  opts: { maxTokens?: number; timeoutMs?: number } = {}
+  opts: { maxTokens?: number; timeoutMs?: number; task?: AiTask } = {}
 ): Promise<{ content: string; providerId: string; model: string }> {
   const normalized = normalizeSystemRole(messages)
+  const chain = chainOrderForTask(opts.task)
   let lastError: unknown = null
-  for (const provider of ANONYMOUS_FREE_LLM_FALLBACKS) {
+  for (const provider of chain) {
     for (const model of provider.models) {
       let emitted = ''
       try {

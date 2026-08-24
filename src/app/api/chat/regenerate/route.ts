@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { getZAI } from '@/lib/zai'
+import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 const SYSTEM_PROMPT =
@@ -57,13 +57,7 @@ export async function POST(req: NextRequest) {
       ...remaining.slice(-24).map((m) => ({ role: m.role, content: m.content })),
     ]
 
-    const zai = await getZAI()
-    const completion = await zai.chat.completions.create({
-      messages: llmMessages,
-      thinking: { type: 'disabled' },
-    })
-
-    const reply = completion.choices[0]?.message?.content
+    const reply = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
     if (!reply || !reply.trim()) {
       throw new Error('The model returned an empty response. Please try again.')
     }

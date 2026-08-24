@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { getActiveAiProvider } from '@/lib/ai-providers'
 import { getSession } from '@/lib/auth'
@@ -25,7 +24,6 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat } from '@/lib/ai-providers'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
-import { zaiOnCooldown, markZaiFailure, markZaiSuccess } from '@/lib/zai'
 
 export const maxDuration = 120
 
@@ -280,43 +278,6 @@ function buildSystemPrompt(
   ].join('\n')
 }
 
-/** Streams a chat completion from the built-in ZAI engine, calling `onDelta`
- *  with each token-chunk as it arrives. Returns the full accumulated content.
- *
- *  The SSE parsing + peek buffer (hide half-formed TOOL_CALLs, flush short
- *  answers at end-of-stream) now lives in the shared consumeSSEWithPeek()
- *  helper (src/lib/llm-stream.ts) so the Z.ai engine and the anonymous
- *  free-LLM fallback chain behave identically.
- *
- *  This is what makes the AI "feel fast" — the user sees the first token
- *  within ~200ms instead of waiting 4-20s for the full response. */
-async function streamZaiChat(
-  messages: Array<{ role: string; content: string }>,
-  onDelta: (delta: string) => void
-): Promise<string> {
-  const zai = await getZAI()
-  const streamBody = await zai.chat.completions.create({
-    messages: messages.map((m) => ({ role: m.role as any, content: m.content })),
-    stream: true,
-    max_tokens: 4096,
-    temperature: 0.7,
-    thinking: { type: 'disabled' },
-  })
-
-  // streamBody is a ReadableStream (SSE format) when stream:true is honored
-  if (!(streamBody instanceof ReadableStream)) {
-    // Some providers return a JSON object instead of a stream. Fall back.
-    const fallback = streamBody as { choices?: Array<{ message?: { content?: string } }> }
-    const content = fallback.choices?.[0]?.message?.content ?? ''
-    if (content) onDelta(content)
-    return content
-  }
-
-  return consumeSSEWithPeek(
-    (streamBody as ReadableStream<Uint8Array>).getReader(),
-    onDelta
-  )
-}
 
 interface ParsedToolCall {
   tool: string
@@ -970,7 +931,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const zai = await getZAI()
     // Phase 1 P1: fetch the verified user's durable memories (top 25 by
     // recency) and inject them into the system prompt. Guests and users
     // with no memories get the unmodified prompt.
@@ -1127,77 +1087,44 @@ export async function POST(req: NextRequest) {
           const attachments: Array<Record<string, unknown>> = []
           let toolCallsUsed = 0
 
-          // Determine if we can stream from the built-in ZAI engine
-          // (when a user provider is connected, smartChat handles it non-streamed)
+          // Determine if we can stream from a user-connected provider
+          // (their provider answers non-streamed via smartChat; otherwise
+          // the free multi-AI pool streams token-by-token directly).
           const hasUserProvider = !!(await getActiveAiProvider())
-          // Circuit breaker: once Z.ai fails in this request (typically a
-          // global 429 storm), skip it for subsequent tool-loop steps —
-          // each retry costs a full round-trip to a rate-limited endpoint.
-          let zaiStreamFailed = false
 
           for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
             const isLast = step === MAX_TOOL_CALLS
 
             // STREAMING PATH — emit assistant_start + assistant_delta chunks
-            // as tokens arrive (only when using the built-in ZAI engine).
+            // as tokens arrive. Primary engine: the FREE MULTI-AI POOL
+            // (LLM7 → Kilo Code → OVHcloud, task-routed) — no single
+            // dependency, every engine has its own rate-limit budget.
             let content: string
             let didStream = false
             if (!hasUserProvider) {
               // Open a new assistant message bubble on the client
               send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
               try {
-                if (zaiStreamFailed) {
-                  throw new Error('Z.ai skipped — failed earlier in this request')
-                }
-                if (zaiOnCooldown()) {
-                  throw new Error('Z.ai skipped — circuit breaker cooldown')
-                }
-                content = await streamZaiChat(llmMessages, (delta) => {
-                  send({ type: 'assistant_delta', delta })
-                })
-                markZaiSuccess()
-              } catch (streamErr) {
-                // Z.ai stream failed (typically the global 429 rate limit).
-                // STREAMING anonymous fallback chain: LLM7.io → OVHcloud →
-                // Kilo Code — all OpenAI-compatible SSE endpoints that need
-                // no API key and have their OWN rate-limit budgets. The user
-                // keeps seeing token-by-token output — no visible difference.
-                zaiStreamFailed = true
-                const isSkip = streamErr instanceof Error && streamErr.message.startsWith('Z.ai skipped')
-                if (!isSkip) {
-                  markZaiFailure()
-                  console.error(
-                    '[api/chat] Z.ai stream failed, trying anonymous streaming fallback:',
-                    streamErr instanceof Error ? streamErr.message : streamErr
-                  )
-                }
-                let anonServed = false
-                try {
-                  const r = await streamAnonymousFallbackChat(
-                    llmMessages,
-                    (delta) => send({ type: 'assistant_delta', delta }),
-                    { maxTokens: 4000, timeoutMs: 60_000 }
-                  )
-                  content = r.content
-                  anonServed = true
-                  console.log(`[api/chat] anonymous streaming fallback served: ${r.providerId}/${r.model}`)
-                } catch (anonErr) {
-                  console.error(
-                    '[api/chat] anonymous streaming fallback failed:',
-                    anonErr instanceof Error ? anonErr.message : anonErr
-                  )
-                }
-                if (!anonServed) {
-                  // Last resort: non-streamed smartChat (user provider →
-                  // Z.ai → anonymous chain) and emit the visible prelude
-                  // as one chunk.
-                  content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
-                  // Emit only the visible prelude (text before any
-                  // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
-                  // peek-buffer behaviour of the normal streaming path.
-                  const prelude = stripToolCall(content)
-                  if (prelude) send({ type: 'assistant_delta', delta: prelude })
-                }
+                const r = await streamAnonymousFallbackChat(
+                  llmMessages,
+                  (delta) => send({ type: 'assistant_delta', delta }),
+                  { maxTokens: 4000, timeoutMs: 60_000, task: 'chat' }
+                )
+                content = r.content
+                console.log(`[api/chat] served by free AI pool: ${r.providerId}/${r.model}`)
+              } catch (poolErr) {
+                console.error(
+                  '[api/chat] free AI pool failed, trying non-streamed smartChat:',
+                  poolErr instanceof Error ? poolErr.message : poolErr
+                )
+                // Last resort: non-streamed smartChat (user provider →
+                // free pool chain) and emit the visible prelude as one chunk.
+                content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
+                // Emit only the visible prelude (text before any
+                // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
+                // peek-buffer behaviour of the normal streaming path.
+                const prelude = stripToolCall(content)
+                if (prelude) send({ type: 'assistant_delta', delta: prelude })
               }
               didStream = true
               if (!content.trim()) throw new Error('Empty model response.')

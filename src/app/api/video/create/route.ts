@@ -6,6 +6,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import { getZAI } from '@/lib/zai'
+import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { videoJobs, pruneVideoJobs, type VideoJob } from '@/lib/video-jobs'
 import { db } from '@/lib/db'
@@ -109,15 +110,10 @@ export async function POST(req: NextRequest) {
         /* ---- 1. Plan scenes ---- */
         job.status = 'planning'
         job.progress = 10
-        const zai = await getZAI()
-        const completion = await zai.chat.completions.create({
-          messages: [
-            { role: 'assistant', content: PLANNER_PROMPT },
-            { role: 'user', content: `Video request: ${prompt}\nVisual style: ${style}\nScenes: ${sceneCount}` },
-          ],
-          thinking: { type: 'disabled' },
-        })
-        const raw = completion.choices[0]?.message?.content ?? ''
+        const raw = await smartChat([
+          { role: 'assistant', content: PLANNER_PROMPT },
+          { role: 'user', content: `Video request: ${prompt}\nVisual style: ${style}\nScenes: ${sceneCount}` },
+        ], { maxTokens: 1500, task: 'fast' })
         const cleaned = raw.replace(/```(?:json)?/g, '').trim()
         const start = cleaned.indexOf('{')
         const end = cleaned.lastIndexOf('}')

@@ -1,23 +1,30 @@
 import { getActiveAiProvider, externalChatCompletion, anonymousFallbackChat, type ExternalChatMessage } from './ai-providers'
-import { getZAI, zaiOnCooldown, markZaiFailure, markZaiSuccess } from './zai'
+import type { AiTask } from './smart-chat-types'
 
 /**
- * SMART AI ROUTER — task-aware, multi-provider.
+ * MULTI-AI SMART ROUTER — task-aware, Z.ai-free.
  *
- * Specialized models per task (when user's providers are connected):
- *   - CODE tasks    → code-specialist models (Qwen Coder, DeepSeek Coder class)
- *   - REASONING     → large reasoning models (Nemotron 550B class)
- *   - CHAT/VOICE    → fast conversational models (GLM, Laguna class)
- *   - DOCUMENTS     → strong writers (Gemma class)
- *   - FAST/SHORT    → tiny instant models (LFM class)
+ * NEXUS runs on a POOL of free AI engines. Every task is routed to the
+ * models that do it best (specialist routing), and each provider has its
+ * own independent rate-limit budget — so the platform never depends on a
+ * single engine.
  *
- * Priority chain per task:
- *   1. Task's specialist model on user's provider
- *   2. General fallback models on user's provider
- *   3. Built-in Z.ai engine
+ * Engine pool (all verified live, no API keys required):
+ *   - LLM7.io     (mistral-Nemo, DeepSeek-V4-Flash, minimax-m2.7)
+ *   - OVHcloud    (Mistral-7B/Small, Qwen3-32B, Llama-3.3-70B)
+ *   - Kilo Code   (openrouter/free router, nemotron-550B, north-code)
+ * Plus any provider the user connected with their own key (OpenRouter,
+ * Groq, Gemini, Cohere, NVIDIA NIM, Ollama Cloud…) — those always go first.
+ *
+ * Task routing (which engine family gets which job):
+ *   CHAT/VOICE   → conversational models (mistral-Nemo class)
+ *   REASONING    → large reasoning models (nemotron-550B, minimax class)
+ *   DOCUMENTS    → strong writers (DeepSeek-V4-Flash class)
+ *   CODE         → code specialists (north-mini-code, Qwen class)
+ *   FAST         → tiny instant models (Mistral-7B, LFM class)
  */
 
-export type AiTask = 'chat' | 'voice' | 'code' | 'documents' | 'reasoning' | 'fast'
+export type { AiTask }
 
 export interface SmartChatOptions {
   maxTokens?: number
@@ -35,66 +42,6 @@ export interface SmartChatOptions {
  *  DeepSeek (when connected+funded) takes priority — it's the strongest direct API.
  *  OpenRouter free models are the fallback specialists. */
 const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
-  // ── Anonymous zero-key providers (added 2026-09 from awesome-free-llm-apis)
-  // When a user "connects" one of these as their primary, smart-chat picks
-  // task-appropriate models from this map before falling to anonymousFallbackChat.
-  llm7: {
-    code: ['DeepSeek-V4-Flash-0731', 'mistral-Nemo-Instruct-2407'],
-    reasoning: ['minimax-m2.7', 'DeepSeek-V4-Flash-0731'],
-    chat: ['mistral-Nemo-Instruct-2407'],
-    voice: ['mistral-Nemo-Instruct-2407'],
-    documents: ['DeepSeek-V4-Flash-0731', 'mistral-Nemo-Instruct-2407'],
-    fast: ['mistral-Nemo-Instruct-2407'],
-  },
-  ovhcloud: {
-    code: ['Qwen3-32B', 'Mistral-Small-3.2-24B-Instruct'],
-    reasoning: ['Meta-Llama-3_3-70B-Instruct', 'Qwen3-32B'],
-    chat: ['Mistral-7B-Instruct-v0.3', 'Mistral-Nemo-Instruct-2407'],
-    voice: ['Mistral-7B-Instruct-v0.3', 'Qwen3.5-9B'],
-    documents: ['Mistral-Small-3.2-24B-Instruct', 'Meta-Llama-3_3-70B-Instruct'],
-    fast: ['Mistral-7B-Instruct-v0.3', 'Qwen3.5-9B'],
-  },
-  kilocode: {
-    code: ['cohere/north-mini-code:free', 'liquid/lfm-2.5-2.6b:free'],
-    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free'],
-    chat: ['openrouter/free', 'liquid/lfm-2.5-2.6b:free'],
-    voice: ['liquid/lfm-2.5-2.6b:free'],
-    documents: ['openrouter/free', 'cohere/north-mini-code:free'],
-    fast: ['liquid/lfm-2.5-2.6b:free'],
-  },
-  // ── New free-key providers (added 2026-09 from awesome-free-llm-apis)
-  cohere: {
-    code: ['command-r-08-2024', 'command-a-03-2025'],
-    reasoning: ['command-a-03-2025', 'command-r-plus-08-2024'],
-    chat: ['command-r-08-2024', 'command-r7b-08-2024'],
-    voice: ['command-r7b-08-2024'],
-    documents: ['command-a-03-2025', 'command-r-plus-08-2024'],
-    fast: ['command-r7b-08-2024'],
-  },
-  cloudflare: {
-    code: ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
-    reasoning: ['@cf/openai/gpt-oss-120b', '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b'],
-    chat: ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/zai-org/glm-4.7-flash'],
-    voice: ['@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
-    documents: ['@cf/google/gemma-4-26b-a4b-it', '@cf/openai/gpt-oss-120b'],
-    fast: ['@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
-  },
-  nvidia: {
-    code: ['mistralai/mistral-large-2-instruct', 'meta/llama-3.3-70b-instruct'],
-    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-super-120b-a12b'],
-    chat: ['nvidia/nemotron-3-super-120b-a12b', 'meta/llama-3.3-70b-instruct'],
-    voice: ['openai/gpt-oss-20b', 'meta/llama-3.3-70b-instruct'],
-    documents: ['mistralai/mistral-large-2-instruct', 'nvidia/nemotron-3-super-120b-a12b'],
-    fast: ['openai/gpt-oss-20b'],
-  },
-  ollama: {
-    code: ['gpt-oss:120b', 'deepseek-v4-flash'],
-    reasoning: ['deepseek-v4-pro', 'mistral-large-3:675b'],
-    chat: ['deepseek-v4-flash', 'minimax-m3'],
-    voice: ['deepseek-v4-flash', 'gpt-oss:120b'],
-    documents: ['deepseek-v4-pro', 'kimi-k3'],
-    fast: ['deepseek-v4-flash'],
-  },
   deepseek: {
     code: ['deepseek-v4-flash', 'deepseek-chat'],
     reasoning: ['deepseek-reasoner', 'deepseek-v4-pro'],   // R1 = elite reasoning
@@ -145,6 +92,63 @@ const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
     documents: ['gpt-4o', 'gpt-4o-mini'],
     fast: ['gpt-4o-mini', 'gpt-3.5-turbo'],
   },
+  // New free-key providers (added 2026-09 from awesome-free-llm-apis)
+  llm7: {
+    code: ['DeepSeek-V4-Flash-0731', 'mistral-Nemo-Instruct-2407'],
+    reasoning: ['minimax-m2.7', 'DeepSeek-V4-Flash-0731'],
+    chat: ['mistral-Nemo-Instruct-2407'],
+    voice: ['mistral-Nemo-Instruct-2407'],
+    documents: ['DeepSeek-V4-Flash-0731', 'mistral-Nemo-Instruct-2407'],
+    fast: ['mistral-Nemo-Instruct-2407'],
+  },
+  ovhcloud: {
+    code: ['Qwen3-32B', 'Mistral-Small-3.2-24B-Instruct'],
+    reasoning: ['Meta-Llama-3_3-70B-Instruct', 'Qwen3-32B'],
+    chat: ['Mistral-7B-Instruct-v0.3', 'Mistral-Nemo-Instruct-2407'],
+    voice: ['Mistral-7B-Instruct-v0.3', 'Qwen3.5-9B'],
+    documents: ['Mistral-Small-3.2-24B-Instruct', 'Meta-Llama-3_3-70B-Instruct'],
+    fast: ['Mistral-7B-Instruct-v0.3', 'Qwen3.5-9B'],
+  },
+  kilocode: {
+    code: ['cohere/north-mini-code:free', 'liquid/lfm-2.5-2.6b:free'],
+    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free'],
+    chat: ['openrouter/free', 'liquid/lfm-2.5-2.6b:free'],
+    voice: ['liquid/lfm-2.5-2.6b:free'],
+    documents: ['openrouter/free', 'cohere/north-mini-code:free'],
+    fast: ['liquid/lfm-2.5-2.6b:free'],
+  },
+  cohere: {
+    code: ['command-r-08-2024', 'command-a-03-2025'],
+    reasoning: ['command-a-03-2025', 'command-r-plus-08-2024'],
+    chat: ['command-r-08-2024', 'command-r7b-08-2024'],
+    voice: ['command-r7b-08-2024'],
+    documents: ['command-a-03-2025', 'command-r-plus-08-2024'],
+    fast: ['command-r7b-08-2024'],
+  },
+  cloudflare: {
+    code: ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+    reasoning: ['@cf/openai/gpt-oss-120b', '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b'],
+    chat: ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/zai-org/glm-4.7-flash'],
+    voice: ['@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+    documents: ['@cf/google/gemma-4-26b-a4b-it', '@cf/openai/gpt-oss-120b'],
+    fast: ['@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+  },
+  nvidia: {
+    code: ['mistralai/mistral-large-2-instruct', 'meta/llama-3.3-70b-instruct'],
+    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-super-120b-a12b'],
+    chat: ['nvidia/nemotron-3-super-120b-a12b', 'meta/llama-3.3-70b-instruct'],
+    voice: ['openai/gpt-oss-20b', 'meta/llama-3.3-70b-instruct'],
+    documents: ['mistralai/mistral-large-2-instruct', 'nvidia/nemotron-3-super-120b-a12b'],
+    fast: ['openai/gpt-oss-20b'],
+  },
+  ollama: {
+    code: ['gpt-oss:120b', 'deepseek-v4-flash'],
+    reasoning: ['deepseek-v4-pro', 'mistral-large-3:675b'],
+    chat: ['deepseek-v4-flash', 'minimax-m3'],
+    voice: ['deepseek-v4-flash', 'gpt-oss:120b'],
+    documents: ['deepseek-v4-pro', 'kimi-k3'],
+    fast: ['deepseek-v4-flash'],
+  },
 }
 
 const TASK_SPECIALISTS: Record<AiTask, string[]> = TASK_SPECIALISTS_BY_PROVIDER.openrouter
@@ -153,20 +157,15 @@ export async function smartChat(
   messages: ExternalChatMessage[] | Array<{ role: string; content: string }>,
   opts: SmartChatOptions = {}
 ): Promise<string> {
-  // Bug 1 fix (Phase 0): destructure `task` with a default so the bare
-  // `task` references at line 99 resolve to a real variable instead of
-  // throwing ReferenceError on every custom-provider request.
   const { maxTokens = 4000, temperature = 0.7, builtinOnly = false, task = 'chat' } = opts
-  // Bug F: voice turns must feel live — cap each model attempt at 15s and try at
-  // most 2 models (vs 4 for other tasks). Non-voice behaviour is unchanged.
   const isVoiceTask = task === 'voice'
   const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
   const maxModelAttempts = isVoiceTask ? 2 : 4
 
+  /* ---- Layer 1: the user's connected provider (their key, their quota) ---- */
   if (!builtinOnly) {
     const provider = await getActiveAiProvider()
     if (provider) {
-      // Task-aware model selection: provider-specific specialists first
       const providerSpecialists = TASK_SPECIALISTS_BY_PROVIDER[provider.providerId]
       const specialists = (providerSpecialists?.[task] ?? TASK_SPECIALISTS[task]) ?? TASK_SPECIALISTS.chat
       const models =
@@ -187,65 +186,36 @@ export async function smartChat(
           if (content.trim()) return content
         } catch (err) {
           lastError = err
-          // 429/402/403 → try next model; other errors → break to builtin
           const msg = err instanceof Error ? err.message : ''
-          // Rate limits, budget errors, and generic upstream provider errors
-          // all warrant trying the next model
           if (/429|402|403|rate|budget|provider returned error|temporarily/i.test(msg)) continue
           break
         }
       }
       if (lastError) {
-        console.error('[smartChat] user provider failed, falling back to built-in:', lastError)
+        console.error('[smartChat] user provider failed, using the free AI pool:', lastError)
       }
     }
   }
 
-  // Built-in Z.ai engine (our quota) — circuit breaker skips it while the
-  // rate-limit cooldown is active so requests don't pay the failed-attempt
-  // latency on every turn during a 429 storm.
-  if (!zaiOnCooldown()) {
-    try {
-      const zai = await getZAI()
-      const completion = await zai.chat.completions.create({
-        messages: messages.map((m) => ({ role: m.role as any, content: m.content })),
-        thinking: { type: 'disabled' },
-      })
-      const content = completion.choices[0]?.message?.content
-      if (content?.trim()) {
-        markZaiSuccess()
-        return content
-      }
-    } catch (err) {
-      markZaiFailure()
-      console.error('[smartChat] Z.ai engine failed, trying anonymous fallbacks:', err instanceof Error ? err.message : err)
-    }
-  } else {
-    console.log('[smartChat] Z.ai on cooldown — going straight to anonymous fallbacks')
-  }
-
-  // ANONYMOUS FREE-LLM FALLBACK CHAIN (NEW 2026-09)
-  // Last-resort layer: LLM7.io → OVHcloud → Kilo Code. No API key, no
-  // signup — every endpoint is verified live and OpenAI-compatible.
-  // This is what makes NEXUS keep working even when:
-  //   - the user has no connected provider
-  //   - the connected provider hit a 429
-  //   - the built-in Z.ai engine ALSO hit a 429
-  // The chain multiplies per-IP free capacity across three providers.
-  // Voice tasks get a tighter timeout so mic turns feel live.
-  const anonTimeout = isVoiceTask ? 15_000 : 30_000
+  /* ---- Layer 2: the free multi-AI pool (task-routed, Z.ai-free) ----
+   * anonymousFallbackChat routes per task:
+   *   chat/voice → LLM7 first (fast conversational)
+   *   reasoning/documents/code → Kilo first (big reasoning/writer/code models)
+   *   fast → OVH first (tiny instant models)
+   * Every engine has its own rate-limit budget. */
+  const anonTimeout = isVoiceTask ? 15_000 : 45_000
   try {
-    const { content: anonContent, providerId, model } = await anonymousFallbackChat(
+    const { content, providerId, model } = await anonymousFallbackChat(
       messages as ExternalChatMessage[],
-      { maxTokens, timeoutMs: anonTimeout }
+      { maxTokens, timeoutMs: anonTimeout, task }
     )
-    if (anonContent.trim()) {
-      console.log(`[smartChat] anonymous fallback served: ${providerId}/${model}`)
-      return anonContent
+    if (content.trim()) {
+      console.log(`[smartChat] served by free AI pool: ${providerId}/${model} (task: ${task})`)
+      return content
     }
   } catch (err) {
-    console.error('[smartChat] anonymous fallbacks exhausted:', err instanceof Error ? err.message : err)
+    console.error('[smartChat] free AI pool exhausted:', err instanceof Error ? err.message : err)
   }
 
-  throw new Error('All AI providers (Z.ai + anonymous fallbacks) returned empty responses.')
+  throw new Error('All AI engines are busy right now. Please try again in a moment.')
 }
