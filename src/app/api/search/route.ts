@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { getZAI } from '@/lib/zai'
+import { smartChat } from '@/lib/smart-chat'
+import { freeWebSearch } from '@/lib/web-access'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 interface SearchItem {
@@ -36,13 +37,21 @@ export async function POST(req: NextRequest) {
     const trimmedQuery = parsed.data.query.trim()
     const summarize = parsed.data.summarize
 
-    const zai = await getZAI()
-    const results = (await zai.functions.invoke('web_search', {
-      query: trimmedQuery,
-      num: 8,
-    })) as SearchItem[]
+    // FREE WEB ACCESS CHAIN — Brave → DuckDuckGo → Wikipedia → Z.ai
+    // (replaces the Z.ai-only search that 429s during quota storms)
+    const results = await freeWebSearch(trimmedQuery, 8)
 
-    if (!Array.isArray(results) || results.length === 0) {
+    const mapped: SearchItem[] = results.map((r) => ({
+      url: r.url,
+      name: r.title,
+      snippet: r.snippet,
+      host_name: r.host_name,
+      rank: r.rank,
+      date: r.date,
+      favicon: r.favicon,
+    }))
+
+    if (mapped.length === 0) {
       return NextResponse.json({
         results: [],
         summary: '',
@@ -50,17 +59,19 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Optional AI summary of the top results
+    // Optional AI summary of the top results — smartChat chains through
+    // the anonymous free-LLM fallbacks when Z.ai is rate-limited, so the
+    // summary keeps working during a 429 storm too.
     let summary = ''
     if (summarize) {
       try {
-        const context = results
+        const context = mapped
           .slice(0, 6)
           .map((r, i) => `[${i + 1}] ${r.name} (${r.host_name})\n${r.snippet}`)
           .join('\n\n')
 
-        const completion = await zai.chat.completions.create({
-          messages: [
+        summary = await smartChat(
+          [
             {
               role: 'assistant',
               content:
@@ -73,15 +84,15 @@ export async function POST(req: NextRequest) {
               content: `Query: "${trimmedQuery}"\n\nSearch results:\n${context}\n\nWrite the digest.`,
             },
           ],
-          thinking: { type: 'disabled' },
-        })
-        summary = completion.choices[0]?.message?.content?.trim() ?? ''
+          { maxTokens: 700, task: 'fast' }
+        )
+        summary = summary.trim()
       } catch (err) {
         console.error('[api/search] summary failed:', err)
       }
     }
 
-    return NextResponse.json({ results, summary })
+    return NextResponse.json({ results: mapped, summary })
   } catch (error) {
     console.error('[api/search] POST error:', error)
     const message =

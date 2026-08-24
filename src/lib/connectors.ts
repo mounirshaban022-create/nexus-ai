@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { getZAI } from './zai'
+import { freeWebSearch, readPageSmart, wikipediaSearch } from './web-access'
 import { getPrimaryAccount, listEmails, searchEmails, readEmail, sendEmail } from './email'
 
 /* ------------------------------------------------------------------ */
@@ -140,38 +141,10 @@ export interface ConnectorDefinition {
 
 const IMAGES_DIR = path.join(process.cwd(), 'generated-images')
 
-/** Blocks requests to private/internal networks (SSRF guard). */
-export function assertPublicUrl(rawUrl: string): URL {
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl)
-  } catch {
-    throw new Error('Invalid URL')
-  }
-  if (!/^https?:$/.test(parsed.protocol)) {
-    throw new Error('Only http(s) URLs are allowed')
-  }
-  const host = parsed.hostname.toLowerCase()
-  const privatePatterns = [
-    /^localhost$/i,
-    /^127\./,
-    /^10\./,
-    /^192\.168\./,
-    /^172\.(1[6-9]|2\d|3[01])\./,
-    /^169\.254\./,
-    /^0\./,
-    /^\[?::1\]?$/,
-    /^\[?fc00:/,
-    /^\[?fe80:/,
-    /^\[?fd/i,
-    /\.internal$/i,
-    /\.local$/i,
-  ]
-  if (privatePatterns.some((re) => re.test(host))) {
-    throw new Error('Requests to internal/private addresses are blocked')
-  }
-  return parsed
-}
+/** Blocks requests to private/internal networks (SSRF guard).
+ *  Shared implementation lives in ./safe-url (re-exported for backwards
+ *  compatibility with existing imports). */
+export { assertPublicUrl } from './safe-url'
 
 async function fetchJson(url: string, timeoutMs = 15000): Promise<unknown> {
   const controller = new AbortController()
@@ -224,15 +197,13 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { query: 'latest AI news' },
     execute: async (args) => {
-      const zai = await getZAI()
-      const results = (await zai.functions.invoke('web_search', {
-        query: String(args.query),
-        num: 6,
-      })) as Array<{ url: string; name: string; snippet: string; host_name?: string; date?: string }>
-      if (!Array.isArray(results)) return { results: [] }
+      // FREE WEB ACCESS CHAIN (replaces Z.ai web_search — bypasses 429s):
+      // Brave Search → DuckDuckGo → Wikipedia → Z.ai (last resort).
+      // Every provider is keyless with its own rate-limit budget.
+      const results = await freeWebSearch(String(args.query), 6)
       return {
         results: results.map((r) => ({
-          title: r.name,
+          title: r.title,
           url: r.url,
           snippet: r.snippet,
           source: r.host_name,
@@ -259,22 +230,13 @@ export const CONNECTORS: ConnectorDefinition[] = [
       if (!/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(parsed.hostname)) {
         throw new Error('Invalid hostname')
       }
-      const zai = await getZAI()
-      const result = (await zai.functions.invoke('page_reader', { url: parsed.toString() })) as {
-        data?: { title?: string; html?: string; url?: string; publishedTime?: string }
-      }
-      const data = result?.data ?? {}
-      const text = (data.html ?? '')
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/\s+/g, ' ')
-        .trim()
-      return truncateForLlm({ title: data.title ?? parsed.hostname, url: data.url ?? url, text: text.slice(0, 6000) }, 6500)
+      // SMART PAGE READER (replaces Z.ai page_reader): direct fetch first
+      // (no quota), Z.ai reader as fallback for JS-rendered pages.
+      const page = await readPageSmart(parsed.toString())
+      return truncateForLlm(
+        { title: page.title, url: page.url, text: page.text.slice(0, 6000) },
+        6500
+      )
     },
   },
   {
@@ -297,38 +259,23 @@ export const CONNECTORS: ConnectorDefinition[] = [
         .join('_')
       const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(slug)}`
 
-      // Wikipedia blocks some HTTP clients (TLS fingerprinting), so we go
-      // through the page reader service, which fetches reliably.
+      // Direct fetch (keyless, no Z.ai dependency — verified live).
+      // Wikipedia serves full HTML to plain HTTP clients with a browser UA.
       try {
-        const zai = await getZAI()
-        const result = (await zai.functions.invoke('page_reader', { url: wikiUrl })) as {
-          data?: { title?: string; html?: string }
-        }
-        const html = result?.data?.html ?? ''
-        const text = html
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]*>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&amp;/g, '&')
-          .replace(/\s+/g, ' ')
-          .trim()
-        if (text.length > 200) {
-          return { title: result?.data?.title ?? topic, url: wikiUrl, extract: text.slice(0, 4500) }
+        const page = await readPageSmart(wikiUrl)
+        if (page.text.length > 200) {
+          return { title: page.title, url: wikiUrl, extract: page.text.slice(0, 4500) }
         }
       } catch {
         /* fall through to search */
       }
 
-      // Fallback: find the right article via web search
-      const zai = await getZAI()
-      const results = (await zai.functions.invoke('web_search', {
-        query: `${topic} wikipedia`,
-        num: 3,
-      })) as Array<{ url: string; name: string; snippet: string }>
+      // Fallback: find the right article via the Wikipedia search API
+      // (also keyless — part of the free web-access chain)
+      const results = await wikipediaSearch(topic, 3)
       return {
-        results: (Array.isArray(results) ? results : []).map((r) => ({
-          title: r.name,
+        results: results.map((r) => ({
+          title: r.title,
           url: r.url,
           snippet: r.snippet,
         })),

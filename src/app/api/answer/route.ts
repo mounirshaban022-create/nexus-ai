@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { getZAI } from '@/lib/zai'
+import { smartChat } from '@/lib/smart-chat'
+import { freeWebSearch } from '@/lib/web-access'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 /**
@@ -114,20 +115,22 @@ function extractJsonArray(text: string): unknown[] | null {
   }
 }
 
-type ZaiInstance = Awaited<ReturnType<typeof getZAI>>
+/* (LLM calls now go through smartChat — provider chain with anonymous
+   free-LLM fallbacks — so no ZaiInstance handle is needed here.) */
 
 /* ------------------------------------------------------------------ */
 /* STAGE 1 — PLAN                                                     */
 /* ------------------------------------------------------------------ */
 
 async function planSubQuestions(
-  zai: ZaiInstance,
   query: string,
   mode: 'quick' | 'pro'
 ): Promise<PlanStep[]> {
   const target = mode === 'quick' ? '2' : '3 to 4'
-  const completion = await zai.chat.completions.create({
-    messages: [
+  // smartChat chains: user provider → Z.ai → anonymous free-LLM gateways,
+  // so planning keeps working during a Z.ai 429 storm.
+  const raw = await smartChat(
+    [
       {
         role: 'assistant',
         content:
@@ -139,9 +142,8 @@ async function planSubQuestions(
       },
       { role: 'user', content: query.slice(0, 2000) },
     ],
-    thinking: { type: 'disabled' },
-  })
-  const raw = completion.choices[0]?.message?.content ?? ''
+    { maxTokens: 500, task: 'fast' }
+  )
   const cleaned = raw
     .replace(/```(?:json)?/gi, '')
     .trim()
@@ -169,7 +171,6 @@ async function planSubQuestions(
 /* ------------------------------------------------------------------ */
 
 async function synthesizeAnswer(
-  zai: ZaiInstance,
   query: string,
   sources: SourceEntry[],
   pageTexts: Map<string, PageData>,
@@ -205,22 +206,25 @@ async function synthesizeAnswer(
         '\n[additional sources truncated due to length]'
       : joined
 
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: 'assistant',
-        content:
-          'You are NEXUS Answer. Using ONLY the retrieved sources below, write a comprehensive answer in Markdown. ' +
-          'Cite every factual claim with inline [N] markers mapping to the source numbers. ' +
-          'If email sources are present, cite them as [E1], [E2], etc. ' +
-          'If sources conflict, note it. If you cannot answer from sources, say so. ' +
-          'End with a one-line takeaway prefixed with "Takeaway:".',
-      },
-      { role: 'user', content: context },
-    ],
-    thinking: { type: 'disabled' },
-  })
-  return (completion.choices[0]?.message?.content ?? '').trim()
+  // smartChat: keeps synthesis alive during Z.ai 429 storms via the
+  // anonymous free-LLM fallback chain.
+  return (
+    await smartChat(
+      [
+        {
+          role: 'assistant',
+          content:
+            'You are NEXUS Answer. Using ONLY the retrieved sources below, write a comprehensive answer in Markdown. ' +
+            'Cite every factual claim with inline [N] markers mapping to the source numbers. ' +
+            'If email sources are present, cite them as [E1], [E2], etc. ' +
+            'If sources conflict, note it. If you cannot answer from sources, say so. ' +
+            'End with a one-line takeaway prefixed with "Takeaway:".',
+        },
+        { role: 'user', content: context },
+      ],
+      { maxTokens: 3000, task: 'documents' }
+    )
+  ).trim()
 }
 
 /* ------------------------------------------------------------------ */
@@ -228,12 +232,11 @@ async function synthesizeAnswer(
 /* ------------------------------------------------------------------ */
 
 async function generateFollowups(
-  zai: ZaiInstance,
   query: string,
   answer: string
 ): Promise<string[]> {
-  const completion = await zai.chat.completions.create({
-    messages: [
+  const raw = await smartChat(
+    [
       {
         role: 'assistant',
         content:
@@ -246,9 +249,8 @@ async function generateFollowups(
         content: `Question: ${query}\n\nAnswer:\n${answer.slice(0, 4000)}`,
       },
     ],
-    thinking: { type: 'disabled' },
-  })
-  const raw = completion.choices[0]?.message?.content ?? ''
+    { maxTokens: 300, task: 'fast' }
+  )
   const cleaned = raw.replace(/```(?:json)?/gi, '').trim()
   const arr = extractJsonArray(cleaned)
   if (!arr) return []
@@ -281,8 +283,6 @@ export async function POST(req: NextRequest) {
   }
   const { query, mode, includeEmail } = parsed.data
 
-  const zai = await getZAI()
-
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -309,7 +309,7 @@ export async function POST(req: NextRequest) {
         /* ---------------- STAGE 1: PLAN ---------------- */
         let plan: PlanStep[] = []
         try {
-          plan = await planSubQuestions(zai, query, mode)
+          plan = await planSubQuestions(query, mode)
         } catch (err) {
           console.error('[api/answer] plan failed:', err)
         }
@@ -366,11 +366,19 @@ export async function POST(req: NextRequest) {
           plan.map(async (step) => {
             send({ type: 'search_start', stepId: step.id })
             try {
-              const results = (await zai.functions.invoke('web_search', {
-                query: step.query,
-                num: 5,
-              })) as RawSearchItem[]
-              const safe = Array.isArray(results) ? results : []
+              // FREE WEB ACCESS CHAIN — Brave → DuckDuckGo → Wikipedia →
+              // Z.ai (last resort). Independent rate-limit budgets per
+              // provider keep deep research alive during Z.ai 429 storms.
+              const freeResults = await freeWebSearch(step.query, 5)
+              const safe: RawSearchItem[] = freeResults.map((r) => ({
+                url: r.url,
+                name: r.title,
+                snippet: r.snippet,
+                host_name: r.host_name,
+                rank: r.rank,
+                date: r.date,
+                favicon: r.favicon,
+              }))
               searchResults.push({ step, results: safe })
               send({
                 type: 'search_done',
@@ -519,7 +527,6 @@ export async function POST(req: NextRequest) {
               'Takeaway: No sources retrieved — try again or rephrase.'
           } else {
             answer = await synthesizeAnswer(
-              zai,
               query,
               allSources,
               pageTexts,
@@ -548,7 +555,7 @@ export async function POST(req: NextRequest) {
         /* ---------------- STAGE 6: FOLLOW-UPS ---------------- */
         let followups: string[] = []
         try {
-          followups = await generateFollowups(zai, query, answer)
+          followups = await generateFollowups(query, answer)
         } catch (err) {
           console.error('[api/answer] followups failed:', err)
         }
