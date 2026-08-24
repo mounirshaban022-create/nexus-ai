@@ -118,17 +118,56 @@ export async function POST(req: NextRequest) {
       const result = await extractRawText({ buffer })
       text = result.value
     } else if (format === 'xlsx') {
+      // CLAUDE-LEVEL EXCEL PARSING: every sheet becomes a proper markdown
+      // table with a detected header row — LLMs reason about markdown
+      // tables far better than pipe-joined lines. Numbers keep their
+      // formatting; sheets get row counts; multi-sheet docs get an index.
       const XLSX = await import('xlsx')
       const wb = XLSX.read(buffer, { type: 'buffer' })
       metadata.sheetNames = wb.SheetNames
       const parts: string[] = []
+      if (wb.SheetNames.length > 1) {
+        parts.push(`*Workbook with ${wb.SheetNames.length} sheets: ${wb.SheetNames.join(', ')}.*`)
+      }
       for (const name of wb.SheetNames) {
-        const rows = XLSX.utils.sheet_to_json<string[]>(wb.Sheets[name], { header: 1, raw: false })
-        if (rows.length > 0) {
-          parts.push(`## Sheet: ${name}\n${rows.map((r) => r.join(' | ')).join('\n')}`)
-          if (rows.length > 1) {
-            tables.push({ caption: name, rows: rows.slice(0, 20).map((r) => r.map(String)) })
-          }
+        const sheet = wb.Sheets[name]
+        const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
+        const totalRows = range ? range.e.r - range.s.r + 1 : 0
+        const rows = XLSX.utils.sheet_to_json<string[]>(sheet, {
+          header: 1,
+          raw: false,
+          defval: '',
+        })
+        if (rows.length === 0) continue
+
+        // Markdown table with the first row as header
+        const maxCols = Math.min(
+          30,
+          Math.max(...rows.slice(0, 12).map((r) => r.length), 1)
+        )
+        const norm = (r: string[]) => {
+          const out = [...r.map((c) => String(c ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ').trim())]
+          while (out.length < maxCols) out.push('')
+          return out.slice(0, maxCols)
+        }
+        const [header, ...body] = rows.map(norm)
+        // Avoid empty all-"_" headers when the sheet has no header row
+        const headerCells = header.map((h, i) => h || `Col ${i + 1}`)
+        const mdTable: string[] = [
+          `## Sheet: ${name}${totalRows ? ` (${totalRows} rows)` : ''}`,
+          '',
+          `| ${headerCells.join(' | ')} |`,
+          `| ${headerCells.map(() => '---').join(' | ')} |`,
+        ]
+        for (const row of body.slice(0, 200)) {
+          mdTable.push(`| ${row.join(' | ')} |`)
+        }
+        if (body.length > 200) {
+          mdTable.push(`*…and ${body.length - 200} more rows*`)
+        }
+        parts.push(mdTable.join('\n'))
+        if (rows.length > 1) {
+          tables.push({ caption: name, rows: rows.slice(0, 20).map((r) => r.map(String)) })
         }
       }
       text = parts.join('\n\n')

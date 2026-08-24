@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "NEXUS AI" }],
   icons: {
-    icon: "/nexus-logo.svg",
+    icon: "/nexus-mark.png",
   },
   openGraph: {
     title: "NEXUS AI — One AI. Infinite connections.",

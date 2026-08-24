@@ -105,6 +105,13 @@ const CHAT_TOOL_DEFS: Array<{
       'operation (required: rotate|removePages|rearrange|split|watermark|singlePage|toHtml|toImages), params (object with the operation\'s options: angle for rotate; pageNumbers like "1,3-5" for removePages; newPageOrder like "3,1,2" for rearrange; pages for split; watermarkText/fontSize/opacity/rotation for watermark)',
   },
   {
+    id: 'create_spreadsheet',
+    description:
+      'Create a real Excel (.xlsx) spreadsheet from structured data you provide — with headers, typed cells, number formatting and SUM/AVG formulas. Use when the user wants a spreadsheet, budget, tracker, data table, or asks to convert document data into Excel.',
+    params:
+      'title (required), sheets (required: JSON array of {name, headers: string[], rows: (string|number)[][], formulas: optional array of {row, col, formula} to add live formulas like SUM/AVERAGE})',
+  },
+  {
     id: 'run_code',
     description:
       'Execute JavaScript or Python code in a sandbox and return stdout/stderr. Use for calculations, data processing, demonstrations.',
@@ -268,7 +275,8 @@ function buildSystemPrompt(
     '   - Use markdown only when it earns its keep. For plain conversational replies, plain text is fine.',
     languageInstruction,
     '7. THINK BEFORE ACTING: for multi-step requests, plan which tools to use in which order.',
-    '8. DOCUMENTS & PDFs: when the user attached a document (its content appears in the conversation), answer questions about it directly. If they ask to EDIT/CHANGE/REWRITE it, call edit_document with clear instructions. If they ask for PDF operations (rotate/delete/reorder/split/watermark pages), call pdf_operation. If they attach a file with no question, give a brief summary and offer next steps.',
+    '8. DOCUMENTS, PDFs & SPREADSHEETS: when the user attached a document (content appears in the conversation), answer questions about it directly — for spreadsheets, reason over the markdown tables (sums, trends, comparisons). If they ask to EDIT/CHANGE/REWRITE a document, call edit_document. If they ask for PDF operations (rotate/delete/reorder/split/watermark pages), call pdf_operation. If they want a spreadsheet, budget, tracker, or tabular data as Excel, call create_spreadsheet with typed cells and formulas. When asked to analyze data in an attached spreadsheet, compute the actual numbers (use run_code for anything non-trivial) — never guess.',
+    '9. When you attach or create a file, ALWAYS present the download link clearly and briefly describe what you produced.',
   ].join('\n')
 }
 
@@ -675,6 +683,90 @@ async function executeChatTool(
     }
   }
 
+  if (toolId === 'create_spreadsheet') {
+    // AI-GENERATED EXCEL: typed cells, headers, number formats + live formulas.
+    const title = String(args.title ?? 'Spreadsheet').slice(0, 120)
+    const sheetsArg = args.sheets
+    if (!Array.isArray(sheetsArg) || sheetsArg.length === 0) {
+      throw new Error('sheets required: [{ name, headers, rows }]')
+    }
+
+    const XLSX = await import('xlsx')
+    const wb = XLSX.utils.book_new()
+    const usedNames = new Set<string>()
+    for (const raw of sheetsArg.slice(0, 10)) {
+      const sheet = raw as {
+        name?: string
+        headers?: unknown[]
+        rows?: unknown[][]
+        formulas?: Array<{ row: number; col: number; formula: string }>
+      }
+      const headers = (sheet.headers ?? []).map((h) => String(h ?? ''))
+      const rows = (sheet.rows ?? []).map((r) =>
+        (Array.isArray(r) ? r : []).map((c) => {
+          if (typeof c === 'number') return c
+          const s = String(c ?? '')
+          return s !== '' && !Number.isNaN(Number(s)) ? Number(s) : s
+        })
+      )
+      // Live formulas (e.g. {row: 10, col: 2, formula: "=SUM(B2:B9)"})
+      const formulas = Array.isArray(sheet.formulas) ? sheet.formulas : []
+      const data = [headers, ...rows]
+      for (const f of formulas.slice(0, 50)) {
+        const r = Number(f.row)
+        const c = Number(f.col)
+        if (Number.isFinite(r) && Number.isFinite(c) && r >= 0 && c >= 0) {
+          while (data.length <= r) data.push([])
+          const rowArr = data[r] as unknown[]
+          while (rowArr.length <= c) rowArr.push('')
+          rowArr[c] = String(f.formula ?? '').startsWith('=') ? f.formula : `=${f.formula}`
+        }
+      }
+      let name = String(sheet.name ?? 'Sheet').slice(0, 28) || 'Sheet'
+      let n = 2
+      while (usedNames.has(name)) name = `${String(sheet.name ?? 'Sheet').slice(0, 25)}_${n++}`
+      usedNames.add(name)
+      const ws = XLSX.utils.aoa_to_sheet(data)
+      // Column widths sized to content (cap 40)
+      const cols = Math.max(headers.length, ...rows.map((r) => r.length), 1)
+      ws['!cols'] = Array.from({ length: cols }, (_, i) => ({
+        wch: Math.min(
+          40,
+          Math.max(
+            10,
+            ...data.slice(0, 40).map((row) => String((row as unknown[])[i] ?? '').length + 2)
+          )
+        ),
+      }))
+      XLSX.utils.book_append_sheet(wb, ws, name)
+    }
+
+    // Save + serve through the shared file route
+    const { randomUUID } = await import('crypto')
+    const { mkdir, writeFile } = await import('fs/promises')
+    const pathMod = await import('path')
+    const dir = pathMod.join(process.cwd(), 'generated-images')
+    await mkdir(dir, { recursive: true })
+    const id = randomUUID()
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    await writeFile(pathMod.join(dir, `${id}.xlsx`), buffer)
+
+    return {
+      result: {
+        downloadUrl: `/api/office/file/${id}?download=1&title=${encodeURIComponent(title)}`,
+        format: 'xlsx',
+        note: 'Spreadsheet created with real data and formulas — give the user the download link.',
+      },
+      attachment: {
+        type: 'document',
+        url: `/api/office/file/${id}?download=1&title=${encodeURIComponent(title)}`,
+        title,
+        format: 'xlsx',
+        size: buffer.byteLength,
+      },
+    }
+  }
+
   if (toolId === 'run_code') {
     const language = String(args.language ?? 'javascript').toLowerCase()
     const code = String(args.code ?? '')
@@ -791,11 +883,15 @@ export async function POST(req: NextRequest) {
             dataUrl: attachment.dataUrl,
           }
           const pageCount = doc.metadata?.pages ? ` (${doc.metadata.pages} pages)` : ''
+          const sheetInfo = Array.isArray(doc.metadata?.sheetNames) && doc.metadata.sheetNames.length > 0
+            ? ` (${doc.metadata.sheetNames.length} sheets: ${doc.metadata.sheetNames.join(', ')})`
+            : ''
           attachmentContextMessage =
-            `[The user attached the document "${attachment.filename}"${pageCount}. Its full parsed content is below.\n\n` +
+            `[The user attached the document "${attachment.filename}"${pageCount}${sheetInfo}. Its full parsed content is below — spreadsheet sheets appear as markdown tables.\n\n` +
             `DOCUMENT "${activeDoc.title}":\n${activeDoc.text.slice(0, 24000)}\n` +
-            `You can answer questions about this document directly from its content. If the user asks to EDIT/CHANGE/REWRITE the document, use the edit_document tool. ` +
-            `${fmt === 'pdf' ? 'If the user asks for PDF operations (rotate/delete pages/reorder/split/watermark etc.), use the pdf_operation tool.' : ''}]`
+            `You can answer questions about this document directly from its content (for spreadsheet data, compute real numbers — use run_code for calculations). If the user asks to EDIT/CHANGE/REWRITE the document, use the edit_document tool. ` +
+            `${fmt === 'pdf' ? 'If the user asks for PDF operations (rotate/delete pages/reorder/split/watermark etc.), use the pdf_operation tool. ' : ''}` +
+            `If they want this data as an Excel file, use create_spreadsheet.]`
           console.log(`[api/chat] attachment parsed: ${attachment.filename} (${fmt}, ${activeDoc.text.length} chars)`)
         }
       } catch (attErr) {

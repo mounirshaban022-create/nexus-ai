@@ -810,17 +810,17 @@ function NexusApp() {
               onScroll={handleConversationScroll}
               className="omni-scroll flex-1 overflow-y-auto"
             >
-                <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:py-6">
+                <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:py-8">
                   {/* Empty state — compact on mobile so the bottom nav stays
                       visible without the page scrolling past the viewport. */}
                   {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-6 sm:py-10">
-                      {/* Static hero (removed infinite-y bobble + blur-2xl pulse to
-                          cut layout thrash on mobile that contributed to "freezes"). */}
-                      <div className="relative mb-4 sm:mb-5">
-                        <Image src="/nexus-onboarding-hero.png" alt="Nexus" width={140} height={93} className="h-16 sm:h-20 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50" />
+                    <div className="flex flex-col items-center justify-center py-8 sm:py-14">
+                      {/* Premium app-icon mark with a soft brand glow */}
+                      <div className="relative mb-5 sm:mb-6">
+                        <div aria-hidden className="absolute inset-0 -z-10 scale-150 rounded-full bg-primary/15 blur-2xl" />
+                        <Image src="/nexus-mark.png" alt="Nexus" width={72} height={72} priority className="h-14 w-14 sm:h-16 sm:w-16 rounded-[1.25rem] shadow-lg shadow-primary/20 ring-1 ring-black/5" />
                       </div>
-                      <h1 className="text-2xl sm:text-[28px] leading-tight font-semibold tracking-tight text-center">
+                      <h1 className="text-[26px] sm:text-3xl leading-tight font-semibold tracking-tight text-center">
                         {displayName !== 'Guest' ? (
                           language === 'ar'
                             ? <>{tr.emptyTitleUser} <span className="text-brand-gradient">{displayName.split(' ')[0]}</span>، بمَ يمكنني مساعدتك؟</>
@@ -831,16 +831,15 @@ function NexusApp() {
                             : <>{tr.emptyTitleGuest} <span className="text-brand-gradient">Nexus</span> help with?</>
                         )}
                       </h1>
-                      <p className="mt-2 sm:mt-3 text-sm text-muted-foreground text-center">{tr.emptyHelp}</p>
-                      <div className="mt-5 sm:mt-6 h-px w-12 bg-border" aria-hidden />
-                      <div className="mt-4 sm:mt-6 grid w-full max-w-2xl grid-cols-2 gap-2 sm:gap-3">
+                      <p className="mt-2.5 sm:mt-3 text-[13px] sm:text-sm text-muted-foreground/90 text-center max-w-md">{tr.emptyHelp}</p>
+                      <div className="mt-6 sm:mt-8 grid w-full max-w-2xl grid-cols-2 gap-2.5 sm:gap-3">
                         {SUGGESTIONS.map((s, i) => {
                           const Icon = s.icon
                           return (
                             <button
                               key={s.title}
                               onClick={() => send(s.title)}
-                              className="group flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl border border-border bg-card p-3 sm:p-3.5 text-left transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
+                              className="group flex items-start gap-2.5 sm:gap-3 rounded-2xl border border-border/80 bg-card/80 p-3.5 sm:p-4 text-left backdrop-blur-sm transition-all duration-200 hover:border-primary/35 hover:bg-card hover:shadow-lg hover:shadow-primary/[0.06] active:scale-[0.98]"
                             >
                               <span className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-primary/10 text-primary">
                                 <Icon className="h-4 w-4" aria-hidden />
@@ -856,11 +855,11 @@ function NexusApp() {
                     </div>
                   )}
                   {/* Messages */}
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-5 sm:gap-7">
                     {messages.map(m => (
                       <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                         {m.role === 'user' ? (
-                          <div className="max-w-[85%] rounded-3xl rounded-tr-lg bg-secondary px-4 py-2.5 text-[15px]">{m.content}</div>
+                          <div className="max-w-[85%] rounded-3xl rounded-tr-md bg-primary/[0.08] border border-primary/15 px-4 py-2.5 text-[15px] leading-relaxed">{m.content}</div>
                         ) : (
                           <div className="max-w-[90%]">
                             {streamingActive && !m.content && m.id === messages[messages.length - 1]?.id ? (
