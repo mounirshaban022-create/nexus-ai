@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useAuth, type AuthUser } from '@/hooks/use-auth'
 import { MemorySection } from './memory-section'
+import { AiModelsMode } from './ai-models-mode'
 
 export interface ProfileActivity {
   type: 'image' | 'document' | 'code'
@@ -464,6 +465,18 @@ export function ProfilePage(props: ProfilePageProps) {
             prompt for future sessions. Guests see a sign-in CTA.
         =========================================================== */}
         <MemorySection language={language} />
+
+        {/* ===========================================================
+            Section 5b — AI Models & Providers
+            Lets the user plug in free API keys from OpenRouter, Groq,
+            Gemini, Putra AI, etc. Once connected, NEXUS routes all AI
+            requests through the user's provider (bypassing the rate-limited
+            built-in Z.ai engine). Guests can view presets but must sign in
+            to save a key.
+        =========================================================== */}
+        <section className="mt-6" aria-label="AI Models & Providers">
+          <AiModelsMode />
+        </section>
 
         {/* ===========================================================
             Section 6 — Bottom legal footer

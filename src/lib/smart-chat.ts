@@ -76,6 +76,15 @@ const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
     documents: ['google/gemma-4-31b-it:free', 'z-ai/glm-5.2:free', 'dots-studio/dots-3-note-preview:free'],
     fast: ['liquid/lfm-2.5-2.6b:free', 'nvidia/nemotron-3.5-lightning:free'],
   },
+  // Putra AI (Malaysia) — OpenAI-compatible, 500 free API calls
+  putra: {
+    code: ['gpt-4o-mini', 'gpt-4o'],
+    reasoning: ['gpt-4o', 'gpt-4'],
+    chat: ['gpt-4o-mini', 'gpt-3.5-turbo'],
+    voice: ['gpt-4o-mini'],
+    documents: ['gpt-4o', 'gpt-4o-mini'],
+    fast: ['gpt-4o-mini', 'gpt-3.5-turbo'],
+  },
 }
 
 const TASK_SPECIALISTS: Record<AiTask, string[]> = TASK_SPECIALISTS_BY_PROVIDER.openrouter

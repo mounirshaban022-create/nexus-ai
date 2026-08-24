@@ -112,6 +112,15 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     freeNote: 'Free turbo endpoints for Llama & DeepSeek models',
     keyUrl: 'https://api.together.ai/settings/api-keys',
   },
+  {
+    id: 'putra',
+    label: 'Putra AI',
+    baseUrl: 'https://putra.ai/api/v1',
+    defaultModel: 'gpt-4o-mini',
+    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'gpt-3.5-turbo'],
+    freeNote: 'Putra AI (Malaysia) — 500 free API calls on the free plan. OpenAI-compatible endpoint.',
+    keyUrl: 'https://putra.ai/dashboard',
+  },
 ]
 
 export const AI_PROVIDER_MAP = new Map(AI_PROVIDER_PRESETS.map((p) => [p.id, p]))
