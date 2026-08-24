@@ -10,7 +10,6 @@ import {
   Plus,
   User,
   Sparkles,
-  Mic,
   Paperclip,
   Send,
   ChevronDown,
@@ -26,18 +25,23 @@ import {
   BookOpen,
   ScanEye,
   FileSearch,
+  X,
+  LogIn,
+  UserPlus,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { isSupabaseConfigured, getCurrentUser, onAuthChange, signOut } from '@/lib/supabase'
 import { usePreferences, applyPreferences } from '@/lib/preferences'
+import { useAuth } from '@/hooks/use-auth'
+import { AuthModal } from '@/components/omni/auth-modal'
 import { Markdown } from '@/components/omni/markdown'
-import { ChatToolStep, AttachmentCard } from '@/components/omni/chat-attachments'
-import { ArtifactPanel, useArtifact } from '@/components/omni/artifact-panel'
-import { puterChat, puterSignIn, isPuterReady } from '@/components/omni/puter-engine'
+import { AttachmentCard } from '@/components/omni/chat-attachments'
 import { Onboarding } from '@/components/omni/onboarding'
 import { ProjectsMode } from '@/components/omni/projects-mode'
 import { LibraryMode } from '@/components/omni/library-mode'
+import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
+import { VoiceChatButton } from '@/components/omni/voice-chat'
 
 // ============ TYPES ============
 type TabId = 'chat' | 'projects' | 'explore' | 'library' | 'profile'
@@ -53,20 +57,15 @@ interface Message {
 interface ToolMenuItem {
   label: string
   icon: any
-  action: string
+  tool: ToolId
 }
 
 // ============ MAIN COMPONENT ============
 export default function Page() {
-  // Preferences (theme + language + onboarding)
   const { theme, language, onboarded } = usePreferences()
   useEffect(() => { applyPreferences(theme, language) }, [theme, language])
 
-  // Onboarding gate — show onboarding flow until user completes it once
-  if (!onboarded) {
-    return <Onboarding />
-  }
-
+  if (!onboarded) return <Onboarding />
   return <NexusApp />
 }
 
@@ -75,29 +74,40 @@ function NexusApp() {
   const { theme, language, toggleTheme, toggleLanguage, name, interests, commStyle, resetOnboarding } = usePreferences()
   useEffect(() => { applyPreferences(theme, language) }, [theme, language])
 
+  // Real auth
+  const { user, signOut, fetchMe } = useAuth()
+  const [authOpen, setAuthOpen] = useState(false)
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+
   // Navigation
   const [activeTab, setActiveTab] = useState<TabId>('chat')
-  
-  // Auth
-  const [user, setUser] = useState<{ email?: string } | null>(null)
-  useEffect(() => {
-    if (!isSupabaseConfigured) return
-    getCurrentUser().then(setUser).catch(() => {})
-    return onAuthChange(setUser)
-  }, [])
 
   // Intelligence selector
   const [intelligence, setIntelligence] = useState<Intelligence>('auto')
   const [intelOpen, setIntelOpen] = useState(false)
 
-  // Tool menu
+  // Tool menu (the + bottom-sheet)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
 
+  // Tool engine — routes the next message to the right /api/* route
+  const toolEngine = useToolEngine(
+    // onAssistant: push assistant message into the conversation
+    useCallback((msg: { content: string; attachments?: any[] }) => {
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: msg.content, attachments: msg.attachments }])
+    }, []),
+    // onToolRunning: show a status line above the composer
+    useCallback((running: boolean, label?: string) => {
+      setToolRunningLabel(running ? (label || 'Working…') : null)
+    }, []),
+  )
+
+  // Send: routes through tool engine if a tool is pending, else plain chat
   const send = useCallback(async (text?: string) => {
     const msg = (text ?? input).trim()
     if (!msg || sending) return
@@ -105,6 +115,12 @@ function NexusApp() {
     setInput('')
     setSending(true)
     try {
+      // If a tool is pending, route to the tool engine
+      if (toolEngine.pendingTool) {
+        await toolEngine.execute(msg)
+        return
+      }
+      // Otherwise: plain chat stream
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,16 +145,12 @@ function NexusApp() {
           } catch {}
         }
       }
-    } catch {
-      // Try Puter fallback
-      const result = await puterChat(msg, 'gpt-5-nano')
-      if (result.ok) {
-        setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: result.text }])
-      }
+    } catch (err: any) {
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: `⚠️ ${err.message || 'Something went wrong.'}` }])
     } finally {
       setSending(false)
     }
-  }, [input, sending])
+  }, [input, sending, toolEngine])
 
   const TABS: Array<{ id: TabId; label: string; icon: any }> = [
     { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -157,30 +169,30 @@ function NexusApp() {
 
   const TOOL_MENU: Array<{ category: string; items: ToolMenuItem[] }> = [
     { category: 'Create', items: [
-      { label: 'Image', icon: ImageIcon, action: 'image' },
-      { label: 'Video', icon: Video, action: 'video' },
-      { label: 'Writing', icon: FileText, action: 'office' },
+      { label: 'Image', icon: ImageIcon, tool: 'image' },
+      { label: 'Video', icon: Video, tool: 'video' },
+      { label: 'Writing', icon: FileText, tool: 'office' },
     ]},
     { category: 'Understand', items: [
-      { label: 'Upload file', icon: Paperclip, action: 'upload' },
-      { label: 'Camera', icon: ScanEye, action: 'camera' },
-      { label: 'Vision', icon: Eye, action: 'vision' },
-      { label: 'Document analysis', icon: FileSearch, action: 'documents' },
+      { label: 'Upload file', icon: Paperclip, tool: 'upload' },
+      { label: 'Camera', icon: ScanEye, tool: 'vision' },
+      { label: 'Vision', icon: Eye, tool: 'vision' },
+      { label: 'Document analysis', icon: FileSearch, tool: 'documents' },
     ]},
     { category: 'Think', items: [
-      { label: 'Deep research', icon: Globe, action: 'search' },
-      { label: 'Reasoning', icon: Brain, action: 'agent' },
-      { label: 'Data analysis', icon: BookOpen, action: 'code' },
+      { label: 'Deep research', icon: Globe, tool: 'search' },
+      { label: 'Reasoning', icon: Brain, tool: 'agent' },
+      { label: 'Data analysis', icon: BookOpen, tool: 'code' },
     ]},
     { category: 'Work', items: [
-      { label: 'Code', icon: Code, action: 'code' },
-      { label: 'Documents', icon: FileText, action: 'documents' },
-      { label: 'Office', icon: FileText, action: 'office' },
+      { label: 'Code', icon: Code, tool: 'code' },
+      { label: 'Documents', icon: FileText, tool: 'documents' },
+      { label: 'Office', icon: FileText, tool: 'office' },
     ]},
     { category: 'Connect', items: [
-      { label: 'Web search', icon: Globe, action: 'search' },
-      { label: 'Connected apps', icon: Plus, action: 'connectors' },
-      { label: 'Email', icon: Mail, action: 'email' },
+      { label: 'Web search', icon: Globe, tool: 'search' },
+      { label: 'Connected apps', icon: Plus, tool: 'connectors' },
+      { label: 'Email', icon: Mail, tool: 'email' },
     ]},
   ]
 
@@ -191,12 +203,47 @@ function NexusApp() {
     'Help me code',
   ]
 
-  // Display name priority: preferences name → auth email → 'Guest'
-  const displayName = name.trim() || user?.email || 'Guest'
-  const displayInitial = (name.trim() || user?.email || 'G')[0].toUpperCase()
+  // Display name priority: auth user → preferences name → 'Guest'
+  const displayName = user?.name || name.trim() || (user?.email ? user.email.split('@')[0] : 'Guest')
+  const displayInitial = (user?.name?.[0] || user?.email?.[0] || name.trim()[0] || 'G').toUpperCase()
+
+  const openAuth = (mode: 'signin' | 'signup') => {
+    setAuthMode(mode)
+    setAuthOpen(true)
+  }
+
+  const handleToolPick = (tool: ToolId, label: string) => {
+    setToolMenuOpen(false)
+    toolEngine.setPendingTool(tool)
+    // Focus the textarea so the user can type their prompt immediately
+    setTimeout(() => {
+      const ta = document.querySelector('textarea[name="nexus-input"]') as HTMLTextAreaElement | null
+      ta?.focus()
+    }, 50)
+  }
+
+  // Voice chat: when transcript arrives, put it in the input (so user can edit) and auto-send
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: text }])
+  }, [])
+  const handleVoiceAssistant = useCallback((text: string) => {
+    setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: text }])
+  }, [])
+
+  const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
 
   return (
     <div className="flex h-dvh flex-col bg-background">
+      {/* Hidden file input for tool uploads — uses the tool engine's ref */}
+      <input
+        ref={toolEngine.fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={toolEngine.onFilePicked}
+      />
+
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
+
       {/* ====== DESKTOP SIDEBAR ====== */}
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-[260px] shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
@@ -204,7 +251,7 @@ function NexusApp() {
             <span className="text-base font-bold">Nexus</span>
           </div>
           <div className="px-3 pt-2">
-            <button onClick={() => { setActiveTab('chat'); setMessages([]) }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
+            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
               <Plus className="h-4 w-4" /> New Chat
             </button>
           </div>
@@ -234,7 +281,6 @@ function NexusApp() {
           {/* Mobile header */}
           <header className="flex items-center justify-between px-4 py-2.5 lg:hidden">
             <span className="text-base font-bold">Nexus</span>
-            {/* Intelligence selector */}
             <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
               {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
               <span className="capitalize">{intelligence}</span>
@@ -242,7 +288,6 @@ function NexusApp() {
             </button>
           </header>
 
-          {/* Desktop: intelligence selector in chat header */}
           {activeTab === 'chat' && (
             <div className="hidden items-center justify-between border-b border-border/50 px-5 py-2 lg:flex">
               <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium transition hover:bg-secondary">
@@ -253,7 +298,6 @@ function NexusApp() {
             </div>
           )}
 
-          {/* Intelligence dropdown */}
           <AnimatePresence>
             {intelOpen && (
               <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
@@ -292,7 +336,7 @@ function NexusApp() {
                         <Sparkles className="h-7 w-7 text-white" />
                       </div>
                       <h1 className="text-2xl font-semibold">
-                        {name.trim() ? `Hi ${name.trim().split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
+                        {displayName !== 'Guest' ? `Hi ${displayName.split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
                       </h1>
                       <p className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</p>
                       <div className="mt-8 flex flex-wrap justify-center gap-2">
@@ -318,11 +362,20 @@ function NexusApp() {
                         )}
                       </div>
                     ))}
-                    {sending && (
-                      <div className="flex items-center gap-1.5 px-1">
-                        <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                        <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                        <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                    {(sending || toolRunningLabel) && (
+                      <div className="flex items-center gap-2 px-1">
+                        {toolRunningLabel ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                            <span className="text-xs text-muted-foreground">{toolRunningLabel}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -331,27 +384,51 @@ function NexusApp() {
 
               {/* ====== COMPOSER ====== */}
               <div className="border-t border-border bg-background">
-                <form className="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send() }}>
+                <form className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send() }}>
+                  {/* Pending tool banner */}
+                  {pendingToolDef && (
+                    <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/8 px-3 py-1.5">
+                      {(() => {
+                        const Icon = TOOL_MENU.flatMap(c => c.items).find(i => i.tool === toolEngine.pendingTool)?.icon || Sparkles
+                        return <Icon className="h-3.5 w-3.5 text-primary" />
+                      })()}
+                      <span className="text-xs font-medium text-primary">{pendingToolDef.label}</span>
+                      {toolEngine.pendingFile && (
+                        <span className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
+                          <Paperclip className="h-2.5 w-2.5" />
+                          {toolEngine.pendingFile.name.slice(0, 20)}
+                          <button type="button" onClick={() => toolEngine.clearPendingFile()} className="ml-0.5">
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </span>
+                      )}
+                      <button type="button" onClick={() => toolEngine.clear()} className="ml-1 text-primary/70 hover:text-primary">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                  {/* Tool error */}
+                  {toolEngine.toolError && (
+                    <p className="self-start text-xs text-destructive">{toolEngine.toolError}</p>
+                  )}
                   <div className="relative flex flex-1 items-end rounded-[26px] border border-border bg-card shadow-sm">
-                    {/* + button (tool menu) */}
                     <button type="button" onClick={() => setToolMenuOpen(!toolMenuOpen)}
                       aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-[26px] text-muted-foreground transition hover:text-foreground"
                     >
                       <Plus className="h-5 w-5" />
                     </button>
-                    {/* Textarea */}
-                    <Textarea value={input} onChange={e => setInput(e.target.value)}
+                    <Textarea name="nexus-input" value={input} onChange={e => setInput(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-                      placeholder="Message Nexus..." rows={1}
+                      placeholder={pendingToolDef?.placeholder || 'Message Nexus...'} rows={1}
                       className="max-h-40 min-h-[48px] flex-1 resize-none border-0 bg-transparent px-1 py-3 text-[15px] focus-visible:ring-0"
                     />
-                    {/* Mic + Send */}
                     <div className="flex items-center pr-1.5 pb-1">
-                      <button type="button" aria-label="Voice" onClick={() => setActiveTab('chat')} className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground">
-                        <Mic className="h-4 w-4" />
-                      </button>
-                      <button type="submit" disabled={!input.trim() || sending} aria-label="Send"
-                        className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-110 disabled:opacity-30"
+                      <VoiceChatButton
+                        onUserMessage={handleVoiceTranscript}
+                        onAssistantReply={handleVoiceAssistant}
+                      />
+                      <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile) || sending || !!toolRunningLabel} aria-label="Send"
+                        className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-110 disabled:opacity-30"
                       >
                         <Send className="h-4 w-4" />
                       </button>
@@ -381,7 +458,7 @@ function NexusApp() {
                               {cat.items.map(item => {
                                 const Icon = item.icon
                                 return (
-                                  <button key={item.action} onClick={() => { setToolMenuOpen(false); setInput(prev => prev + ` [${item.label}]`) }}
+                                  <button key={`${cat.category}-${item.tool}-${item.label}`} onClick={() => handleToolPick(item.tool, item.label)}
                                     className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:bg-secondary"
                                   >
                                     <Icon className="h-3.5 w-3.5" aria-hidden />
@@ -413,7 +490,7 @@ function NexusApp() {
                       {cat.items.map(item => {
                         const Icon = item.icon
                         return (
-                          <button key={item.action} onClick={() => { setActiveTab('chat'); setInput(`[${item.label}] `) }}
+                          <button key={`${cat.category}-${item.tool}-${item.label}`} onClick={() => { setActiveTab('chat'); handleToolPick(item.tool, item.label) }}
                             className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-3 text-left transition hover:bg-secondary"
                           >
                             <Icon className="h-5 w-5" aria-hidden />
@@ -448,10 +525,22 @@ function NexusApp() {
                   </div>
                   <h2 className="mt-3 text-lg font-bold">{displayName}</h2>
                   {user && <span className="text-xs text-muted-foreground">{user.email}</span>}
+                  {user && user.createdAt && (
+                    <span className="mt-1 text-[11px] text-muted-foreground">
+                      Member since {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
                   <span className="mt-1 text-[11px] text-muted-foreground capitalize">{commStyle} style</span>
                 </div>
                 {!user ? (
-                  <Button className="mt-6 w-full rounded-xl bg-primary text-primary-foreground" onClick={() => signOut()}>Sign in</Button>
+                  <div className="mt-6 grid grid-cols-2 gap-2">
+                    <Button className="rounded-xl bg-primary text-primary-foreground" onClick={() => openAuth('signin')}>
+                      <LogIn className="mr-1.5 h-4 w-4" /> Sign in
+                    </Button>
+                    <Button variant="outline" className="rounded-xl" onClick={() => openAuth('signup')}>
+                      <UserPlus className="mr-1.5 h-4 w-4" /> Sign up
+                    </Button>
+                  </div>
                 ) : (
                   <Button variant="outline" className="mt-6 w-full rounded-xl" onClick={() => signOut()}>Sign out</Button>
                 )}

@@ -6,6 +6,7 @@ import path from 'path'
 import { db } from '@/lib/db'
 import { getZAI } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { getCurrentUser } from '@/lib/auth'
 
 const requestSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -33,6 +34,8 @@ export async function POST(req: NextRequest) {
     const chosenSize = parsed.data.size ?? '1024x1024'
     const provider = parsed.data.provider ?? 'nexus'
     const trimmedPrompt = parsed.data.prompt.trim()
+
+    const user = await getCurrentUser(req)
 
     let buffer: Buffer
     if (provider === 'free') {
@@ -77,6 +80,7 @@ export async function POST(req: NextRequest) {
         size: chosenSize,
         provider,
         url: `/api/image/file/${filename.replace('.png', '')}`,
+        userId: user?.id ?? null,
       },
     })
 

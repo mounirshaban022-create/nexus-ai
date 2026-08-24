@@ -1,81 +1,140 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Library,
   Search,
   Image as ImageIcon,
   FileText,
   Film,
-  AudioLines,
   Download,
   Trash2,
   Grid3x3,
-  List,
-  File,
+  List as ListIcon,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react'
 
-type ItemType = 'image' | 'document' | 'video' | 'audio' | 'other'
+type ItemType = 'image' | 'document' | 'video'
+type FilterId = 'all' | ItemType
 
 interface LibItem {
   id: string
-  name: string
   type: ItemType
+  name: string
+  preview: string | null
   size: string
-  updated: string
-  // optional preview color for image tiles
-  color?: string
+  url: string | null
+  downloadUrl?: string | null
+  createdAt: string
+  status?: string
 }
-
-const SEED: LibItem[] = [
-  { id: '1', name: 'Cover — Q4 Launch.png', type: 'image', size: '1.2 MB', updated: '2h ago', color: 'from-orange-400 to-rose-500' },
-  { id: '2', name: 'Positioning memo.docx', type: 'document', size: '48 KB', updated: '5h ago' },
-  { id: '3', name: 'Onboarding walkthrough.mp4', type: 'video', size: '24 MB', updated: 'Yesterday', color: 'from-amber-400 to-orange-500' },
-  { id: '4', name: 'Interview summary.docx', type: 'document', size: '32 KB', updated: '2d ago' },
-  { id: '5', name: 'Logo concepts.png', type: 'image', size: '3.4 MB', updated: '3d ago', color: 'from-rose-400 to-pink-500' },
-  { id: '6', name: 'Pricing call notes.wav', type: 'audio', size: '12 MB', updated: '3d ago' },
-  { id: '7', name: 'Customer research.pdf', type: 'document', size: '256 KB', updated: '5d ago' },
-  { id: '8', name: 'Hero banner.png', type: 'image', size: '2.1 MB', updated: '1w ago', color: 'from-yellow-400 to-amber-500' },
-  { id: '9', name: 'Pricing analysis.xlsx', type: 'other', size: '64 KB', updated: '1w ago' },
-]
 
 const TYPE_META: Record<ItemType, { label: string; icon: any }> = {
   image: { label: 'Image', icon: ImageIcon },
   document: { label: 'Document', icon: FileText },
   video: { label: 'Video', icon: Film },
-  audio: { label: 'Audio', icon: AudioLines },
-  other: { label: 'File', icon: File },
 }
 
-const FILTERS: Array<{ id: 'all' | ItemType; label: string }> = [
+const FILTERS: Array<{ id: FilterId; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'image', label: 'Images' },
-  { id: 'document', label: 'Documents' },
   { id: 'video', label: 'Videos' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'other', label: 'Files' },
+  { id: 'document', label: 'Documents' },
 ]
+
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime()
+  const diff = Date.now() - then
+  if (!Number.isFinite(diff) || diff < 0) return 'just now'
+  const sec = Math.floor(diff / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return `${day}d ago`
+  const wk = Math.floor(day / 7)
+  if (wk < 4) return `${wk}w ago`
+  return new Date(iso).toLocaleDateString()
+}
 
 export function LibraryMode() {
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<'all' | ItemType>('all')
+  const [filter, setFilter] = useState<FilterId>('all')
   const [view, setView] = useState<'grid' | 'list'>('grid')
 
-  const items = useMemo(() => {
-    return SEED.filter(i => {
+  const [items, setItems] = useState<LibItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const fetchLibrary = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/library', { cache: 'no-store' })
+      if (!res.ok) throw new Error(`Failed (${res.status})`)
+      const data = (await res.json()) as { items: LibItem[] }
+      setItems(data.items ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load library.')
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchLibrary()
+  }, [fetchLibrary])
+
+  const handleDelete = useCallback(async (item: LibItem) => {
+    setDeleting(item.id)
+    try {
+      const res = await fetch('/api/library', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, type: item.type }),
+      })
+      if (!res.ok) throw new Error('Delete failed')
+      // Snappy local update — remove the item without a full refetch.
+      setItems(prev => prev.filter(i => i.id !== item.id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed.')
+    } finally {
+      setDeleting(null)
+    }
+  }, [])
+
+  const filtered = useMemo(() => {
+    return items.filter(i => {
       const matchType = filter === 'all' || i.type === filter
       const matchQuery = !query || i.name.toLowerCase().includes(query.toLowerCase())
       return matchType && matchQuery
     })
-  }, [query, filter])
+  }, [items, query, filter])
 
   return (
     <div className="omni-scroll flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl px-4 py-6">
-        <div className="mb-4">
-          <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">Files, images, documents, and saved outputs.</p>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Everything you create — images, videos, and documents — saved automatically.
+            </p>
+          </div>
+          <button
+            onClick={() => void fetchLibrary()}
+            disabled={loading}
+            aria-label="Refresh library"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition hover:bg-secondary disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
 
         {/* Search + view toggle */}
@@ -85,7 +144,7 @@ export function LibraryMode() {
             <input
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search files..."
+              placeholder="Search by name..."
               className="w-full rounded-xl border border-border bg-card py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
             />
           </div>
@@ -94,6 +153,7 @@ export function LibraryMode() {
               onClick={() => setView('grid')}
               className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${view === 'grid' ? 'bg-secondary' : 'text-muted-foreground'}`}
               aria-label="Grid view"
+              aria-pressed={view === 'grid'}
             >
               <Grid3x3 className="h-4 w-4" />
             </button>
@@ -101,8 +161,9 @@ export function LibraryMode() {
               onClick={() => setView('list')}
               className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${view === 'list' ? 'bg-secondary' : 'text-muted-foreground'}`}
               aria-label="List view"
+              aria-pressed={view === 'list'}
             >
-              <List className="h-4 w-4" />
+              <ListIcon className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -122,50 +183,119 @@ export function LibraryMode() {
           ))}
         </div>
 
-        {/* Items */}
-        {items.length === 0 ? (
+        {/* Content */}
+        {loading ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div
+                key={i}
+                className="overflow-hidden rounded-2xl border border-border bg-card"
+              >
+                <div className="aspect-[4/3] w-full animate-pulse bg-secondary" />
+                <div className="p-2.5">
+                  <div className="h-3 w-3/4 animate-pulse rounded bg-secondary" />
+                  <div className="mt-1.5 h-2.5 w-1/2 animate-pulse rounded bg-secondary" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <AlertCircle className="mb-3 h-10 w-10 text-destructive/60" />
+            <h3 className="text-base font-medium">Couldn't load your library</h3>
+            <p className="mt-1 max-w-sm text-sm text-muted-foreground">{error}</p>
+            <button
+              onClick={() => void fetchLibrary()}
+              className="mt-4 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium transition hover:bg-secondary"
+            >
+              Try again
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Library className="mb-3 h-12 w-12 text-muted-foreground/30" />
-            <h3 className="text-base font-medium">Nothing here yet</h3>
+            <h3 className="text-base font-medium">
+              {items.length === 0 ? 'Nothing here yet' : 'No matches'}
+            </h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              {query ? 'No files match your search.' : 'Files you create or upload will appear here.'}
+              {items.length === 0
+                ? 'Images, videos, and documents you create will appear here.'
+                : 'Try a different search or filter.'}
             </p>
           </div>
         ) : view === 'grid' ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {items.map(item => {
+            {filtered.map(item => {
               const Icon = TYPE_META[item.type].icon
+              const downloadHref = item.downloadUrl || item.url || '#'
               return (
                 <motion.div
-                  key={item.id}
+                  key={`${item.type}-${item.id}`}
                   layout
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
                   className="group overflow-hidden rounded-2xl border border-border bg-card transition hover:border-primary/30"
                 >
                   {/* Preview */}
                   <div className="relative aspect-[4/3] overflow-hidden bg-secondary">
-                    {item.color ? (
-                      <div className={`h-full w-full bg-gradient-to-br ${item.color}`} />
+                    {item.type === 'image' && item.preview ? (
+                      <img
+                        src={item.preview}
+                        alt={item.name}
+                        loading="lazy"
+                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                        onError={e => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none'
+                        }}
+                      />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center">
                         <Icon className="h-8 w-8 text-muted-foreground/60" />
                       </div>
                     )}
                     <div className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/40 opacity-0 transition group-hover:opacity-100">
-                      <button className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground transition hover:bg-white">
+                      <a
+                        href={downloadHref}
+                        download
+                        aria-label="Download"
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-foreground transition hover:bg-white"
+                      >
                         <Download className="h-3.5 w-3.5" />
-                      </button>
-                      <button className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-destructive transition hover:bg-white">
-                        <Trash2 className="h-3.5 w-3.5" />
+                      </a>
+                      <button
+                        onClick={() => void handleDelete(item)}
+                        disabled={deleting === item.id}
+                        aria-label="Delete"
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-destructive transition hover:bg-white disabled:opacity-50"
+                      >
+                        {deleting === item.id ? (
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
                       </button>
                     </div>
-                    <span className="absolute left-2 top-2 rounded-md bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                    <span className="absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white">
                       {TYPE_META[item.type].label}
                     </span>
+                    {item.type === 'video' && item.status && item.status !== 'done' && (
+                      <span className="absolute right-2 top-2 rounded-md bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-medium text-white capitalize">
+                        {item.status}
+                      </span>
+                    )}
+                    {item.type === 'video' && item.status === 'error' && (
+                      <span className="absolute right-2 top-2 rounded-md bg-destructive/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        Failed
+                      </span>
+                    )}
                   </div>
                   {/* Info */}
                   <div className="p-2.5">
-                    <p className="truncate text-xs font-medium">{item.name}</p>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">{item.size} · {item.updated}</p>
+                    <p className="truncate text-xs font-medium" title={item.name}>{item.name}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {item.size} · {timeAgo(item.createdAt)}
+                    </p>
                   </div>
                 </motion.div>
               )
@@ -173,24 +303,70 @@ export function LibraryMode() {
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border bg-card">
-            {items.map((item, idx) => {
-              const Icon = TYPE_META[item.type].icon
-              return (
-                <div
-                  key={item.id}
-                  className={`flex items-center gap-3 px-3 py-2.5 transition hover:bg-secondary ${idx > 0 ? 'border-t border-border/60' : ''}`}
-                >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{item.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{TYPE_META[item.type].label} · {item.size}</p>
-                  </div>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{item.updated}</span>
-                </div>
-              )
-            })}
+            <AnimatePresence initial={false}>
+              {filtered.map((item, idx) => {
+                const Icon = TYPE_META[item.type].icon
+                const downloadHref = item.downloadUrl || item.url || '#'
+                return (
+                  <motion.div
+                    key={`${item.type}-${item.id}`}
+                    layout
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className={`flex items-center gap-3 px-3 py-2.5 transition hover:bg-secondary ${idx > 0 ? 'border-t border-border/60' : ''}`}
+                  >
+                    <span className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-secondary">
+                      {item.type === 'image' && item.preview ? (
+                        <img
+                          src={item.preview}
+                          alt={item.name}
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={e => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <Icon className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium" title={item.name}>{item.name}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {TYPE_META[item.type].label} · {item.size}
+                        {item.type === 'video' && item.status && item.status !== 'done'
+                          ? ` · ${item.status}`
+                          : ''}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{timeAgo(item.createdAt)}</span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <a
+                        href={downloadHref}
+                        download
+                        aria-label="Download"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                      <button
+                        onClick={() => void handleDelete(item)}
+                        disabled={deleting === item.id}
+                        aria-label="Delete"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-destructive disabled:opacity-50"
+                      >
+                        {deleting === item.id ? (
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </motion.div>
+                )
+              })}
+            </AnimatePresence>
           </div>
         )}
       </div>

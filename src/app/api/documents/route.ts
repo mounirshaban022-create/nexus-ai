@@ -5,6 +5,8 @@ import { writeFile, readFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { smartChat } from '@/lib/smart-chat'
+import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
 
 export const maxDuration = 120
 
@@ -328,6 +330,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Too many edits. Wait a moment.' }, { status: 429 })
     }
 
+    const user = await getCurrentUser(req)
+
     const bodySchema = z.object({
       id: z.string().min(1),
       instruction: z.string().min(3).max(2000),
@@ -393,6 +397,23 @@ export async function PUT(req: NextRequest) {
 
     const filePath = path.join(UPLOAD_DIR, `${id}.${ext}`)
     await writeFile(filePath, buffer)
+
+    // Persist the exported document to the library DB.
+    try {
+      await db.generatedDocument.create({
+        data: {
+          filename: doc.filename,
+          format: ext,
+          title: doc.title,
+          summary: edited.slice(0, 200),
+          downloadUrl: `/api/documents/file/${id}?format=${ext}`,
+          size: buffer.length,
+          userId: user?.id ?? null,
+        },
+      })
+    } catch (e) {
+      console.error('[documents] db save failed:', e)
+    }
 
     return NextResponse.json({
       edited: {

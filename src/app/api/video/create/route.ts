@@ -8,6 +8,8 @@ import path from 'path'
 import { getZAI } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { videoJobs, pruneVideoJobs, type VideoJob } from '@/lib/video-jobs'
+import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
 
 export const maxDuration = 300
 
@@ -82,6 +84,8 @@ export async function POST(req: NextRequest) {
     }
     const { prompt, voice, style } = parsed.data
     const sceneCount = parseInt(parsed.data.scenes) || 4
+
+    const user = await getCurrentUser(req)
 
     const id = randomUUID()
     const job: VideoJob = {
@@ -239,11 +243,47 @@ export async function POST(req: NextRequest) {
         job.progress = 100
         job.message = 'Video ready!'
         job.url = `/api/video/file/${id}`
+
+        // Persist the finished video to the library DB.
+        try {
+          await db.generatedVideo.create({
+            data: {
+              prompt,
+              scenes: sceneCount,
+              voice,
+              style,
+              url: job.url,
+              jobId: id,
+              status: 'done',
+              userId: user?.id ?? null,
+            },
+          })
+        } catch (e) {
+          console.error('[video] db save failed:', e)
+        }
       } catch (err) {
         console.error(`[video job ${id}] failed:`, err)
         job.status = 'error'
         job.error = err instanceof Error ? err.message : 'Video generation failed.'
         await rm(path.join(VIDEO_DIR, id), { recursive: true, force: true }).catch(() => {})
+
+        // Persist the failed attempt too, so the user sees it in the library with an error badge.
+        try {
+          await db.generatedVideo.create({
+            data: {
+              prompt,
+              scenes: sceneCount,
+              voice,
+              style,
+              url: null,
+              jobId: id,
+              status: 'error',
+              userId: user?.id ?? null,
+            },
+          })
+        } catch (e) {
+          console.error('[video] db save (error path) failed:', e)
+        }
       }
     })()
 
