@@ -4,30 +4,30 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Settings,
-  ChevronDown,
-  ChevronRight,
-  Sparkles,
-  Mail,
-  FileText,
-  Pencil,
-  LogIn,
-  UserPlus,
-  Image as ImageIcon,
+  ArrowCounterClockwise,
+  Brain,
+  ImageSquare as ImageIcon,
+  CalendarBlank,
+  CaretDown,
+  CaretRight,
+  ChatCircleText,
+  CloudCheck,
   Code,
-  MessageSquare,
-  Calendar,
+  EnvelopeSimple,
+  FileText,
+  GearSix,
   MapPin,
-  Sun,
   Moon,
-  Languages,
-  RotateCcw,
-  CloudCog,
+  PenNib,
+  Scales,
+  SealCheck,
   ShieldCheck,
-  Scale,
-  BadgeCheck,
-  BrainCircuit,
-} from 'lucide-react'
+  SignIn,
+  Sparkle,
+  Sun,
+  Translate,
+  UserPlus,
+} from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { useAuth, type AuthUser } from '@/hooks/use-auth'
 import { MemorySection } from './memory-section'
@@ -188,7 +188,7 @@ export function ProfilePage(props: ProfilePageProps) {
                   onClick={onEditProfile}
                   className="h-9 rounded-lg px-4"
                 >
-                  <Pencil className="h-4 w-4" />
+                  <PenNib className="h-4 w-4" />
                   Edit profile
                 </Button>
               )}
@@ -221,7 +221,7 @@ export function ProfilePage(props: ProfilePageProps) {
               <div className="flex flex-wrap justify-center gap-1.5 text-xs text-muted-foreground sm:justify-start">
                 {user.email && (
                   <span className="inline-flex items-center gap-1">
-                    <Mail className="h-3 w-3" aria-hidden />
+                    <EnvelopeSimple className="h-3 w-3" aria-hidden />
                     {user.email}
                   </span>
                 )}
@@ -231,7 +231,7 @@ export function ProfilePage(props: ProfilePageProps) {
                       ·
                     </span>
                     <span className="inline-flex items-center gap-1">
-                      <Calendar className="h-3 w-3" aria-hidden />
+                      <CalendarBlank className="h-3 w-3" aria-hidden />
                       Member since {memberSince}
                     </span>
                   </>
@@ -261,7 +261,7 @@ export function ProfilePage(props: ProfilePageProps) {
                     key={i}
                     className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs capitalize text-primary"
                   >
-                    <Sparkles className="h-3 w-3" aria-hidden />
+                    <Sparkle className="h-3 w-3" aria-hidden />
                     {i}
                   </span>
                 ))}
@@ -277,7 +277,7 @@ export function ProfilePage(props: ProfilePageProps) {
           {user ? (
             <>
               <Button onClick={onEditProfile} className="h-10 rounded-xl">
-                <Pencil className="h-4 w-4" />
+                <PenNib className="h-4 w-4" />
                 Edit profile
               </Button>
               <Button
@@ -293,7 +293,7 @@ export function ProfilePage(props: ProfilePageProps) {
           ) : (
             <>
               <Button onClick={onSignIn} className="h-10 rounded-xl">
-                <LogIn className="h-4 w-4" />
+                <SignIn className="h-4 w-4" />
                 Sign in
               </Button>
               <Button variant="outline" onClick={onSignUp} className="h-10 rounded-xl">
@@ -313,7 +313,7 @@ export function ProfilePage(props: ProfilePageProps) {
           </h2>
           {items.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/50 px-4 py-10 text-center">
-              <Sparkles className="h-6 w-6 text-muted-foreground/60" aria-hidden />
+              <Sparkle className="h-6 w-6 text-muted-foreground/60" aria-hidden />
               <p className="max-w-xs text-sm text-muted-foreground">
                 No activity yet — start a conversation to see your creations here.
               </p>
@@ -323,7 +323,7 @@ export function ProfilePage(props: ProfilePageProps) {
                 onClick={onOpenChat}
                 className="mt-1 rounded-lg"
               >
-                <MessageSquare className="h-4 w-4" />
+                <ChatCircleText className="h-4 w-4" />
                 Start chatting
               </Button>
             </div>
@@ -374,9 +374,9 @@ export function ProfilePage(props: ProfilePageProps) {
               className="flex w-full items-center justify-between p-4 text-left transition hover:bg-secondary/60"
             >
               <span className="flex items-center gap-2">
-                <Settings className="h-4 w-4 text-muted-foreground" aria-hidden />
+                <GearSix className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <span className="text-sm font-semibold text-foreground">Personalization</span>
-                <ChevronDown
+                <CaretDown
                   className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${
                     personalizationOpen ? 'rotate-180' : ''
                   }`}
@@ -408,14 +408,14 @@ export function ProfilePage(props: ProfilePageProps) {
                     >
                       <span className="flex items-center gap-3">
                         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                          <Mail className="h-4 w-4" aria-hidden />
+                          <EnvelopeSimple className="h-4 w-4" aria-hidden />
                         </span>
                         <span className="flex flex-col items-start leading-tight">
                           <span className="font-medium">Email &amp; apps</span>
                           <span className="text-[11px] text-muted-foreground">Connect Gmail and other services</span>
                         </span>
                       </span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+                      <CaretRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -439,7 +439,7 @@ export function ProfilePage(props: ProfilePageProps) {
                     >
                       <span className="flex items-center gap-3">
                         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600">
-                          <Languages className="h-4 w-4" aria-hidden />
+                          <Translate className="h-4 w-4" aria-hidden />
                         </span>
                         <span className="font-medium">Language</span>
                       </span>
@@ -454,14 +454,14 @@ export function ProfilePage(props: ProfilePageProps) {
                     >
                       <span className="flex items-center gap-3">
                         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/10 text-rose-600">
-                          <RotateCcw className="h-4 w-4" aria-hidden />
+                          <ArrowCounterClockwise className="h-4 w-4" aria-hidden />
                         </span>
                         <span className="flex flex-col items-start leading-tight">
                           <span className="font-medium">Personalize NEXUS</span>
                           <span className="text-[11px] text-muted-foreground">Re-run the setup wizard</span>
                         </span>
                       </span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+                      <CaretRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -474,7 +474,7 @@ export function ProfilePage(props: ProfilePageProps) {
                         </span>
                         <span className="font-medium">Privacy Policy</span>
                       </span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+                      <CaretRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -483,11 +483,11 @@ export function ProfilePage(props: ProfilePageProps) {
                     >
                       <span className="flex items-center gap-3">
                         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
-                          <Scale className="h-4 w-4" aria-hidden />
+                          <Scales className="h-4 w-4" aria-hidden />
                         </span>
                         <span className="font-medium">Terms of Service</span>
                       </span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+                      <CaretRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
                   </div>
                 </motion.div>

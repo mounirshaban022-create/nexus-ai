@@ -12,21 +12,20 @@
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  ArrowLeftRight,
-  Combine,
-  Download,
-  FileDown,
+  ArrowsLeftRight,
+  CircleNotch,
+  DownloadSimple,
+  FileArrowDown,
   FileImage,
   FileText,
-  FileType,
+  FileDoc,
   Info,
-  Loader2,
-  Merge,
   ShieldCheck,
-  Trash2,
-  Upload,
+  Trash,
+  UploadSimple,
   X,
-} from 'lucide-react'
+ Intersect,
+} from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 
@@ -66,35 +65,35 @@ const OPERATIONS: OpDef[] = [
     id: 'rotate',
     label: 'Rotate',
     desc: 'Turn every page 90° / 180° / 270°',
-    icon: ArrowLeftRight,
+    icon: ArrowsLeftRight,
     fields: [{ key: 'angle', label: 'Angle (°)', placeholder: '90', defaultValue: '90' }],
   },
   {
     id: 'removePages',
     label: 'Delete pages',
     desc: 'Remove specific pages (e.g. 1,3-5)',
-    icon: Trash2,
+    icon: Trash,
     fields: [{ key: 'pageNumbers', label: 'Pages to delete', placeholder: 'e.g. 1,3-5' }],
   },
   {
     id: 'rearrange',
     label: 'Reorder pages',
     desc: 'New order, e.g. 3,1,2',
-    icon: ArrowLeftRight,
+    icon: ArrowsLeftRight,
     fields: [{ key: 'newPageOrder', label: 'New page order', placeholder: 'e.g. 3,1,2' }],
   },
   {
     id: 'split',
     label: 'Split',
     desc: 'Extract pages to separate PDFs (ZIP)',
-    icon: FileDown,
+    icon: FileArrowDown,
     fields: [{ key: 'pages', label: 'Pages', placeholder: 'all or e.g. 1-3' }],
   },
   {
     id: 'merge',
     label: 'Merge',
     desc: 'Combine this PDF with another',
-    icon: Combine,
+    icon:Intersect,
     needsSecondFile: true,
   },
   {
@@ -119,7 +118,7 @@ const OPERATIONS: OpDef[] = [
     id: 'toHtml',
     label: 'To HTML',
     desc: 'Convert the PDF to a web page',
-    icon: FileType,
+    icon: FileDoc,
   },
   {
     id: 'toImages',
@@ -238,7 +237,7 @@ export function StudioPdf({ onDownloadFile }: StudioPdfProps) {
       <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
         <header className="mb-5">
           <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
-            <FileDown className="h-5 w-5 text-primary" aria-hidden /> PDF Tools
+            <FileArrowDown className="h-5 w-5 text-primary" aria-hidden /> PDF Tools
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Real PDF editing powered by{' '}
@@ -265,7 +264,7 @@ export function StudioPdf({ onDownloadFile }: StudioPdfProps) {
             }}
             className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border bg-card py-16 text-center transition hover:border-primary/40 hover:bg-secondary/40"
           >
-            <Upload className="mb-3 h-9 w-9 text-primary/70" aria-hidden />
+            <UploadSimple className="mb-3 h-9 w-9 text-primary/70" aria-hidden />
             <p className="text-sm font-medium">Drop a PDF here, or click to browse</p>
             <p className="mt-1 text-xs text-muted-foreground">Every operation runs on the real PDF binary — not a re-render</p>
           </div>
@@ -284,7 +283,7 @@ export function StudioPdf({ onDownloadFile }: StudioPdfProps) {
                 </p>
               </div>
               <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} className="rounded-lg text-xs">
-                <Upload className="mr-1 h-3.5 w-3.5" /> Replace
+                <UploadSimple className="mr-1 h-3.5 w-3.5" /> Replace
               </Button>
               <button
                 onClick={() => { setPdf(null); setResult(null); setActiveOp(null) }}
@@ -375,7 +374,7 @@ export function StudioPdf({ onDownloadFile }: StudioPdfProps) {
                                   </div>
                                 ) : (
                                   <Button size="sm" variant="outline" onClick={() => input2Ref.current?.click()} className="w-fit rounded-lg text-xs">
-                                    <Upload className="mr-1 h-3.5 w-3.5" /> Choose second PDF
+                                    <UploadSimple className="mr-1 h-3.5 w-3.5" /> Choose second PDF
                                   </Button>
                                 )}
                               </div>
@@ -388,7 +387,7 @@ export function StudioPdf({ onDownloadFile }: StudioPdfProps) {
                           >
                             {busy === activeOp ? (
                               <>
-                                <Loader2 className="h-4 w-4 animate-spin" /> Processing with Stirling-PDF…
+                                <CircleNotch className="h-4 w-4 animate-spin" /> Processing with Stirling-PDF…
                               </>
                             ) : (
                               <>
@@ -414,7 +413,7 @@ export function StudioPdf({ onDownloadFile }: StudioPdfProps) {
                   className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4"
                 >
                   <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
-                    <Download className="h-5 w-5" aria-hidden />
+                    <DownloadSimple className="h-5 w-5" aria-hidden />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold">{result.title}</p>

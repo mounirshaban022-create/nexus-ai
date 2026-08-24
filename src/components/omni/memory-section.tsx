@@ -15,13 +15,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Brain,
-  ChevronDown,
-  Loader2,
+  CaretDown,
+  CircleNotch,
+  Trash,
+  X,
+} from '@phosphor-icons/react'
+import {
   Pencil,
   Plus,
   Save,
-  Trash2,
-  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/use-auth'
@@ -239,7 +241,7 @@ export function MemorySection({ language }: MemorySectionProps) {
               {memories.length}
             </span>
           </span>
-          <ChevronDown
+          <CaretDown
             className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${
               open ? 'rotate-180' : ''
             }`}
@@ -284,7 +286,7 @@ export function MemorySection({ language }: MemorySectionProps) {
                       className="h-8"
                     >
                       {savingNew ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <CircleNotch className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <Plus className="h-3.5 w-3.5" />
                       )}
@@ -304,7 +306,7 @@ export function MemorySection({ language }: MemorySectionProps) {
               <ul className="mt-4 flex flex-col gap-2" dir={isRtl ? 'rtl' : 'ltr'}>
                 {loading ? (
                   <li className="flex items-center justify-center py-6 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <CircleNotch className="h-4 w-4 animate-spin" />
                   </li>
                 ) : memories.length === 0 ? (
                   <li className="py-6 text-center text-xs text-muted-foreground">{t.empty}</li>
@@ -344,7 +346,7 @@ export function MemorySection({ language }: MemorySectionProps) {
                                 className="h-7"
                               >
                                 {savingEditId === m.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  <CircleNotch className="h-3.5 w-3.5 animate-spin" />
                                 ) : (
                                   <Save className="h-3.5 w-3.5" />
                                 )}
@@ -386,9 +388,9 @@ export function MemorySection({ language }: MemorySectionProps) {
                               aria-label={t.delete}
                             >
                               {deletingId === m.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <CircleNotch className="h-3.5 w-3.5 animate-spin" />
                               ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <Trash className="h-3.5 w-3.5" />
                               )}
                             </Button>
                           </div>

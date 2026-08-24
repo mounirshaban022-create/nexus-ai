@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2, LogIn, Mail, ShieldCheck, UserPlus, X } from 'lucide-react'
+import {
+  CircleNotch,
+  EnvelopeSimple,
+  ShieldCheck,
+  SignIn,
+  UserPlus,
+  X,
+} from '@phosphor-icons/react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -150,7 +157,7 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
               Email
             </label>
             <div className="relative">
-              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" aria-hidden />
+              <EnvelopeSimple className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" aria-hidden />
               <Input
                 id="auth-email"
                 ref={isSignup ? undefined : firstFieldRef}
@@ -198,9 +205,9 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
             className="mt-1 h-12 w-full gap-2 rounded-xl bg-primary text-[15px] font-semibold text-primary-foreground shadow-md shadow-primary/20 transition hover:brightness-110"
           >
             {submitting || auth.loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <CircleNotch className="h-4 w-4 animate-spin" />
             ) : (
-              <LogIn className="h-4 w-4" aria-hidden />
+              <SignIn className="h-4 w-4" aria-hidden />
             )}
             {isSignup ? 'Create account' : 'Sign in'}
           </Button>

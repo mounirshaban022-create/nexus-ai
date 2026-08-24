@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  X,
-  Pencil,
-  Loader2,
   Check,
-  Sparkles,
+  CircleNotch,
+  PenNib,
+  Sparkle,
+  X,
+} from '@phosphor-icons/react'
+import {
   type LucideIcon,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -42,10 +44,10 @@ const INTERESTS: Array<{ id: Interest; label: string }> = [
 ]
 
 const STYLES: Array<{ id: CommStyle; label: string; desc: string; icon: LucideIcon }> = [
-  { id: 'concise', label: 'Concise', desc: 'Short, to-the-point', icon: Sparkles },
-  { id: 'balanced', label: 'Balanced', desc: 'Default depth', icon: Sparkles },
-  { id: 'detailed', label: 'Detailed', desc: 'In-depth answers', icon: Sparkles },
-  { id: 'friendly', label: 'Friendly', desc: 'Warm & casual', icon: Sparkles },
+  { id: 'concise', label: 'Concise', desc: 'Short, to-the-point', icon: Sparkle },
+  { id: 'balanced', label: 'Balanced', desc: 'Default depth', icon: Sparkle },
+  { id: 'detailed', label: 'Detailed', desc: 'In-depth answers', icon: Sparkle },
+  { id: 'friendly', label: 'Friendly', desc: 'Warm & casual', icon: Sparkle },
 ]
 
 const TIMEZONES: string[] = [
@@ -245,7 +247,7 @@ export function ProfileEditModal({ open, onClose }: { open: boolean; onClose: ()
                     aria-label="Change avatar"
                     className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background shadow-sm transition hover:bg-secondary disabled:opacity-50"
                   >
-                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+                    {uploading ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <PenNib className="h-3.5 w-3.5" />}
                   </button>
                   <input
                     ref={fileInputRef}
@@ -382,7 +384,7 @@ export function ProfileEditModal({ open, onClose }: { open: boolean; onClose: ()
             <footer className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
               <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-xl">Cancel</Button>
               <Button onClick={handleSave} disabled={saving || uploading} className="rounded-xl">
-                {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Check className="mr-1.5 h-4 w-4" />}
+                {saving ? <CircleNotch className="mr-1.5 h-4 w-4 animate-spin" /> : <Check className="mr-1.5 h-4 w-4" />}
                 Save
               </Button>
             </footer>

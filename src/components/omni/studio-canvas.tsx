@@ -14,15 +14,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Circle,
+  Cursor,
   Diamond,
   Eraser,
-  ListChecks,
   Minus,
-  MousePointer2,
-  PenLine,
+  PenNib,
   Square,
-  Trash2,
-  Type,
+  TextAa,
+  Trash,
+} from '@phosphor-icons/react'
+import {
+  ListChecks,
 } from 'lucide-react'
 
 export interface CanvasElementSeed {
@@ -58,13 +60,13 @@ const PALETTE = ['#1e1e1e', '#D97706', '#BE123C', '#7C3AED', '#0F766E', '#B45309
 type Tool = 'select' | 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'text' | 'pen' | 'eraser'
 
 const TOOL_META: Array<{ id: Tool; icon: any; label: string }> = [
-  { id: 'select', icon: MousePointer2, label: 'Select' },
+  { id: 'select', icon: Cursor, label: 'Select' },
   { id: 'rectangle', icon: Square, label: 'Rectangle' },
   { id: 'ellipse', icon: Circle, label: 'Ellipse' },
   { id: 'diamond', icon: Diamond, label: 'Diamond' },
   { id: 'arrow', icon: Minus, label: 'Arrow' },
-  { id: 'text', icon: Type, label: 'Text' },
-  { id: 'pen', icon: PenLine, label: 'Draw' },
+  { id: 'text', icon: TextAa, label: 'Text' },
+  { id: 'pen', icon: PenNib, label: 'Draw' },
   { id: 'eraser', icon: Eraser, label: 'Erase' },
 ]
 
@@ -399,7 +401,7 @@ export function StudioCanvas({ onReady }: StudioCanvasProps) {
           aria-label="Delete selected element"
           className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash className="h-4 w-4" />
         </button>
       </div>
 

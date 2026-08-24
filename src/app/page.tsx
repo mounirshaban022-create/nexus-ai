@@ -5,35 +5,37 @@ import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Compass,
-  FolderKanban,
-  Library,
-  MessageSquare,
+  FolderOpen,
+  Books,
+  ChatCircleText,
   Plus,
-  User,
-  Sparkles,
-  Paperclip,
-  Pencil,
-  Send,
-  ChevronDown,
-  Zap,
+  UserCircle,
+  Sparkle,
+  PaperclipHorizontal,
+  PenNib,
+  PaperPlaneRight,
+  CaretDown,
+  Lightning,
   Brain,
   Eye,
-  Image as ImageIcon,
-  Video,
+  ImageSquare,
+  VideoCamera,
   Code,
-  Globe,
-  Mail,
-  BookOpen,
-  ScanEye,
-  Layers,
+  GlobeHemisphereWest,
+  EnvelopeSimple,
+  BookOpenText,
+  Eyes,
+  Stack,
   X,
-  LogIn,
+  SignIn,
   UserPlus,
-  Loader2,
-  ChevronRight,
-  Wand2,
+  CircleNotch,
+  CaretRight,
+  MagicWand,
   Check,
-} from 'lucide-react'
+  Headphones,
+  Microphone,
+} from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { Textarea } from '@/components/ui/textarea'
@@ -54,7 +56,6 @@ import { ProfileEditModal } from '@/components/omni/profile-edit-modal'
 import { AuthLanding } from '@/components/omni/auth-landing'
 import { ProfilePage } from '@/components/omni/profile-page'
 import { ArtifactPanel, useArtifact, type Artifact } from '@/components/omni/artifact-panel'
-import { Headphones, Mic } from 'lucide-react'
 
 // ============ TYPES ============
 type TabId = 'chat' | 'projects' | 'explore' | 'library' | 'profile'
@@ -507,45 +508,45 @@ function NexusApp() {
 
   const tr = t[language]
   const TABS: Array<{ id: TabId; label: string; icon: any }> = [
-    { id: 'chat', label: tr.chat, icon: MessageSquare },
-    { id: 'projects', label: tr.projects, icon: FolderKanban },
+    { id: 'chat', label: tr.chat, icon: ChatCircleText },
+    { id: 'projects', label: tr.projects, icon: FolderOpen },
     { id: 'explore', label: tr.explore, icon: Compass },
-    { id: 'library', label: tr.library, icon: Library },
-    { id: 'profile', label: tr.profile, icon: User },
+    { id: 'library', label: tr.library, icon: Books },
+    { id: 'profile', label: tr.profile, icon: UserCircle },
   ]
 
   const INTEL_OPTIONS: Array<{ id: Intelligence; label: string; desc: string; icon: any }> = [
-    { id: 'auto', label: tr.intelAuto, desc: tr.intelAutoDesc, icon: Sparkles },
-    { id: 'fast', label: tr.intelFast, desc: tr.intelFastDesc, icon: Zap },
+    { id: 'auto', label: tr.intelAuto, desc: tr.intelAutoDesc, icon: Sparkle },
+    { id: 'fast', label: tr.intelFast, desc: tr.intelFastDesc, icon: Lightning },
     { id: 'reasoning', label: tr.intelReasoning, desc: tr.intelReasoningDesc, icon: Brain },
     { id: 'vision', label: tr.intelVision, desc: tr.intelVisionDesc, icon: Eye },
   ]
 
   const TOOL_MENU: Array<{ category: string; items: ToolMenuItem[] }> = [
     { category: 'Create', items: [
-      { label: 'Image', icon: ImageIcon, tool: 'image' },
-      { label: 'Video', icon: Video, tool: 'video' },
+      { label: 'Image', icon: ImageSquare, tool: 'image' },
+      { label: 'Video', icon: VideoCamera, tool: 'video' },
       // THE one document tool — Studio does everything the old scattered
       // tools did (Writing / Office / Documents / Upload / Document
       // analysis) in a single Claude-canvas + Canva-class suite.
-      { label: 'Studio', icon: Layers, tool: 'studio' },
+      { label: 'Studio', icon: Stack, tool: 'studio' },
     ]},
     { category: 'Understand', items: [
-      { label: 'Camera', icon: ScanEye, tool: 'vision' },
+      { label: 'Camera', icon: Eyes, tool: 'vision' },
       { label: 'Vision', icon: Eye, tool: 'vision' },
     ]},
     { category: 'Think', items: [
-      { label: 'Deep research', icon: Globe, tool: 'search' },
+      { label: 'Deep research', icon: GlobeHemisphereWest, tool: 'search' },
       { label: 'Reasoning', icon: Brain, tool: 'agent' },
     ]},
     { category: 'Work', items: [
       { label: 'Code', icon: Code, tool: 'code' },
-      { label: 'Data analysis', icon: BookOpen, tool: 'code' },
+      { label: 'Data analysis', icon: BookOpenText, tool: 'code' },
     ]},
     { category: 'Connect', items: [
-      { label: 'Web search', icon: Globe, tool: 'search' },
+      { label: 'Web search', icon: GlobeHemisphereWest, tool: 'search' },
       { label: 'Connected apps', icon: Plus, tool: 'connectors' },
-      { label: 'Email', icon: Mail, tool: 'email' },
+      { label: 'Email', icon: EnvelopeSimple, tool: 'email' },
     ]},
   ]
 
@@ -563,9 +564,9 @@ function NexusApp() {
   }
 
   const SUGGESTIONS: Array<{ title: string; subtitle: string; icon: any; tool?: ToolId }> = [
-    { title: tr.suggestResearch, subtitle: tr.suggestResearchSub, icon: Globe, tool: 'search' },
-    { title: tr.suggestAnalyze, subtitle: tr.suggestAnalyzeSub, icon: Layers, tool: 'studio' },
-    { title: tr.suggestCreate, subtitle: tr.suggestCreateSub, icon: Wand2, tool: 'image' },
+    { title: tr.suggestResearch, subtitle: tr.suggestResearchSub, icon: GlobeHemisphereWest, tool: 'search' },
+    { title: tr.suggestAnalyze, subtitle: tr.suggestAnalyzeSub, icon: Stack, tool: 'studio' },
+    { title: tr.suggestCreate, subtitle: tr.suggestCreateSub, icon: MagicWand, tool: 'image' },
     { title: tr.suggestCode, subtitle: tr.suggestCodeSub, icon: Code, tool: 'code' },
   ]
 
@@ -739,7 +740,7 @@ function NexusApp() {
                   className={`relative flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left transition ${active ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary/60'}`}
                 >
                   {active && <motion.span layoutId="side-active" className="absolute left-0 h-5 w-1 rounded-full bg-primary" style={{ top: '50%', transform: 'translateY(-50%)' }} transition={{ type: 'spring', stiffness: 500, damping: 35 }} />}
-                  <Icon className={`h-[18px] w-[18px] ${active ? 'text-primary' : ''}`} aria-hidden />
+                  <Icon size={18} weight={active ? 'fill' : 'duotone'} className={active ? 'text-primary' : ''} aria-hidden />
                   <span className="text-sm">{tab.label}</span>
                 </motion.button>
               )
@@ -752,7 +753,7 @@ function NexusApp() {
                 <span className="truncate text-sm font-medium">{displayName}</span>
                 <span className="truncate text-[11px] text-muted-foreground">{user?.email || 'Guest mode'}</span>
               </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
+              <CaretRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
             </button>
           </div>
         </aside>
@@ -780,9 +781,9 @@ function NexusApp() {
                 <Headphones className="h-4 w-4" />
               </button>
               <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
-                {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+                {intelligence === 'auto' ? <Sparkle size={14} weight="fill" /> : intelligence === 'reasoning' ? <Brain size={14} weight="fill" /> : intelligence === 'vision' ? <Eye size={14} weight="fill" /> : <Lightning size={14} weight="fill" />}
                 <span className="capitalize">{intelligence}</span>
-                <ChevronDown className="h-3 w-3" />
+                <CaretDown className="h-3 w-3" />
               </button>
             </div>
           </header>
@@ -794,9 +795,9 @@ function NexusApp() {
             style={activeTab === 'chat' ? undefined : { display: 'none' }}
           >
               <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium transition hover:bg-secondary">
-                {intelligence === 'auto' ? <Sparkles className="h-4 w-4" /> : intelligence === 'reasoning' ? <Brain className="h-4 w-4" /> : intelligence === 'vision' ? <Eye className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+                {intelligence === 'auto' ? <Sparkle size={16} weight="fill" /> : intelligence === 'reasoning' ? <Brain size={16} weight="fill" /> : intelligence === 'vision' ? <Eye size={16} weight="fill" /> : <Lightning size={16} weight="fill" />}
                 <span className="capitalize">Nexus {intelligence}</span>
-                <ChevronDown className="h-3.5 w-3.5" />
+                <CaretDown className="h-3.5 w-3.5" />
               </button>
               <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
                 className="flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-secondary"
@@ -930,7 +931,7 @@ function NexusApp() {
                       <div className="flex items-center gap-2 px-1">
                         {toolRunningLabel ? (
                           <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                            <CircleNotch className="h-3.5 w-3.5 animate-spin text-primary" />
                             <span className="text-xs text-muted-foreground">{toolRunningLabel}</span>
                           </>
                         ) : (
@@ -958,7 +959,7 @@ function NexusApp() {
                       context. */}
                   {activeProjectId && activeProjectName && (
                     <div className="flex items-center gap-2 self-start rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
-                      <FolderKanban className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                      <FolderOpen className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                       <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{activeProjectName}</span>
                       <button
                         type="button"
@@ -981,13 +982,13 @@ function NexusApp() {
                   {pendingToolDef && (
                     <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5">
                       {(() => {
-                        const Icon = TOOL_MENU.flatMap(c => c.items).find(i => i.tool === toolEngine.pendingTool)?.icon || Sparkles
+                        const Icon = TOOL_MENU.flatMap(c => c.items).find(i => i.tool === toolEngine.pendingTool)?.icon || Sparkle
                         return <Icon className="h-3.5 w-3.5 text-primary" />
                       })()}
                       <span className="text-xs font-medium text-primary">{pendingToolDef.label}</span>
                       {toolEngine.pendingFile && (
                         <span className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
-                          <Paperclip className="h-2.5 w-2.5" />
+                          <PaperclipHorizontal className="h-2.5 w-2.5" />
                           {toolEngine.pendingFile.name.slice(0, 20)}
                           <button type="button" onClick={() => toolEngine.clearPendingFile()} className="ml-0.5">
                             <X className="h-2.5 w-2.5" />
@@ -1007,7 +1008,7 @@ function NexusApp() {
                       the next message; the AI can read, edit, or run PDF ops on it. */}
                   {chatAttachment && !pendingToolDef && (
                     <div className="flex items-center gap-2 self-start rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5">
-                      <Paperclip className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                      <PaperclipHorizontal className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
                       <span className="max-w-[220px] truncate text-xs font-medium text-emerald-700">{chatAttachment.filename}</span>
                       <span className="text-[10px] text-emerald-600/70">{(chatAttachment.size / 1024).toFixed(0)}KB · AI can edit this</span>
                       <button type="button" onClick={() => setChatAttachment(null)} aria-label="Remove attachment" className="text-emerald-700/70 hover:text-emerald-700">
@@ -1032,18 +1033,18 @@ function NexusApp() {
                         title="Attach a document — the AI can read, edit, and transform it"
                         className={`flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-secondary ${chatAttachment ? 'text-emerald-600' : 'text-muted-foreground hover:text-foreground'}`}
                       >
-                        <Paperclip className="h-[18px] w-[18px]" />
+                        <PaperclipHorizontal className="h-[18px] w-[18px]" />
                       </button>
                       <button type="button" onClick={() => setVoiceOpen(true)}
                         aria-label="Open voice mode"
                         className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-primary"
                       >
-                        <Mic className="h-[18px] w-[18px]" />
+                        <Microphone className="h-[18px] w-[18px]" />
                       </button>
                       <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile && !chatAttachment) || sending || !!toolRunningLabel} aria-label="Send"
                         className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-30"
                       >
-                        <Send className="h-4 w-4" />
+                        <PaperPlaneRight className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
@@ -1218,7 +1219,7 @@ function NexusApp() {
               {active && (
                 <span aria-hidden className="absolute top-0 h-0.5 w-7 rounded-full bg-primary" />
               )}
-              <Icon className="h-[22px] w-[22px] transition-transform" aria-hidden />
+              <Icon size={22} weight={active ? 'fill' : 'duotone'} className="transition-transform" aria-hidden />
               <span className={`text-[11px] leading-none transition-colors ${active ? 'font-semibold text-primary' : 'text-muted-foreground'}`}>{tab.label}</span>
             </button>
           )

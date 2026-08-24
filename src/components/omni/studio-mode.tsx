@@ -24,22 +24,24 @@ import dynamic from 'next/dynamic'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowRight,
-  BadgeCheck,
+  ChatCircleDots,
+  CircleNotch,
+  FileArrowDown,
   FileText,
-  FileDown,
-  FileType2,
-  Languages,
-  Loader2,
-  MessageCircleQuestion,
-  PenLine,
+  FileDoc,
+  MagicWand,
+  PaperPlaneRight,
+  PenNib,
   Plus,
-  Send,
-  Sparkles,
-  ListChecks,
-  Upload,
-  Wand2,
+  SealCheck,
+  Sparkle,
+  TextAa,
+  Translate,
+  UploadSimple,
   X,
-  Type,
+} from '@phosphor-icons/react'
+import {
+  ListChecks,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { usePreferences } from '@/lib/preferences'
@@ -55,7 +57,7 @@ const StudioDocEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading editor…
+        <CircleNotch className="h-4 w-4 animate-spin" /> Loading editor…
       </div>
     ),
   }
@@ -91,11 +93,11 @@ interface DocQaMessage {
 }
 
 const CONVERT_FORMATS: Array<{ id: 'pdf' | 'docx' | 'md' | 'html' | 'txt'; label: string; icon: any }> = [
-  { id: 'pdf', label: 'PDF', icon: FileDown },
+  { id: 'pdf', label: 'PDF', icon: FileArrowDown },
   { id: 'docx', label: 'Word', icon: FileText },
-  { id: 'md', label: 'Markdown', icon: FileType2 },
-  { id: 'html', label: 'HTML', icon: Type },
-  { id: 'txt', label: 'Text', icon: PenLine },
+  { id: 'md', label: 'Markdown', icon: FileDoc },
+  { id: 'html', label: 'HTML', icon: TextAa },
+  { id: 'txt', label: 'Text', icon: PenNib },
 ]
 
 export function StudioMode({ open, onClose }: StudioModeProps) {
@@ -461,7 +463,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
           <header className="flex flex-wrap items-center gap-2 border-b border-border bg-background px-3 py-2 sm:px-4">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-sm">
-                <Wand2 className="h-4 w-4" aria-hidden />
+                <MagicWand className="h-4 w-4" aria-hidden />
               </span>
               <div className="flex flex-col leading-tight">
                 <span className="text-sm font-bold">Studio</span>
@@ -496,7 +498,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                   tab === 'canvas' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <PenLine className="h-3.5 w-3.5" aria-hidden /> Canvas
+                <PenNib className="h-3.5 w-3.5" aria-hidden /> Canvas
               </button>
               <button
                 onClick={() => setTab('pdf')}
@@ -505,7 +507,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                   tab === 'pdf' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <FileDown className="h-3.5 w-3.5" aria-hidden /> PDF
+                <FileArrowDown className="h-3.5 w-3.5" aria-hidden /> PDF
               </button>
             </div>
 
@@ -513,18 +515,18 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
               {tab === 'doc' ? (
                 <>
                   <Button size="sm" onClick={() => setAiOpen(!aiOpen)} className="h-8 gap-1.5 rounded-lg bg-primary text-primary-foreground hover:brightness-110">
-                    {busy === 'write' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} AI Write
+                    {busy === 'write' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <Sparkle className="h-3.5 w-3.5" />} AI Write
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setAskOpen(!askOpen)} disabled={!currentDocText.trim()} className="h-8 gap-1 rounded-lg text-xs" title="Chat with the document — extract information directly">
-                    {askBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircleQuestion className="h-3.5 w-3.5" />} Ask
+                    {askBusy ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <ChatCircleDots className="h-3.5 w-3.5" />} Ask
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setGalleryOpen(true)} className="h-8 gap-1 rounded-lg text-xs" title="Premium templates">
-                    <BadgeCheck className="h-3.5 w-3.5 text-amber-600" /> Templates
+                    <SealCheck className="h-3.5 w-3.5 text-amber-600" /> Templates
                   </Button>
                   {/* Convert dropdown */}
                   <div className="relative">
                     <Button size="sm" variant="outline" onClick={() => setConvertOpen(!convertOpen)} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs">
-                      {busy === 'export' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />} Convert
+                      {busy === 'export' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <FileArrowDown className="h-3.5 w-3.5" />} Convert
                     </Button>
                     {convertOpen && (
                       <>
@@ -545,32 +547,32 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                   </div>
                   <div className="hidden items-center gap-1 sm:flex">
                     <Button size="sm" variant="outline" onClick={() => aiTransform('enhance')} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs" title="Improve the selected blocks">
-                      {busy === 'enhance' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Enhance
+                      {busy === 'enhance' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <MagicWand className="h-3.5 w-3.5" />} Enhance
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => aiTransform('summarize')} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs" title="Summarize the selection">
-                      {busy === 'summarize' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />} Summarize
+                      {busy === 'summarize' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />} Summarize
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => aiTransform('translate', 'Arabic')} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs" title="Translate to Arabic">
-                      <Languages className="h-3.5 w-3.5" /> عربي
+                      <Translate className="h-3.5 w-3.5" /> عربي
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => aiTransform('translate', 'English')} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs" title="Translate to English">
-                      <Languages className="h-3.5 w-3.5" /> EN
+                      <Translate className="h-3.5 w-3.5" /> EN
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => aiTransform('continue')} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs" title="Let the AI keep writing">
-                      {busy === 'continue' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />} Continue
+                      {busy === 'continue' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />} Continue
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs">
-                      {busy === 'import' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Import
+                      {busy === 'import' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <UploadSimple className="h-3.5 w-3.5" />} Import
                     </Button>
                   </div>
                 </>
               ) : (
                 <>
                   <Button size="sm" onClick={() => setCanvasAiOpen(!canvasAiOpen)} className="h-8 gap-1.5 rounded-lg bg-primary text-primary-foreground hover:brightness-110">
-                    {busy === 'design' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} AI Design
+                    {busy === 'design' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <Sparkle className="h-3.5 w-3.5" />} AI Design
                   </Button>
                   <Button size="sm" variant="outline" onClick={exportCanvas} disabled={!!busy} className="h-8 gap-1 rounded-lg text-xs">
-                    {busy === 'export' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />} PNG
+                    {busy === 'export' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <FileArrowDown className="h-3.5 w-3.5" />} PNG
                   </Button>
                 </>
               )}
@@ -622,7 +624,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                       className="min-h-[52px] flex-1 resize-none rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15"
                     />
                     <Button onClick={aiWrite} disabled={!aiPrompt.trim() || !!busy} className="gap-1.5 rounded-xl">
-                      <Sparkles className="h-3.5 w-3.5" /> Write it
+                      <Sparkle className="h-3.5 w-3.5" /> Write it
                     </Button>
                   </div>
                 </div>
@@ -656,7 +658,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                     className="min-h-[52px] flex-1 resize-none rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15"
                   />
                   <Button onClick={aiDesign} disabled={!canvasPrompt.trim() || !!busy} className="gap-1.5 rounded-xl">
-                    <Sparkles className="h-3.5 w-3.5" /> Design it
+                    <Sparkle className="h-3.5 w-3.5" /> Design it
                   </Button>
                 </div>
               </motion.div>
@@ -673,7 +675,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                 className="overflow-hidden border-b border-border bg-emerald-500/5"
               >
                 <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-3 px-4 py-2.5">
-                  <FileDown className="h-4 w-4 text-emerald-600" aria-hidden />
+                  <FileArrowDown className="h-4 w-4 text-emerald-600" aria-hidden />
                   <span className="flex-1 truncate text-sm font-medium">{exportedFile.title}</span>
                   <span className="text-xs text-muted-foreground">{exportedFile.format.toUpperCase()} · {(exportedFile.size / 1024).toFixed(1)} KB</span>
                   <Button asChild size="sm" className="rounded-lg bg-emerald-600 text-white hover:bg-emerald-500">
@@ -717,13 +719,13 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button size="sm" variant="outline" onClick={() => setGalleryOpen(true)} className="gap-1.5 rounded-lg text-xs">
-                          <BadgeCheck className="h-3.5 w-3.5 text-amber-600" /> Browse all 12 premium templates
+                          <SealCheck className="h-3.5 w-3.5 text-amber-600" /> Browse all 12 premium templates
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => setAiOpen(true)} className="gap-1.5 rounded-lg text-xs">
-                          <Sparkles className="h-3.5 w-3.5" /> Let AI write it
+                          <Sparkle className="h-3.5 w-3.5" /> Let AI write it
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={!!busy} className="gap-1.5 rounded-lg text-xs">
-                          {busy === 'import' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Import a file
+                          {busy === 'import' ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <UploadSimple className="h-3.5 w-3.5" />} Import a file
                         </Button>
                       </div>
                     </div>
@@ -760,7 +762,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                     <div className="flex h-full flex-col">
                       <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
                         <p className="flex items-center gap-1.5 text-xs font-semibold">
-                          <MessageCircleQuestion className="h-3.5 w-3.5 text-primary" aria-hidden /> Ask the document
+                          <ChatCircleDots className="h-3.5 w-3.5 text-primary" aria-hidden /> Ask the document
                         </p>
                         <button onClick={() => setAskOpen(false)} aria-label="Close Ask panel" className="rounded-lg p-1 text-muted-foreground hover:bg-secondary">
                           <X className="h-3.5 w-3.5" />
@@ -769,7 +771,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                       <div ref={qaScrollRef} className="omni-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3">
                         {qaThread.length === 0 ? (
                           <div className="px-1 py-6 text-center">
-                            <MessageCircleQuestion className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
+                            <ChatCircleDots className="mx-auto mb-2 h-7 w-7 text-muted-foreground/50" aria-hidden />
                             <p className="text-xs text-muted-foreground">
                               Ask anything — answers come <strong>directly from your document</strong>.
                             </p>
@@ -829,7 +831,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                             className="min-h-[44px] flex-1 resize-none rounded-xl border border-border/70 bg-background px-2.5 py-2 text-[13px] outline-none focus:border-primary/40"
                           />
                           <Button size="sm" onClick={askDoc} disabled={!askInput.trim() || askBusy} aria-label="Send question" className="h-9 w-9 rounded-xl p-0">
-                            <Send className="h-3.5 w-3.5" />
+                            <PaperPlaneRight className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       </div>
@@ -871,7 +873,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                 <div className="flex items-center justify-between border-b border-border px-4 py-3">
                   <div>
                     <h3 className="flex items-center gap-2 text-sm font-bold">
-                      <BadgeCheck className="h-4 w-4 text-amber-600" aria-hidden /> Premium templates
+                      <SealCheck className="h-4 w-4 text-amber-600" aria-hidden /> Premium templates
                     </h3>
                     <p className="text-[11px] text-muted-foreground">Professional starters — every placeholder is yours to fill, and AI can enhance anything.</p>
                   </div>
@@ -905,7 +907,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                       >
                         {t.premium && (
                           <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">
-                            <BadgeCheck className="h-3 w-3" aria-hidden /> Premium
+                            <SealCheck className="h-3 w-3" aria-hidden /> Premium
                           </span>
                         )}
                         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -941,22 +943,22 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
           {tab === 'doc' && (docStarted || !!initialMarkdown) && (
             <div className="flex items-center gap-1 overflow-x-auto border-t border-border bg-background px-3 py-1.5 sm:hidden">
               <Button size="sm" variant="ghost" onClick={() => setAskOpen(!askOpen)} disabled={!currentDocText.trim()} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
-                {askBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircleQuestion className="h-3.5 w-3.5" />} Ask
+                {askBusy ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <ChatCircleDots className="h-3.5 w-3.5" />} Ask
               </Button>
               <Button size="sm" variant="ghost" onClick={() => aiTransform('enhance')} disabled={!!busy} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
-                <Wand2 className="h-3.5 w-3.5" /> Enhance
+                <MagicWand className="h-3.5 w-3.5" /> Enhance
               </Button>
               <Button size="sm" variant="ghost" onClick={() => aiTransform('summarize')} disabled={!!busy} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
                 <ListChecks className="h-3.5 w-3.5" /> Summarize
               </Button>
               <Button size="sm" variant="ghost" onClick={() => aiTransform('translate', 'Arabic')} disabled={!!busy} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
-                <Languages className="h-3.5 w-3.5" /> عربي
+                <Translate className="h-3.5 w-3.5" /> عربي
               </Button>
               <Button size="sm" variant="ghost" onClick={() => aiTransform('continue')} disabled={!!busy} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
-                <Type className="h-3.5 w-3.5" /> Continue
+                <TextAa className="h-3.5 w-3.5" /> Continue
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setConvertOpen(!convertOpen)} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
-                <FileDown className="h-3.5 w-3.5" /> Convert
+                <FileArrowDown className="h-3.5 w-3.5" /> Convert
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setAiOpen(true)} className="h-8 shrink-0 gap-1 rounded-lg text-xs">
                 <Plus className="h-3.5 w-3.5" /> AI Write
@@ -976,7 +978,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
               >
                 <div className="flex items-center justify-between px-4 py-2.5">
                   <p className="flex items-center gap-1.5 text-xs font-semibold">
-                    <MessageCircleQuestion className="h-3.5 w-3.5 text-primary" aria-hidden /> Ask the document
+                    <ChatCircleDots className="h-3.5 w-3.5 text-primary" aria-hidden /> Ask the document
                   </p>
                   <button onClick={() => setAskOpen(false)} aria-label="Close Ask panel" className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary">
                     <X className="h-4 w-4" />
@@ -1027,7 +1029,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                       className="min-h-[44px] flex-1 resize-none rounded-xl border border-border/70 bg-background px-3 py-2.5 text-[13px] outline-none focus:border-primary/40"
                     />
                     <Button size="sm" onClick={askDoc} disabled={!askInput.trim() || askBusy} aria-label="Send question" className="h-11 w-11 rounded-xl p-0">
-                      <Send className="h-4 w-4" />
+                      <PaperPlaneRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>

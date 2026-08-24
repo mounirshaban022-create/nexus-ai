@@ -3,20 +3,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  BrainCircuit,
+  ArrowSquareOut,
+  Brain,
+  CaretDown,
   Check,
-  ChevronDown,
-  ExternalLink,
-  KeyRound,
-  Loader2,
-  PlugZap,
+  CircleNotch,
+  Key,
+  Lightning,
+  Plug,
   Power,
-  ShieldOff,
-  Sparkles,
-  Trash2,
+  ShieldSlash,
+  Sparkle,
+  Trash,
   X,
-  Zap,
-} from 'lucide-react'
+} from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -199,7 +199,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
         aria-label="Show AI models and providers"
       >
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <BrainCircuit className="h-5 w-5" aria-hidden />
+          <Brain className="h-5 w-5" aria-hidden />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold">AI Models &amp; Providers</span>
@@ -207,7 +207,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
             3 zero-setup engines · {presets.length} free providers — tap to expand
           </span>
         </span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <CaretDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
       </button>
     )
   }
@@ -217,7 +217,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
       <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
         <header className="mb-6">
           <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
-            <BrainCircuit className="h-5 w-5 text-primary" aria-hidden /> AI Models
+            <Brain className="h-5 w-5 text-primary" aria-hidden /> AI Models
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             NEXUS now ships 3 zero-setup anonymous LLM gateways (LLM7.io, OVHcloud, Kilo Code)
@@ -268,7 +268,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                       aria-label={`Remove ${p.label}`}
                       className="rounded-lg text-xs hover:border-destructive/40 hover:text-destructive"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -282,7 +282,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
           <div className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-5">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 text-primary">
-                <Zap className="h-5 w-5" aria-hidden />
+                <Lightning className="h-5 w-5" aria-hidden />
               </span>
               <div className="min-w-0 flex-1">
                 <h4 className="flex items-center gap-2 text-sm font-semibold">
@@ -317,7 +317,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
         <section className="mb-6" aria-label="Zero-setup anonymous providers">
           <div className="rounded-2xl border-2 border-emerald-500/30 bg-emerald-500/5 p-5">
             <div className="flex items-center gap-2">
-              <ShieldOff className="h-4 w-4 text-emerald-700" aria-hidden />
+              <ShieldSlash className="h-4 w-4 text-emerald-700" aria-hidden />
               <h3 className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
                 Zero-setup fallbacks — bypass Z.ai rate limits
               </h3>
@@ -351,7 +351,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <PlugZap className="h-4 w-4 text-emerald-600" aria-hidden />
+                      <Plug className="h-4 w-4 text-emerald-600" aria-hidden />
                       {connected?.status === 'connected' && (
                         <Badge
                           className="gap-1 rounded-full border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-700"
@@ -373,11 +373,11 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                       onClick={() => connectAnonymous(preset.id, preset.label)}
                     >
                       {isConnecting ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <CircleNotch className="h-3 w-3 animate-spin" />
                       ) : connected ? (
                         <Check className="h-3 w-3" />
                       ) : (
-                        <PlugZap className="h-3 w-3" />
+                        <Plug className="h-3 w-3" />
                       )}
                       {connected ? 'Connected' : 'One-click connect'}
                     </Button>
@@ -415,7 +415,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-muted text-muted-foreground">
-                        <Zap className="h-5 w-5" aria-hidden />
+                        <Lightning className="h-5 w-5" aria-hidden />
                       </div>
                       {connected?.status === 'connected' && (
                         <Badge className="gap-1 rounded-full border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-700" variant="outline">
@@ -472,7 +472,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                             disabled={saving}
                             className="flex-1 gap-1.5 rounded-lg bg-primary text-primary-foreground hover:brightness-110"
                           >
-                            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                            {saving ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <Key className="h-3.5 w-3.5" />}
                             Save
                           </Button>
                         </div>
@@ -489,7 +489,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                           }}
                           className="h-8 gap-1.5 rounded-lg text-xs"
                         >
-                          <KeyRound className="h-3.5 w-3.5" /> {connected ? 'Update key' : 'Add key'}
+                          <Key className="h-3.5 w-3.5" /> {connected ? 'Update key' : 'Add key'}
                         </Button>
                         <a
                           href={preset.keyUrl}
@@ -497,7 +497,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
                           rel="noopener noreferrer"
                           className="flex items-center gap-1 text-[11px] text-primary hover:underline"
                         >
-                          Get free key <ExternalLink className="h-3 w-3" aria-hidden />
+                          Get free key <ArrowSquareOut className="h-3 w-3" aria-hidden />
                         </a>
                       </div>
                     )}
@@ -511,7 +511,7 @@ export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
         <section className="mt-8">
           <div className="rounded-2xl border border-border/60 bg-card/50 p-5 backdrop-blur">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Sparkles className="h-4 w-4" aria-hidden /> How it works
+              <Sparkle className="h-4 w-4" aria-hidden /> How it works
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               The NEXUS smart router tries each layer in order: (1) your Puter browser engine,
