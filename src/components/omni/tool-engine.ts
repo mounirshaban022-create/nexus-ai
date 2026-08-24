@@ -335,29 +335,34 @@ export function useToolEngine(
           break
         }
         case 'office': {
-          // Plan first
-          const planRes = await safeJsonFetch<any>('/api/office/plan', {
+          // Step 1: plan the document structure with the LLM.
+          // /api/office/plan returns { title, blocks } (NOT { plan }).
+          const planRes = await safeJsonFetch<{ title: string; blocks: any[] }>('/api/office/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt }),
           }, { timeoutMs: 60_000, label: 'Document planning' })
-          if (!planRes.ok || !planRes.data?.plan) throw new Error(planRes.error || 'Planning failed.')
-          // Then create
-          const createRes = await safeJsonFetch<any>('/api/office/create', {
+          if (!planRes.ok || !planRes.data?.blocks?.length) throw new Error(planRes.error || 'Planning failed.')
+          const { title: docTitle, blocks: docBlocks } = planRes.data
+          // Step 2: build the real file.
+          // /api/office/create expects { format, title, blocks, theme } and
+          // returns { file: { url, format, title, filename, size, mimeType } }
+          // (NOT { attachment }).
+          const createRes = await safeJsonFetch<{ file: { url: string; format: string; title: string; filename: string; size: number } }>('/api/office/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, plan: planRes.data.plan }),
+            body: JSON.stringify({ format: 'docx', title: docTitle, blocks: docBlocks, theme: 'nexus' }),
           }, { timeoutMs: 120_000, label: 'Document creation' })
-          if (!createRes.ok || !createRes.data?.attachment) throw new Error(createRes.error || 'Document creation failed.')
-          const a = createRes.data.attachment
+          if (!createRes.ok || !createRes.data?.file) throw new Error(createRes.error || 'Document creation failed.')
+          const f = createRes.data.file
           result = {
-            content: `I drafted a ${a?.format?.toUpperCase() || 'document'} for you. Download below:`,
+            content: `I drafted a ${f.format.toUpperCase()} for you — **${f.title}**. Download below:`,
             attachments: [{
               type: 'document',
-              url: a?.downloadUrl || a?.url,
-              title: a?.title || 'Document',
-              format: a?.format || 'docx',
-              size: a?.size,
+              url: f.url,
+              title: f.title,
+              format: f.format,
+              size: f.size,
             }],
           }
           break

@@ -1,0 +1,703 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useRef, useState } from 'react'
+     4→import Image from 'next/image'
+     5→import { motion, AnimatePresence } from 'framer-motion'
+     6→import { Mic, Phone, Settings2, Square, X, ChevronDown, Check, Volume2, Radio } from 'lucide-react'
+     7→import { useToast } from '@/hooks/use-toast'
+     8→import { startAsrMode, stopAsrMode } from './voice-asr-fallback'
+     9→import { EDGE_VOICES, NEXUS_VOICES, isEdgeVoice, type VoiceOption } from '@/lib/voices'
+    10→import { safeJsonFetch } from '@/lib/safe-fetch'
+    11→import { usePreferences } from '@/lib/preferences'
+    12→
+    13→/**
+    14→ * NEXUS Premium Voice Mode — ChatGPT-style full-screen voice conversation.
+    15→ *
+    16→ * Pipeline (proven, multi-layer, resilient):
+    17→ *  - INPUT:  Browser-native Web Speech API (live transcription as you speak).
+    18→ *            Falls back to MediaRecorder → /api/asr (server-side ASR) if
+    19→ *            the browser can't do on-device recognition.
+    20→ *  - THINK:  /api/voice/turn (single fast LLM call, voice persona prompt).
+    21→ *  - OUTPUT: /api/tts (Microsoft neural voices, 300+ premium voices) OR
+    22→ *            Kokoro in-browser neural voice OR browser speechSynthesis.
+    23→ *
+    24→ * Premium UI:
+    25→ *  - Full-screen gradient backdrop with ambient grain.
+    26→ *  - Large animated orb (gradient core + pulsing rings + waveform).
+    27→ *  - Live interim transcript as you speak.
+    28→ *  - Conversation transcript ribbon at the bottom.
+    29→ *  - Voice picker (premium neural voices grouped by language).
+    30→ *  - Language picker (12 languages).
+    31→ */
+    32→
+    33→type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking'
+    34→
+    35→interface Turn {
+    36→  id: string
+    37→  user: string
+    38→  reply: string
+    39→}
+    40→
+    41→const LANGUAGES = [
+    42→  { code: 'en-US', label: 'English (US)', voice: 'en-US-AriaNeural' },
+    43→  { code: 'en-GB', label: 'English (UK)', voice: 'en-GB-SoniaNeural' },
+    44→  { code: 'ar-AE', label: 'العربية', voice: 'ar-AE-FatimaNeural' },
+    45→  { code: 'ar-SA', label: 'العربية (SA)', voice: 'ar-SA-ZariyahNeural' },
+    46→  { code: 'fr-FR', label: 'Français', voice: 'fr-FR-DeniseNeural' },
+    47→  { code: 'es-ES', label: 'Español', voice: 'es-ES-ElviraNeural' },
+    48→  { code: 'de-DE', label: 'Deutsch', voice: 'de-DE-KatjaNeural' },
+    49→  { code: 'hi-IN', label: 'हिन्दी', voice: 'hi-IN-SwaraNeural' },
+    50→  { code: 'ja-JP', label: '日本語', voice: 'ja-JP-NanamiNeural' },
+    51→  { code: 'zh-CN', label: '中文', voice: 'zh-CN-XiaoxiaoNeural' },
+    52→  { code: 'pt-BR', label: 'Português', voice: 'pt-BR-FranciscaNeural' },
+    53→  { code: 'ru-RU', label: 'Русский', voice: 'ru-RU-SvetlanaNeural' },
+    54→  { code: 'tr-TR', label: 'Türkçe', voice: 'tr-TR-EmelNeural' },
+    55→  { code: 'it-IT', label: 'Italiano', voice: 'it-IT-ElsaNeural' },
+    56→  { code: 'ko-KR', label: '한국어', voice: 'ko-KR-SunHiNeural' },
+    57→]
+    58→
+    59→export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+    60→  const { toast } = useToast()
+    61→  // UI language from global preferences — passed as `?lang=en|ar` to /api/tts
+    62→  // and as a `lang` field to /api/voice/turn so the server can swap to a
+    63→  // high-quality Arabic neural voice when the user is in Arabic mode.
+    64→  const prefLang = usePreferences((s) => s.language)
+    65→  const [state, setState] = useState<VoiceState>('idle')
+    66→  const [iframeBlocked, setIframeBlocked] = useState(false)
+    67→  const [audioUnlocked, setAudioUnlocked] = useState(false)
+    68→  const [lang, setLang] = useState('en-US')
+    69→  const [ttsVoice, setTtsVoice] = useState('en-US-AriaNeural')
+    70→  const [interim, setInterim] = useState('')
+    71→  const [micLevel, setMicLevel] = useState(0)
+    72→  const [turns, setTurns] = useState<Turn[]>([])
+    73→  const [showVoicePicker, setShowVoicePicker] = useState(false)
+    74→  const [showLangPicker, setShowLangPicker] = useState(false)
+    75→  const [error, setError] = useState('')
+    76→
+    77→  const recognitionRef = useRef<any>(null)
+    78→  const historyRef = useRef<Array<{ role: string; content: string }>>([])
+    79→  const audioRef = useRef<HTMLAudioElement | null>(null)
+    80→  const stateRef = useRef<VoiceState>('idle')
+    81→  const audioCtxRef = useRef<AudioContext | null>(null)
+    82→  const sourceRef = useRef<AudioBufferSourceNode | null>(null)
+    83→  const scrollRef = useRef<HTMLDivElement | null>(null)
+    84→
+    85→  // Bug C: keep the overlay cheap when closed — callbacks no-op via this ref.
+    86→  const openRef = useRef(open)
+    87→  // Bug K: per-turn AbortController so in-flight think()/speak() can be cancelled on close.
+    88→  const controllerRef = useRef<AbortController | null>(null)
+    89→  // Bug E: SpeechRecognition auto-restart loop protection.
+    90→  const restartCountRef = useRef(0)
+    91→  const lastStartRef = useRef(0)
+    92→  const manualStopRef = useRef(false)
+    93→
+    94→  const setStateSafe = useCallback((s: VoiceState) => {
+    95→    stateRef.current = s
+    96→    setState(s)
+    97→  }, [])
+    98→
+    99→  // Bug C: keep openRef in sync so guards inside callbacks read the latest value.
+   100→  useEffect(() => { openRef.current = open }, [open])
+   101→
+   102→  const stopSpeaking = useCallback(() => {
+   103→    // Bug K: cancel any in-flight think()/speak() fetch.
+   104→    controllerRef.current?.abort()
+   105→    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
+   106→    if (sourceRef.current) { try { sourceRef.current.stop() } catch {} sourceRef.current = null }
+   107→  }, [])
+   108→
+   109→  const stopRecognition = useCallback(() => {
+   110→    // Bug E: mark as manually stopped so onend won't auto-restart.
+   111→    manualStopRef.current = true
+   112→    if (recognitionRef.current) {
+   113→      try {
+   114→        const pulse = (recognitionRef.current as any).__pulse
+   115→        if (pulse) clearInterval(pulse)
+   116→        recognitionRef.current.onend = null
+   117→        recognitionRef.current.onresult = null
+   118→        recognitionRef.current.onerror = null
+   119→        recognitionRef.current.stop()
+   120→      } catch {}
+   121→      recognitionRef.current = null
+   122→      setMicLevel(0)
+   123→    }
+   124→  }, [])
+   125→
+   126→  /* ---------- WebAudio unlock (autoplay policy) ---------- */
+   127→  const unlockAudio = useCallback(() => {
+   128→    try {
+   129→      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+   130→        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+   131→        audioCtxRef.current = new AudioCtx()
+   132→      }
+   133→      if (audioCtxRef.current.state === 'suspended') {
+   134→        audioCtxRef.current.resume().catch(() => {})
+   135→      }
+   136→      setAudioUnlocked(true)
+   137→    } catch {}
+   138→  }, [])
+   139→
+   140→  const playWebAudio = useCallback(async (arrayBuffer: ArrayBuffer): Promise<void> => {
+   141→    unlockAudio()
+   142→    const ctx = audioCtxRef.current
+   143→    if (!ctx || ctx.state === 'closed') throw new Error('Audio context unavailable')
+   144→    if (ctx.state === 'suspended') await ctx.resume().catch(() => {})
+   145→    const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+   146→    if (sourceRef.current) { try { sourceRef.current.stop() } catch {} }
+   147→    await new Promise<void>((resolve) => {
+   148→      const source = ctx.createBufferSource()
+   149→      source.buffer = audioBuffer
+   150→      source.connect(ctx.destination)
+   151→      sourceRef.current = source
+   152→      source.onended = () => resolve()
+   153→      try { source.start() } catch { resolve() }
+   154→    })
+   155→  }, [unlockAudio])
+   156→
+   157→  /* ---------- SPEAK (multi-layer TTS — Kokoro removed for latency) ---------- */
+   158→  const speak = useCallback(async (text: string): Promise<void> => {
+   159→    // Bug C: no-op when overlay closed.
+   160→    if (!openRef.current) return
+   161→    // Layer 1: Edge neural TTS via our API (server-side Microsoft neural voices)
+   162→    try {
+   163→      setStateSafe('speaking')
+   164→      const r = await safeJsonFetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
+   165→        method: 'POST',
+   166→        headers: { 'Content-Type': 'application/json' },
+   167→        body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
+   168→        signal: controllerRef.current?.signal, // Bug K: cancel on close
+   169→      }, { timeoutMs: 30_000, label: 'Voice synthesis' })
+   170→      if (!r.ok) throw new Error(r.error || 'TTS failed')
+   171→      // r.data is { audio: base64, format } OR raw audio blob?
+   172→      // /api/tts returns audio bytes directly — re-fetch as blob if JSON.
+   173→      // Handle both: if JSON with audio field, decode; else fetch as blob.
+   174→      let arrayBuffer: ArrayBuffer
+   175→      if (r.data && typeof r.data === 'object' && r.data.audio) {
+   176→        const b64 = r.data.audio
+   177→        const byteStr = atob(b64)
+   178→        const bytes = new Uint8Array(byteStr.length)
+   179→        for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i)
+   180→        arrayBuffer = bytes.buffer
+   181→      } else {
+   182→        // Fallback: fetch as blob directly
+   183→        const blobRes = await fetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
+   184→          method: 'POST',
+   185→          headers: { 'Content-Type': 'application/json' },
+   186→          body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
+   187→        })
+   188→        const blob = await blobRes.blob()
+   189→        arrayBuffer = await blob.arrayBuffer()
+   190→      }
+   191→      await playWebAudio(arrayBuffer)
+   192→    } catch {
+   193→      // Layer 2: browser speechSynthesis (works in restricted contexts)
+   194→      try {
+   195→        await new Promise<void>((resolve) => {
+   196→          const utter = new SpeechSynthesisUtterance(text)
+   197→          utter.lang = lang
+   198→          utter.onend = () => resolve()
+   199→          utter.onerror = () => resolve()
+   200→          speechSynthesis.speak(utter)
+   201→          setTimeout(resolve, Math.min(30000, text.length * 100))
+   202→        })
+   203→      } catch {}
+   204→    }
+   205→  }, [ttsVoice, lang, prefLang, playWebAudio, setStateSafe])
+   206→
+   207→  /* ---------- THINK (one LLM turn via /api/voice/turn) ---------- */
+   208→  // Bug A: returns the full server payload so the client can play server-generated
+   209→  // TTS audio directly and skip the redundant client-side speak() pass.
+   210→  const think = useCallback(async (userText: string): Promise<{
+   211→    reply: string
+   212→    audio: string | null
+   213→    audioFormat: string
+   214→  }> => {
+   215→    // Bug C: no-op when overlay closed.
+   216→    if (!openRef.current) return { reply: '', audio: null, audioFormat: 'wav' }
+   217→    const r = await safeJsonFetch<any>('/api/voice/turn', {
+   218→      method: 'POST',
+   219→      headers: { 'Content-Type': 'application/json' },
+   220→      body: JSON.stringify({
+   221→        message: userText,
+   222→        history: historyRef.current.slice(-6),
+   223→        language: lang.split('-')[0],
+   224→        voice: ttsVoice,
+   225→        lang: prefLang,
+   226→        audio: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=',
+   227→      }),
+   228→      signal: controllerRef.current?.signal, // Bug K: cancel on close
+   229→    }, { timeoutMs: 60_000, label: 'AI reply' })
+   230→    if (!r.ok || !r.data?.reply) throw new Error(r.error || 'AI had trouble responding. Try again.')
+   231→    return {
+   232→      reply: r.data.reply,
+   233→      audio: r.data.audio ?? null,
+   234→      audioFormat: r.data.audioFormat ?? 'wav',
+   235→    }
+   236→  }, [lang, ttsVoice, prefLang])
+   237→
+   238→  /* ---------- HANDLE FINAL TRANSCRIPT ---------- */
+   239→  const handleUtterance = useCallback(async (text: string) => {
+   240→    // Bug C: no-op when overlay closed (also stops the think/speak chain).
+   241→    if (!openRef.current) return
+   242→    const clean = text.trim()
+   243→    if (!clean) return
+   244→    stopRecognition()
+   245→    setStateSafe('thinking')
+   246→    setInterim('')
+   247→    setError('')
+   248→    // Bug K: fresh AbortController for this turn so close/stop can cancel in-flight work.
+   249→    controllerRef.current = new AbortController()
+   250→    try {
+   251→      historyRef.current.push({ role: 'user', content: clean })
+   252→      // Bug A: think() returns the full { reply, audio, audioFormat } payload.
+   253→      const { reply, audio } = await think(clean)
+   254→      if (!reply) return // closed mid-flight
+   255→      historyRef.current.push({ role: 'assistant', content: reply })
+   256→      setTurns(prev => [...prev, { id: crypto.randomUUID(), user: clean, reply }])
+   257→      if (audio) {
+   258→        // Bug A: server already generated TTS audio — play it directly and SKIP speak().
+   259→        setStateSafe('speaking')
+   260→        const byteStr = atob(audio)
+   261→        const bytes = new Uint8Array(byteStr.length)
+   262→        for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i)
+   263→        await playWebAudio(bytes.buffer)
+   264→      } else {
+   265→        // No server audio — fall back to client-side TTS pipeline.
+   266→        await speak(reply)
+   267→      }
+   268→    } catch (e) {
+   269→      if ((e as Error)?.name === 'AbortError') return // Bug K: silent cancel
+   270→      setError(e instanceof Error ? e.message : 'Something went wrong')
+   271→      toast({ title: 'Voice error', description: 'Could not get a response.', variant: 'destructive' })
+   272→    } finally {
+   273→      startListening()
+   274→    }
+   275→    // NOTE: startListening is intentionally omitted from deps — it is declared
+   276→    // below this callback (cycle: startListening → handleUtterance → startListening).
+   277→    // Matching the original pattern keeps the closure stable without reordering.
+   278→  }, [think, speak, playWebAudio, toast, setStateSafe, stopRecognition])
+   279→
+   280→  /* ---------- ASR FALLBACK (record + upload) ---------- */
+   281→  const startAsrFallback = useCallback(() => {
+   282→    try {
+   283→      startAsrMode({ lang, ttsVoice, historyRef, setStateSafe, setTurns, setInterim, setError })
+   284→    } catch {
+   285→      setError('Voice is not available in this browser.')
+   286→      setStateSafe('idle')
+   287→    }
+   288→  }, [lang, ttsVoice, setStateSafe])
+   289→
+   290→  /* ---------- LISTEN (Web Speech API) ---------- */
+   291→  const startListening = useCallback(() => {
+   292→    // Bug C: no-op when overlay closed.
+   293→    if (!openRef.current) return
+   294→    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+   295→    if (!SR) {
+   296→      // No Web Speech — go straight to ASR fallback
+   297→      startAsrFallback()
+   298→      return
+   299→    }
+   300→    stopSpeaking()
+   301→    const rec = new SR()
+   302→    rec.lang = lang
+   303→    rec.continuous = true
+   304→    rec.interimResults = true
+   305→    rec.onresult = (event: any) => {
+   306→      let finalTranscript = ''
+   307→      let interimText = ''
+   308→      for (let i = event.resultIndex; i < event.results.length; i++) {
+   309→        const r = event.results[i]
+   310→        if (r.isFinal) finalTranscript += r[0].transcript
+   311→        else interimText += r[0].transcript
+   312→      }
+   313→      if (interimText) {
+   314→        setInterim(interimText)
+   315→        setMicLevel(0.3) // Bug D: fixed pulse level, no Math.random() jitter
+   316→      }
+   317→      if (finalTranscript.trim()) handleUtterance(finalTranscript)
+   318→    }
+   319→    rec.onerror = (event: any) => {
+   320→      if (event.error === 'not-allowed') {
+   321→        const inIframe = window.self !== window.top
+   322→        setError(inIframe
+   323→          ? 'This preview frame blocks the microphone. Open the app in a new tab for voice.'
+   324→          : 'Microphone blocked — allow mic access in your browser settings.')
+   325→        if (inIframe) setIframeBlocked(true)
+   326→        setStateSafe('idle')
+   327→      } else if (['audio-capture', 'service-not-allowed', 'network'].includes(event.error)) {
+   328→        stopRecognition()
+   329→        setStateSafe('idle')
+   330→        setTimeout(() => startAsrFallback(), 50)
+   331→      }
+   332→    }
+   333→    rec.onend = () => {
+   334→      // Bug E: never auto-restart after a manual stop.
+   335→      if (manualStopRef.current) return
+   336→      if (stateRef.current !== 'listening' || !recognitionRef.current) return
+   337→      // Count only consecutive IMMEDIATE restarts (gap < 1s between start and onend).
+   338→      const elapsed = performance.now() - lastStartRef.current
+   339→      if (elapsed < 1000) {
+   340→        restartCountRef.current += 1
+   341→        // After 10 immediate restarts, give up entirely.
+   342→        if (restartCountRef.current >= 10) {
+   343→          stopRecognition()
+   344→          setStateSafe('idle')
+   345→          toast({
+   346→            title: 'Voice recognition unavailable',
+   347→            description: 'Try the ASR fallback',
+   348→            variant: 'destructive',
+   349→          })
+   350→          return
+   351→        }
+   352→        // After 5 immediate restarts, switch to the proven record/upload fallback.
+   353→        if (restartCountRef.current >= 5) {
+   354→          stopRecognition()
+   355→          setStateSafe('idle')
+   356→          setTimeout(() => startAsrFallback(), 50)
+   357→          return
+   358→        }
+   359→      } else {
+   360→        restartCountRef.current = 0
+   361→      }
+   362→      try {
+   363→        recognitionRef.current.start()
+   364→        lastStartRef.current = performance.now()
+   365→      } catch {}
+   366→    }
+   367→    recognitionRef.current = rec
+   368→    restartCountRef.current = 0
+   369→    manualStopRef.current = false
+   370→    try {
+   371→      rec.start()
+   372→      lastStartRef.current = performance.now()
+   373→      setStateSafe('listening')
+   374→      setError('')
+   375→      // Bug D: throttle pulse to 500ms (was 150ms) to cut re-renders ~3.3×.
+   376→      const pulse = setInterval(() => setMicLevel(v => Math.max(0.05, v * 0.85)), 500)
+   377→      ;(rec as any).__pulse = pulse
+   378→    } catch {}
+   379→  }, [lang, handleUtterance, stopSpeaking, setStateSafe, startAsrFallback, stopRecognition, toast])
+   380→
+   381→  /* ---------- CONTROLS ---------- */
+   382→  const toggle = useCallback(() => {
+   383→    // Bug C: no-op when overlay closed.
+   384→    if (!openRef.current) return
+   385→    const s = stateRef.current
+   386→    if (s === 'idle') { unlockAudio(); startListening() }
+   387→    else if (s === 'listening') { stopRecognition(); stopAsrMode(); setStateSafe('idle'); setInterim('') }
+   388→    else if (s === 'speaking') { stopSpeaking(); stopAsrMode(); startListening() }
+   389→    else { stopSpeaking(); stopRecognition(); stopAsrMode(); setStateSafe('idle') }
+   390→  }, [unlockAudio, startListening, stopRecognition, stopSpeaking, setStateSafe])
+   391→
+   392→  const endConversation = useCallback(() => {
+   393→    stopRecognition(); stopAsrMode(); stopSpeaking()
+   394→    setStateSafe('idle'); setTurns([]); setInterim('')
+   395→    historyRef.current = []
+   396→  }, [stopRecognition, stopSpeaking, setStateSafe])
+   397→
+   398→  /* ---------- AUTO-SCROLL TRANSCRIPT ---------- */
+   399→  useEffect(() => {
+   400→    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+   401→  }, [turns, interim])
+   402→
+   403→  /* ---------- CLEANUP ON CLOSE ---------- */
+   404→  useEffect(() => {
+   405→    if (!open) {
+   406→      stopRecognition(); stopAsrMode(); stopSpeaking()
+   407→      // Bug K: cancel any in-flight think()/speak() fetch.
+   408→      controllerRef.current?.abort()
+   409→      setStateSafe('idle')
+   410→    }
+   411→  }, [open])
+   412→
+   413→  // Bug I + Bug K: on unmount, close the AudioContext and abort any in-flight turn.
+   414→  useEffect(() => () => {
+   415→    stopRecognition(); stopSpeaking()
+   416→    audioCtxRef.current?.close?.().catch(() => {})
+   417→    audioCtxRef.current = null
+   418→    controllerRef.current?.abort()
+   419→    controllerRef.current = null
+   420→  }, [stopRecognition, stopSpeaking])
+   421→
+   422→  const stateMeta: Record<VoiceState, { label: string; sub: string }> = {
+   423→    idle: { label: 'Tap to talk', sub: 'Natural conversation — I hear you as you speak' },
+   424→    listening: { label: 'Listening…', sub: 'Speak naturally — I will respond when you pause' },
+   425→    thinking: { label: 'Thinking…', sub: 'Crafting your reply' },
+   426→    speaking: { label: 'Speaking', sub: 'Tap to interrupt' },
+   427→  }
+   428→  const meta = stateMeta[state]
+   429→
+   430→  const voicesForLang = (code: string) => {
+   431→    const langPrefix = code.split('-')[0]
+   432→    const edge = EDGE_VOICES.filter(v => v.id.startsWith(langPrefix))
+   433→    return [...NEXUS_VOICES, ...edge]
+   434→  }
+   435→
+   436→  return (
+   437→    <AnimatePresence>
+   438→      {open && (
+   439→        <motion.div
+   440→          initial={{ opacity: 0 }}
+   441→          animate={{ opacity: 1 }}
+   442→          exit={{ opacity: 0 }}
+   443→          transition={{ duration: 0.25 }}
+   444→          className="fixed inset-0 z-50 flex flex-col bg-background"
+   445→          role="dialog"
+   446→          aria-modal="true"
+   447→          aria-label="Nexus Voice Mode"
+   448→        >
+   449→          {/* Ambient gradient backdrop — Bug D: single static gradient (no blur, much cheaper) */}
+   450→          <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+   451→            <div className="absolute inset-0 bg-gradient-to-br from-primary/15 to-rose-500/10" />
+   452→          </div>
+   453→
+   454→          {/* Top bar */}
+   455→          <div className="relative z-10 flex items-center justify-between px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+   456→            <div className="flex items-center gap-2">
+   457→              <Image src="/nexus-header-logo.png" alt="Nexus" width={96} height={32} className="h-7 w-auto" />
+   458→              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-primary">Voice</span>
+   459→            </div>
+   460→            <button onClick={onClose} aria-label="Close voice mode"
+   461→              className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary/60 transition hover:bg-secondary">
+   462→              <X className="h-5 w-5" />
+   463→            </button>
+   464→          </div>
+   465→
+   466→          {/* Voice picker sheet */}
+   467→          <AnimatePresence>
+   468→            {showVoicePicker && (
+   469→              <motion.div
+   470→                initial={{ opacity: 0, y: 20 }}
+   471→                animate={{ opacity: 1, y: 0 }}
+   472→                exit={{ opacity: 0, y: 20 }}
+   473→                className="absolute inset-x-3 top-16 z-20 mx-auto max-w-md"
+   474→              >
+   475→                <div className="omni-scroll max-h-[60vh] overflow-y-auto rounded-3xl border border-border bg-card/95 p-4 shadow-2xl backdrop-blur-xl">
+   476→                  <div className="mb-3 flex items-center justify-between">
+   477→                    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Premium voices</p>
+   478→                    <button onClick={() => setShowVoicePicker(false)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+   479→                  </div>
+   480→                  <div className="space-y-4">
+   481→                    <div>
+   482→                      <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/70">Nexus voices</p>
+   483→                      <div className="space-y-1">
+   484→                        {NEXUS_VOICES.map(v => (
+   485→                          <VoiceRow key={v.id} v={v} active={ttsVoice === v.id} onPick={() => { setTtsVoice(v.id); setShowVoicePicker(false); toast({ title: `Voice: ${v.label}`, description: v.language }) }} />
+   486→                        ))}
+   487→                      </div>
+   488→                    </div>
+   489→                    <div>
+   490→                      <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/70">Neural voices · {LANGUAGES.find(l => l.code === lang)?.label}</p>
+   491→                      <div className="space-y-1">
+   492→                        {voicesForLang(lang).filter(v => v.provider === 'edge').map(v => (
+   493→                          <VoiceRow key={v.id} v={v} active={ttsVoice === v.id} onPick={() => { setTtsVoice(v.id); setShowVoicePicker(false); toast({ title: `Voice: ${v.label}`, description: v.language }) }} />
+   494→                        ))}
+   495→                      </div>
+   496→                    </div>
+   497→                  </div>
+   498→                </div>
+   499→              </motion.div>
+   500→            )}
+   501→          </AnimatePresence>
+   502→
+   503→          {/* Language picker sheet */}
+   504→          <AnimatePresence>
+   505→            {showLangPicker && (
+   506→              <motion.div
+   507→                initial={{ opacity: 0, y: 20 }}
+   508→                animate={{ opacity: 1, y: 0 }}
+   509→                exit={{ opacity: 0, y: 20 }}
+   510→                className="absolute inset-x-3 top-16 z-20 mx-auto max-w-md"
+   511→              >
+   512→                <div className="rounded-3xl border border-border bg-card/95 p-4 shadow-2xl backdrop-blur-xl">
+   513→                  <div className="mb-3 flex items-center justify-between">
+   514→                    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Language</p>
+   515→                    <button onClick={() => setShowLangPicker(false)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+   516→                  </div>
+   517→                  <div className="grid grid-cols-2 gap-1.5">
+   518→                    {LANGUAGES.map(l => (
+   519→                      <button key={l.code} onClick={() => { setLang(l.code); setTtsVoice(l.voice); setShowLangPicker(false) }}
+   520→                        className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition ${lang === l.code ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-secondary text-foreground'}`}>
+   521→                        <span>{l.label}</span>
+   522→                        {lang === l.code && <Check className="h-3.5 w-3.5" />}
+   523→                      </button>
+   524→                    ))}
+   525→                  </div>
+   526→                </div>
+   527→              </motion.div>
+   528→            )}
+   529→          </AnimatePresence>
+   530→
+   531→          {/* Main stage */}
+   532→          <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6">
+   533→            {/* THE ORB */}
+   534→            <div className="relative flex items-center justify-center">
+   535→              <AnimatePresence>
+   536→                {state === 'listening' && (
+   537→                  <>
+   538→                    <motion.span key="r1" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: [1, 1.8], opacity: [0.5, 0] }} exit={{ opacity: 0 }} transition={{ duration: 3.5, repeat: Infinity, ease: 'easeOut' }} className="absolute h-40 w-40 rounded-full bg-primary/30" />
+   539→                    <motion.span key="r2" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: [1, 2.1], opacity: [0.4, 0] }} exit={{ opacity: 0 }} transition={{ duration: 3.5, repeat: Infinity, ease: 'easeOut', delay: 0.6 }} className="absolute h-40 w-40 rounded-full bg-primary/20" />
+   540→                  </>
+   541→                )}
+   542→                {state === 'speaking' && (
+   543→                  <motion.span key="sr" initial={{ scale: 1, opacity: 0.5 }} animate={{ scale: [1, 1.6], opacity: [0.5, 0] }} exit={{ opacity: 0 }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }} className="absolute h-40 w-40 rounded-full bg-rose-500/30" />
+   544→                )}
+   545→                {state === 'thinking' && (
+   546→                  <motion.span key="tr" initial={{ scale: 1, opacity: 0.4 }} animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0.2, 0.4] }} exit={{ opacity: 0 }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }} className="absolute h-40 w-40 rounded-full bg-primary/20" />
+   547→                )}
+   548→              </AnimatePresence>
+   549→
+   550→              <motion.button
+   551→                onClick={toggle}
+   552→                whileTap={{ scale: 0.95 }}
+   553→                aria-label={meta.label}
+   554→                className={`relative z-10 flex items-center justify-center rounded-full transition-all duration-300 ${
+   555→                  state === 'idle'
+   556→                    ? 'size-28 bg-gradient-to-br from-primary to-rose-500 text-white shadow-2xl shadow-primary/30'
+   557→                    : state === 'listening'
+   558→                      ? 'size-36 bg-gradient-to-br from-primary to-rose-500 text-white shadow-2xl shadow-primary/40'
+   559→                      : state === 'speaking'
+   560→                        ? 'size-36 bg-gradient-to-br from-rose-500 to-primary text-white shadow-2xl shadow-rose-500/40'
+   561→                        : 'size-36 bg-gradient-to-br from-primary/80 to-rose-500/80 text-white shadow-2xl shadow-primary/30'
+   562→                }`}
+   563→                style={state === 'listening' ? { transform: `scale(${1 + Math.min(0.18, micLevel * 0.5)})` } : undefined}
+   564→              >
+   565→                {state === 'idle' && <Mic className="h-10 w-10" />}
+   566→                {state === 'listening' && (
+   567→                  <span className="flex items-end gap-1" aria-hidden>
+   568→                    {[0,1,2,3,4].map(i => (
+   569→                      <motion.span key={i} className="block w-1.5 rounded-full bg-white"
+   570→                        animate={{ height: [8, 28, 8] }}
+   571→                        transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
+   572→                      />
+   573→                    ))}
+   574→                  </span>
+   575→                )}
+   576→                {state === 'thinking' && (
+   577→                  <span className="flex gap-1.5" aria-hidden>
+   578→                    {[0,1,2].map(i => (
+   579→                      <motion.span key={i} className="block h-2.5 w-2.5 rounded-full bg-white"
+   580→                        animate={{ opacity: [0.3, 1, 0.3] }}
+   581→                        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut', delay: i * 0.15 }}
+   582→                      />
+   583→                    ))}
+   584→                  </span>
+   585→                )}
+   586→                {state === 'speaking' && (
+   587→                  <span className="flex items-end gap-1" aria-hidden>
+   588→                    {[0,1,2,3,4].map(i => (
+   589→                      <motion.span key={i} className="block w-1.5 rounded-full bg-white"
+   590→                        animate={{ height: [6, 32, 6] }}
+   591→                        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut', delay: i * 0.08 }}
+   592→                      />
+   593→                    ))}
+   594→                  </span>
+   595→                )}
+   596→              </motion.button>
+   597→            </div>
+   598→
+   599→            {/* Live interim transcript */}
+   600→            <div className="mt-8 min-h-[3.5rem] max-w-md text-center">
+   601→              <AnimatePresence mode="wait">
+   602→                {state === 'listening' && interim ? (
+   603→                  <motion.p key="interim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+   604→                    className="text-xl font-medium text-foreground/90">
+   605→                    {interim}
+   606→                  </motion.p>
+   607→                ) : state === 'speaking' && turns.length > 0 ? (
+   608→                  <motion.p key="reply" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+   609→                    className="text-lg leading-relaxed text-foreground/80">
+   610→                    {turns[turns.length - 1].reply}
+   611→                  </motion.p>
+   612→                ) : (
+   613→                  <motion.div key="meta" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+   614→                    <p className="text-base font-medium text-foreground">{meta.label}</p>
+   615→                    <p className="mt-1 text-sm text-muted-foreground">{meta.sub}</p>
+   616→                  </motion.div>
+   617→                )}
+   618→              </AnimatePresence>
+   619→              {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+   620→            </div>
+   621→
+   622→            {/* Iframe-blocked warning */}
+   623→            {iframeBlocked && (
+   624→              <div className="mt-6 max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center dark:border-amber-900 dark:bg-amber-950/40">
+   625→                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Voice is limited in this preview</p>
+   626→                <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+   627→                  The preview frame blocks microphone and audio. Open the app in a new tab for the full voice experience.
+   628→                </p>
+   629→                <a href="/" target="_blank" rel="noopener noreferrer"
+   630→                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-amber-700">
+   631→                  Open in New Tab
+   632→                </a>
+   633→              </div>
+   634→            )}
+   635→          </div>
+   636→
+   637→          {/* Transcript ribbon */}
+   638→          {turns.length > 0 && (
+   639→            <div ref={scrollRef} className="omni-scroll relative z-10 max-h-32 overflow-y-auto border-t border-border/50 px-6 py-3">
+   640→              <div className="mx-auto flex max-w-lg flex-col gap-2.5">
+   641→                {turns.map(t => (
+   642→                  <div key={t.id} className="flex flex-col gap-1">
+   643→                    <p className="text-xs font-medium text-primary/90">You · {t.user}</p>
+   644→                    <p className="text-[13px] leading-relaxed text-muted-foreground">{t.reply}</p>
+   645→                  </div>
+   646→                ))}
+   647→              </div>
+   648→            </div>
+   649→          )}
+   650→
+   651→          {/* Bottom controls */}
+   652→          <div className="relative z-10 flex items-center justify-center gap-3 px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
+   653→            <button onClick={() => { setShowLangPicker(v => !v); setShowVoicePicker(false) }}
+   654→              aria-label="Change language"
+   655→              className="flex h-11 items-center gap-1.5 rounded-full bg-secondary/60 px-4 text-xs font-medium transition hover:bg-secondary">
+   656→              <Radio className="h-4 w-4 text-muted-foreground" />
+   657→              <span>{LANGUAGES.find(l => l.code === lang)?.label}</span>
+   658→              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+   659→            </button>
+   660→            {state !== 'idle' && (
+   661→              <button onClick={toggle} aria-label="Stop"
+   662→                className="flex h-11 w-11 items-center justify-center rounded-full bg-secondary transition hover:bg-secondary/80">
+   663→                <Square className="h-4 w-4" />
+   664→              </button>
+   665→            )}
+   666→            <button onClick={() => { setShowVoicePicker(v => !v); setShowLangPicker(false) }}
+   667→              aria-label="Change voice"
+   668→              className="flex h-11 items-center gap-1.5 rounded-full bg-secondary/60 px-4 text-xs font-medium transition hover:bg-secondary">
+   669→              <Volume2 className="h-4 w-4 text-muted-foreground" />
+   670→              <span className="max-w-[80px] truncate">{EDGE_VOICES.find(v => v.id === ttsVoice)?.label ?? NEXUS_VOICES.find(v => v.id === ttsVoice)?.label ?? 'Voice'}</span>
+   671→              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+   672→            </button>
+   673→            {turns.length > 0 && (
+   674→              <button onClick={endConversation} aria-label="End conversation"
+   675→                className="flex h-11 w-11 items-center justify-center rounded-full bg-secondary/60 transition hover:bg-secondary">
+   676→                <Phone className="h-5 w-5 rotate-[135deg] text-destructive" />
+   677→              </button>
+   678→            )}
+   679→          </div>
+   680→        </motion.div>
+   681→      )}
+   682→    </AnimatePresence>
+   683→  )
+   684→}
+   685→
+   686→function VoiceRow({ v, active, onPick }: { v: VoiceOption; active: boolean; onPick: () => void }) {
+   687→  return (
+   688→    <button onClick={onPick}
+   689→      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition ${active ? 'bg-primary/15 text-primary' : 'hover:bg-secondary text-foreground'}`}>
+   690→      <div className="flex items-center gap-2.5">
+   691→        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${active ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>
+   692→          {v.label.slice(0, 1)}
+   693→        </span>
+   694→        <div>
+   695→          <p className="text-sm font-medium">{v.label}</p>
+   696→          <p className="text-[11px] text-muted-foreground">{v.language}</p>
+   697→        </div>
+   698→      </div>
+   699→      {active && <Check className="h-4 w-4" />}
+   700→    </button>
+   701→  )
+   702→}
+   703→

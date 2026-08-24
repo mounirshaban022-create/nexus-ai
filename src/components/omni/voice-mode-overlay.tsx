@@ -158,36 +158,23 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
   const speak = useCallback(async (text: string): Promise<void> => {
     // Bug C: no-op when overlay closed.
     if (!openRef.current) return
-    // Layer 1: Edge neural TTS via our API (server-side Microsoft neural voices)
+    // Bug V1 (Voice): fetch /api/tts as a BLOB directly, NOT via safeJsonFetch.
+    // safeJsonFetch tries to JSON.parse the body, but /api/tts returns raw
+    // audio bytes (audio/mpeg or audio/wav), so safeJsonFetch always fails,
+    // throws, and the catch falls through to speechSynthesis (the generic
+    // browser voice the user was hearing). Fetching as blob keeps the
+    // premium Microsoft neural voice path intact.
     try {
       setStateSafe('speaking')
-      const r = await safeJsonFetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
+      const res = await fetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
-        signal: controllerRef.current?.signal, // Bug K: cancel on close
-      }, { timeoutMs: 30_000, label: 'Voice synthesis' })
-      if (!r.ok) throw new Error(r.error || 'TTS failed')
-      // r.data is { audio: base64, format } OR raw audio blob?
-      // /api/tts returns audio bytes directly — re-fetch as blob if JSON.
-      // Handle both: if JSON with audio field, decode; else fetch as blob.
-      let arrayBuffer: ArrayBuffer
-      if (r.data && typeof r.data === 'object' && r.data.audio) {
-        const b64 = r.data.audio
-        const byteStr = atob(b64)
-        const bytes = new Uint8Array(byteStr.length)
-        for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i)
-        arrayBuffer = bytes.buffer
-      } else {
-        // Fallback: fetch as blob directly
-        const blobRes = await fetch(`/api/tts?lang=${encodeURIComponent(prefLang)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
-        })
-        const blob = await blobRes.blob()
-        arrayBuffer = await blob.arrayBuffer()
-      }
+        signal: controllerRef.current?.signal,
+      })
+      if (!res.ok) throw new Error('TTS failed')
+      const arrayBuffer = await res.arrayBuffer()
+      if (arrayBuffer.byteLength < 100) throw new Error('TTS returned empty audio')
       await playWebAudio(arrayBuffer)
     } catch {
       // Layer 2: browser speechSynthesis (works in restricted contexts)

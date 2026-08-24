@@ -166,6 +166,10 @@ export async function POST(req: NextRequest) {
     })
 
     // ---------- 3. Reply (single fast call, no separate thinking phase) ----------
+    // Bug V2 (Voice speed): reduce maxTokens from 300 to 200 so the LLM
+    // produces shorter, faster replies (voice replies should be 1-3 sentences).
+    // Combined with the 15s per-model timeout in smart-chat.ts, this keeps
+    // each voice turn well under 5s end-to-end.
     const historyMessages = parsed.data.history.slice(-6).map((m) => ({
       role: m.role,
       content: m.content,
@@ -180,7 +184,7 @@ export async function POST(req: NextRequest) {
         ...historyMessages,
         { role: 'user', content: transcript },
       ],
-      { maxTokens: 300, task: 'voice' }
+      { maxTokens: 200, task: 'voice' }
     )).trim()
     if (!reply) {
       return NextResponse.json({ error: 'The assistant had nothing to say. Try again.' }, { status: 500 })
