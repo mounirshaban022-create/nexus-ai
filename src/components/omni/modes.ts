@@ -9,11 +9,9 @@ import {
   Bot,
   Waypoints,
   AudioWaveform,
-  FileStack,
   Layers,
   Code2,
   Clapperboard,
-  FileSearch,
   Settings,
   UserCircle2,
   type LucideIcon,
@@ -30,11 +28,10 @@ export type ModeId =
   | 'voice'
   | 'search'
   | 'reader'
-  | 'office'
+  | 'studio'
   | 'models'
   | 'code'
   | 'video'
-  | 'documents'
   | 'settings'
   | 'profile'
 
@@ -252,31 +249,17 @@ export const MODES: ModeDefinition[] = [
     gradient: 'from-orange-500 to-rose-500',
   },
   {
-    id: 'documents',
-    label: 'Documents',
-    shortLabel: 'Docs',
-    tagline: 'Read · Chat · Edit — any document',
+    id: 'studio',
+    label: 'Studio',
+    shortLabel: 'Studio',
+    tagline: 'Docs + Canvas — one suite',
     description:
-      'Upload PDF, Word, Excel, PowerPoint — AI reads it, answers questions, and edits it like Claude.',
-    icon: FileSearch,
+      'The unified creative suite: Notion-style documents (BlockNote) + visual canvas (Excalidraw), with AI writing, import and real exports.',
+    icon: Layers,
     group: 'superpowers',
     accentText: 'text-primary',
     accentBg: 'bg-secondary',
     accentBorder: 'border-border',
-    gradient: 'from-orange-500 to-rose-500',
-  },
-  {
-    id: 'office',
-    label: 'Office Studio',
-    shortLabel: 'Office',
-    tagline: 'Real documents, built for you',
-    description:
-      'Generate real Word, Excel, PowerPoint and Markdown files — or read any uploaded document.',
-    icon: FileStack,
-    group: 'superpowers',
-    accentText: 'text-foreground',
-    accentBg: 'bg-secondary',
-    accentBorder: 'border-sky-500/30',
     gradient: 'from-orange-500 to-rose-500',
   },
   {

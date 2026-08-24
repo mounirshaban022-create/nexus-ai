@@ -33,7 +33,7 @@ export function AbilityPicker({ activeMode, onSelect }: AbilityPickerProps) {
 
   const groups: Array<{ label: string; ids: ModeId[] }> = [
     { label: 'Converse', ids: ['chat', 'voice-live', 'agent'] },
-    { label: 'Create', ids: ['code', 'video', 'image', 'office', 'documents'] },
+    { label: 'Create', ids: ['studio', 'code', 'video', 'image'] },
     { label: 'Tools', ids: ['voice', 'search', 'reader', 'vision'] },
     { label: 'Platform', ids: ['profile', 'settings', 'models', 'connectors', 'home'] },
   ]

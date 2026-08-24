@@ -21,12 +21,11 @@ import {
   Image as ImageIcon,
   Video,
   Code,
-  FileText,
   Globe,
   Mail,
   BookOpen,
   ScanEye,
-  FileSearch,
+  Layers,
   X,
   LogIn,
   UserPlus,
@@ -47,6 +46,7 @@ import { ProjectsMode } from '@/components/omni/projects-mode'
 import { LibraryMode } from '@/components/omni/library-mode'
 import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
 import { VoiceModeOverlay } from '@/components/omni/voice-mode-overlay'
+import { StudioMode } from '@/components/omni/studio-mode'
 import { ConnectPanel } from '@/components/omni/connect-panel'
 import { LegalPage } from '@/components/omni/legal-page'
 import { ProfileEditModal } from '@/components/omni/profile-edit-modal'
@@ -152,6 +152,8 @@ function NexusApp() {
   const [authOpen, setAuthOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [voiceMounted, setVoiceMounted] = useState(false)
+  const [studioOpen, setStudioOpen] = useState(false)
+  const [studioMounted, setStudioMounted] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
   const [legalPage, setLegalPage] = useState<'privacy' | 'terms' | null>(null)
@@ -442,23 +444,22 @@ function NexusApp() {
     { category: 'Create', items: [
       { label: 'Image', icon: ImageIcon, tool: 'image' },
       { label: 'Video', icon: Video, tool: 'video' },
-      { label: 'Writing', icon: FileText, tool: 'office' },
+      // THE one document tool — Studio does everything the old scattered
+      // tools did (Writing / Office / Documents / Upload / Document
+      // analysis) in a single Claude-canvas + Canva-class suite.
+      { label: 'Studio', icon: Layers, tool: 'studio' },
     ]},
     { category: 'Understand', items: [
-      { label: 'Upload file', icon: Paperclip, tool: 'upload' },
       { label: 'Camera', icon: ScanEye, tool: 'vision' },
       { label: 'Vision', icon: Eye, tool: 'vision' },
-      { label: 'Document analysis', icon: FileSearch, tool: 'documents' },
     ]},
     { category: 'Think', items: [
       { label: 'Deep research', icon: Globe, tool: 'search' },
       { label: 'Reasoning', icon: Brain, tool: 'agent' },
-      { label: 'Data analysis', icon: BookOpen, tool: 'code' },
     ]},
     { category: 'Work', items: [
       { label: 'Code', icon: Code, tool: 'code' },
-      { label: 'Documents', icon: FileText, tool: 'documents' },
-      { label: 'Office', icon: FileText, tool: 'office' },
+      { label: 'Data analysis', icon: BookOpen, tool: 'code' },
     ]},
     { category: 'Connect', items: [
       { label: 'Web search', icon: Globe, tool: 'search' },
@@ -471,10 +472,8 @@ function NexusApp() {
   const TOOL_GRADIENT: Record<string, string> = {
     image:      'from-rose-500 to-orange-500',
     video:      'from-orange-500 to-amber-500',
-    office:     'from-pink-500 to-rose-500',
-    upload:     'from-amber-500 to-orange-500',
+    studio:     'from-fuchsia-500 to-pink-500',
     vision:     'from-orange-500 to-rose-500',
-    documents:  'from-rose-500 to-pink-500',
     search:     'from-amber-500 to-yellow-500',
     agent:      'from-fuchsia-500 to-pink-500',
     code:       'from-amber-500 to-yellow-500',
@@ -484,7 +483,7 @@ function NexusApp() {
 
   const SUGGESTIONS: Array<{ title: string; subtitle: string; icon: any; tool?: ToolId }> = [
     { title: tr.suggestResearch, subtitle: tr.suggestResearchSub, icon: Globe, tool: 'search' },
-    { title: tr.suggestAnalyze, subtitle: tr.suggestAnalyzeSub, icon: FileSearch, tool: 'documents' },
+    { title: tr.suggestAnalyze, subtitle: tr.suggestAnalyzeSub, icon: Layers, tool: 'studio' },
     { title: tr.suggestCreate, subtitle: tr.suggestCreateSub, icon: Wand2, tool: 'image' },
     { title: tr.suggestCode, subtitle: tr.suggestCodeSub, icon: Code, tool: 'code' },
   ]
@@ -503,6 +502,11 @@ function NexusApp() {
   useEffect(() => {
     if (voiceOpen) setVoiceMounted(true)
   }, [voiceOpen])
+
+  // Same lazy-mount pattern for the Studio (BlockNote + Excalidraw are heavy).
+  useEffect(() => {
+    if (studioOpen) setStudioMounted(true)
+  }, [studioOpen])
 
   // Listen for "open connect panel" requests from inline email cards
   useEffect(() => {
@@ -539,6 +543,12 @@ function NexusApp() {
       setConnectOpen(true)
       return
     }
+    // Studio opens the unified creative suite directly (docs + canvas +
+    // AI + import/export) — replaces the old scattered document tools.
+    if (tool === 'studio') {
+      setStudioOpen(true)
+      return
+    }
     toolEngine.setPendingTool(tool)
     // Focus the textarea so the user can type their prompt immediately
     setTimeout(() => {
@@ -571,6 +581,12 @@ function NexusApp() {
       {/* Voice overlay is lazy-mounted — its hooks only evaluate once opened */}
       {voiceMounted && (
         <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+      )}
+
+      {/* NEXUS Studio — the unified document + canvas suite (BlockNote +
+          Excalidraw), lazy-mounted like the voice overlay. */}
+      {studioMounted && (
+        <StudioMode open={studioOpen} onClose={() => setStudioOpen(false)} />
       )}
 
       <ConnectPanel open={connectOpen} onClose={() => setConnectOpen(false)} />

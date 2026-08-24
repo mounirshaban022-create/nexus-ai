@@ -19,10 +19,8 @@ export type ToolId =
   | 'video'
   | 'code'
   | 'vision'
-  | 'upload'
+  | 'studio'
   | 'search'
-  | 'office'
-  | 'documents'
   | 'agent'
   | 'connectors'
   | 'email'
@@ -40,10 +38,8 @@ export interface ToolDef {
 export const TOOLS: Record<ToolId, ToolDef> = {
   image:      { id: 'image',      label: 'Image',            category: 'Create',    placeholder: 'Describe the image to generate...' },
   video:      { id: 'video',      label: 'Video',            category: 'Create',    placeholder: 'Describe the video to create...' },
-  office:     { id: 'office',     label: 'Writing',         category: 'Create',    placeholder: 'What should I write? (memo, email, blog...)' },
-  upload:     { id: 'upload',     label: 'Upload file',      category: 'Understand',placeholder: 'Ask a question about this file...', needsFile: true, fileAccept: '.pdf,.docx,.xlsx,.pptx,.txt,.md,.csv' },
+  studio:     { id: 'studio',     label: 'Studio',           category: 'Create',    placeholder: 'Documents & canvas — the full creative suite opens directly…' },
   vision:     { id: 'vision',     label: 'Vision',           category: 'Understand',placeholder: 'What do you want to know about this image?', needsFile: true, fileAccept: 'image/*' },
-  documents:  { id: 'documents',  label: 'Document analysis',category: 'Understand',placeholder: 'Ask anything about the uploaded document...', needsFile: true, fileAccept: '.pdf,.docx,.xlsx,.pptx,.txt,.md,.csv' },
   search:     { id: 'search',     label: 'Deep research',   category: 'Think',     placeholder: 'What should I research on the web?' },
   agent:      { id: 'agent',      label: 'Reasoning',        category: 'Think',     placeholder: 'What hard problem should I solve?' },
   code:       { id: 'code',       label: 'Code',            category: 'Work',      placeholder: 'Paste code to run, or describe what to build...' },
@@ -206,38 +202,14 @@ export function useToolEngine(
           }
           break
         }
-        case 'upload':
-        case 'documents': {
-          if (!pendingFile) throw new Error('Please attach a file first.')
-          // Step 1: upload + parse
-          const upRes = await safeJsonFetch<any>('/api/documents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              file: pendingFile.dataUrl,
-              filename: pendingFile.name,
-              format: detectFormat(pendingFile.name),
-            }),
-          }, { timeoutMs: 120_000, label: 'Document upload' })
-          if (!upRes.ok || !upRes.data?.document) throw new Error(upRes.error || 'Could not read that file. Please try a different file.')
-          const doc = upRes.data.document
-          // Step 2: if user has a question, ask it
-          if (prompt.trim()) {
-            const qRes = await safeJsonFetch<any>(
-              `/api/documents?id=${encodeURIComponent(doc.id)}&q=${encodeURIComponent(prompt)}`,
-              {},
-              { timeoutMs: 60_000, label: 'Document analysis' }
-            )
-            if (!qRes.ok || !qRes.data?.answer) throw new Error(qRes.error || 'Could not answer that about the document.')
-            result = {
-              content: qRes.data.answer,
-              attachments: [],
-            }
-          } else {
-            result = {
-              content: `I've read **${doc.filename}**. Here's a summary:\n\n${doc.summary || 'Document processed successfully.'}`,
-              attachments: [],
-            }
+        case 'studio': {
+          // The Studio opens directly from the + menu (see handleToolPick in
+          // page.tsx) — it never routes through the chat pipeline. This case
+          // only exists to satisfy the exhaustive switch if a pending tool
+          // was somehow left over from an older session.
+          result = {
+            content: 'The Studio has everything documents need — open it from the + menu.',
+            attachments: [],
           }
           break
         }
@@ -330,39 +302,6 @@ export function useToolEngine(
               answer,
               followUps,
               emailMatches,
-            }],
-          }
-          break
-        }
-        case 'office': {
-          // Step 1: plan the document structure with the LLM.
-          // /api/office/plan returns { title, blocks } (NOT { plan }).
-          const planRes = await safeJsonFetch<{ title: string; blocks: any[] }>('/api/office/plan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt }),
-          }, { timeoutMs: 60_000, label: 'Document planning' })
-          if (!planRes.ok || !planRes.data?.blocks?.length) throw new Error(planRes.error || 'Planning failed.')
-          const { title: docTitle, blocks: docBlocks } = planRes.data
-          // Step 2: build the real file.
-          // /api/office/create expects { format, title, blocks, theme } and
-          // returns { file: { url, format, title, filename, size, mimeType } }
-          // (NOT { attachment }).
-          const createRes = await safeJsonFetch<{ file: { url: string; format: string; title: string; filename: string; size: number } }>('/api/office/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ format: 'docx', title: docTitle, blocks: docBlocks, theme: 'nexus' }),
-          }, { timeoutMs: 120_000, label: 'Document creation' })
-          if (!createRes.ok || !createRes.data?.file) throw new Error(createRes.error || 'Document creation failed.')
-          const f = createRes.data.file
-          result = {
-            content: `I drafted a ${f.format.toUpperCase()} for you — **${f.title}**. Download below:`,
-            attachments: [{
-              type: 'document',
-              url: f.url,
-              title: f.title,
-              format: f.format,
-              size: f.size,
             }],
           }
           break
@@ -543,17 +482,6 @@ function detectLanguage(code: string): 'javascript' | 'typescript' | 'python' {
   if (/^\s*(def |import |from |print\(|lambda )/m.test(code) || /\bprint\(/.test(code)) return 'python'
   if (/(interface|type|:\s*(string|number|boolean)\b|import\s+\{)/.test(code)) return 'typescript'
   return 'javascript'
-}
-
-function detectFormat(filename: string): 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'txt' | 'md' | 'csv' {
-  const ext = filename.split('.').pop()?.toLowerCase() || ''
-  if (ext === 'pdf') return 'pdf'
-  if (ext === 'docx') return 'docx'
-  if (ext === 'xlsx') return 'xlsx'
-  if (ext === 'pptx') return 'pptx'
-  if (ext === 'md') return 'md'
-  if (ext === 'csv') return 'csv'
-  return 'txt'
 }
 
 /**
