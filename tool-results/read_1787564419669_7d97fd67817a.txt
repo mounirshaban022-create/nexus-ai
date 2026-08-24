@@ -1,0 +1,802 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useState } from 'react'
+     4→import Image from 'next/image'
+     5→import { motion, AnimatePresence } from 'framer-motion'
+     6→import {
+     7→  Compass,
+     8→  FolderKanban,
+     9→  Library,
+    10→  MessageSquare,
+    11→  Plus,
+    12→  User,
+    13→  Sparkles,
+    14→  Paperclip,
+    15→  Pencil,
+    16→  Send,
+    17→  ChevronDown,
+    18→  Zap,
+    19→  Brain,
+    20→  Eye,
+    21→  Image as ImageIcon,
+    22→  Video,
+    23→  Code,
+    24→  FileText,
+    25→  Globe,
+    26→  Mail,
+    27→  BookOpen,
+    28→  ScanEye,
+    29→  FileSearch,
+    30→  X,
+    31→  LogIn,
+    32→  UserPlus,
+    33→  Loader2,
+    34→} from 'lucide-react'
+    35→import { Button } from '@/components/ui/button'
+    36→import { Textarea } from '@/components/ui/textarea'
+    37→import { usePreferences, applyPreferences } from '@/lib/preferences'
+    38→import { useAuth } from '@/hooks/use-auth'
+    39→import { AuthModal } from '@/components/omni/auth-modal'
+    40→import { Markdown } from '@/components/omni/markdown'
+    41→import { AttachmentCard } from '@/components/omni/chat-attachments'
+    42→import { Onboarding } from '@/components/omni/onboarding'
+    43→import { ProjectsMode } from '@/components/omni/projects-mode'
+    44→import { LibraryMode } from '@/components/omni/library-mode'
+    45→import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
+    46→import { VoiceModeOverlay } from '@/components/omni/voice-mode-overlay'
+    47→import { ConnectPanel } from '@/components/omni/connect-panel'
+    48→import { LegalPage } from '@/components/omni/legal-page'
+    49→import { ProfileEditModal } from '@/components/omni/profile-edit-modal'
+    50→import { Headphones, Mic } from 'lucide-react'
+    51→
+    52→// ============ TYPES ============
+    53→type TabId = 'chat' | 'projects' | 'explore' | 'library' | 'profile'
+    54→type Intelligence = 'auto' | 'fast' | 'reasoning' | 'vision'
+    55→
+    56→interface Message {
+    57→  id: string
+    58→  role: 'user' | 'assistant'
+    59→  content: string
+    60→  attachments?: any[]
+    61→}
+    62→
+    63→interface ToolMenuItem {
+    64→  label: string
+    65→  icon: any
+    66→  tool: ToolId
+    67→}
+    68→
+    69→// ============ MAIN COMPONENT ============
+    70→export default function Page() {
+    71→  const { theme, language, onboarded } = usePreferences()
+    72→  useEffect(() => { applyPreferences(theme, language) }, [theme, language])
+    73→
+    74→  if (!onboarded) return <Onboarding />
+    75→  return <NexusApp />
+    76→}
+    77→
+    78→// ============ APP (post-onboarding) ============
+    79→function NexusApp() {
+    80→  const { theme, language, toggleTheme, toggleLanguage, name, interests, commStyle, resetOnboarding } = usePreferences()
+    81→  useEffect(() => { applyPreferences(theme, language) }, [theme, language])
+    82→
+    83→  // Real auth
+    84→  const { user, signOut, fetchMe } = useAuth()
+    85→  const [authOpen, setAuthOpen] = useState(false)
+    86→  const [voiceOpen, setVoiceOpen] = useState(false)
+    87→  const [voiceMounted, setVoiceMounted] = useState(false)
+    88→  const [connectOpen, setConnectOpen] = useState(false)
+    89→  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+    90→  const [legalPage, setLegalPage] = useState<'privacy' | 'terms' | null>(null)
+    91→  const [profileEditOpen, setProfileEditOpen] = useState(false)
+    92→
+    93→  // Navigation
+    94→  const [activeTab, setActiveTab] = useState<TabId>('chat')
+    95→
+    96→  // Intelligence selector
+    97→  const [intelligence, setIntelligence] = useState<Intelligence>('auto')
+    98→  const [intelOpen, setIntelOpen] = useState(false)
+    99→
+   100→  // Tool menu (the + bottom-sheet)
+   101→  const [toolMenuOpen, setToolMenuOpen] = useState(false)
+   102→
+   103→  // Chat state
+   104→  const [messages, setMessages] = useState<Message[]>([])
+   105→  const [input, setInput] = useState('')
+   106→  const [sending, setSending] = useState(false)
+   107→  const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
+   108→
+   109→  // Tool engine — routes the next message to the right /api/* route
+   110→  const toolEngine = useToolEngine(
+   111→    // onAssistant: push assistant message into the conversation
+   112→    useCallback((msg: { content: string; attachments?: any[] }) => {
+   113→      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: msg.content, attachments: msg.attachments }])
+   114→    }, []),
+   115→    // onToolRunning: show a status line above the composer
+   116→    useCallback((running: boolean, label?: string) => {
+   117→      setToolRunningLabel(running ? (label || 'Working…') : null)
+   118→    }, []),
+   119→  )
+   120→
+   121→  // Send: routes through tool engine if a tool is pending, else plain chat
+   122→  const send = useCallback(async (text?: string) => {
+   123→    const msg = (text ?? input).trim()
+   124→    if (!msg || sending) return
+   125→    setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: msg }])
+   126→    setInput('')
+   127→    setSending(true)
+   128→    try {
+   129→      // If a tool is pending, route to the tool engine
+   130→      if (toolEngine.pendingTool) {
+   131→        await toolEngine.execute(msg)
+   132→        return
+   133→      }
+   134→      // Otherwise: plain chat stream
+   135→      const res = await fetch('/api/chat', {
+   136→        method: 'POST',
+   137→        headers: { 'Content-Type': 'application/json' },
+   138→        body: JSON.stringify({ message: msg }),
+   139→      })
+   140→      const reader = res.body!.getReader()
+   141→      const decoder = new TextDecoder()
+   142→      let buf = ''
+   143→      for (;;) {
+   144→        const { done, value } = await reader.read()
+   145→        if (done) break
+   146→        buf += decoder.decode(value, { stream: true })
+   147→        const lines = buf.split('\n')
+   148→        buf = lines.pop() ?? ''
+   149→        for (const line of lines) {
+   150→          if (!line.trim()) continue
+   151→          try {
+   152→            const e = JSON.parse(line)
+   153→            if (e.type === 'assistant') {
+   154→              setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: e.content, attachments: e.attachments }])
+   155→            }
+   156→          } catch {}
+   157→        }
+   158→      }
+   159→    } catch (err: any) {
+   160→      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: `⚠️ ${err.message || 'Something went wrong.'}` }])
+   161→    } finally {
+   162→      setSending(false)
+   163→    }
+   164→  }, [input, sending, toolEngine])
+   165→
+   166→  const TABS: Array<{ id: TabId; label: string; icon: any }> = [
+   167→    { id: 'chat', label: 'Chat', icon: MessageSquare },
+   168→    { id: 'projects', label: 'Projects', icon: FolderKanban },
+   169→    { id: 'explore', label: 'Explore', icon: Compass },
+   170→    { id: 'library', label: 'Library', icon: Library },
+   171→    { id: 'profile', label: 'Profile', icon: User },
+   172→  ]
+   173→
+   174→  const INTEL_OPTIONS: Array<{ id: Intelligence; label: string; desc: string; icon: any }> = [
+   175→    { id: 'auto', label: 'Auto', desc: 'Best model for the task', icon: Sparkles },
+   176→    { id: 'fast', label: 'Fast', desc: 'Quick everyday conversations', icon: Zap },
+   177→    { id: 'reasoning', label: 'Reasoning', desc: 'Complex analysis & hard problems', icon: Brain },
+   178→    { id: 'vision', label: 'Vision', desc: 'Images & visual understanding', icon: Eye },
+   179→  ]
+   180→
+   181→  const TOOL_MENU: Array<{ category: string; items: ToolMenuItem[] }> = [
+   182→    { category: 'Create', items: [
+   183→      { label: 'Image', icon: ImageIcon, tool: 'image' },
+   184→      { label: 'Video', icon: Video, tool: 'video' },
+   185→      { label: 'Writing', icon: FileText, tool: 'office' },
+   186→    ]},
+   187→    { category: 'Understand', items: [
+   188→      { label: 'Upload file', icon: Paperclip, tool: 'upload' },
+   189→      { label: 'Camera', icon: ScanEye, tool: 'vision' },
+   190→      { label: 'Vision', icon: Eye, tool: 'vision' },
+   191→      { label: 'Document analysis', icon: FileSearch, tool: 'documents' },
+   192→    ]},
+   193→    { category: 'Think', items: [
+   194→      { label: 'Deep research', icon: Globe, tool: 'search' },
+   195→      { label: 'Reasoning', icon: Brain, tool: 'agent' },
+   196→      { label: 'Data analysis', icon: BookOpen, tool: 'code' },
+   197→    ]},
+   198→    { category: 'Work', items: [
+   199→      { label: 'Code', icon: Code, tool: 'code' },
+   200→      { label: 'Documents', icon: FileText, tool: 'documents' },
+   201→      { label: 'Office', icon: FileText, tool: 'office' },
+   202→    ]},
+   203→    { category: 'Connect', items: [
+   204→      { label: 'Web search', icon: Globe, tool: 'search' },
+   205→      { label: 'Connected apps', icon: Plus, tool: 'connectors' },
+   206→      { label: 'Email', icon: Mail, tool: 'email' },
+   207→    ]},
+   208→  ]
+   209→
+   210→  // Premium gradient per tool — warm, cohesive, no blue/indigo.
+   211→  const TOOL_GRADIENT: Record<string, string> = {
+   212→    image:      'from-rose-500 to-orange-500',
+   213→    video:      'from-orange-500 to-amber-500',
+   214→    office:     'from-pink-500 to-rose-500',
+   215→    upload:     'from-amber-500 to-orange-500',
+   216→    vision:     'from-orange-500 to-rose-500',
+   217→    documents:  'from-rose-500 to-pink-500',
+   218→    search:     'from-amber-500 to-yellow-500',
+   219→    agent:      'from-fuchsia-500 to-pink-500',
+   220→    code:       'from-amber-500 to-yellow-500',
+   221→    connectors: 'from-rose-500 to-red-500',
+   222→    email:      'from-orange-500 to-amber-500',
+   223→  }
+   224→
+   225→  const SUGGESTIONS = [
+   226→    'Research something',
+   227→    'Analyze a file',
+   228→    'Create something',
+   229→    'Help me code',
+   230→  ]
+   231→
+   232→  // Display name priority: auth user → preferences name → 'Guest'
+   233→  const displayName = user?.name || name.trim() || (user?.email ? user.email.split('@')[0] : 'Guest')
+   234→  const displayInitial = (user?.name?.[0] || user?.email?.[0] || name.trim()[0] || 'G').toUpperCase()
+   235→
+   236→  const openAuth = (mode: 'signin' | 'signup') => {
+   237→    setAuthMode(mode)
+   238→    setAuthOpen(true)
+   239→  }
+   240→
+   241→  // Lazy-mount the voice overlay so its hooks don't re-evaluate on every keystroke
+   242→  // until the user actually opens voice mode.
+   243→  useEffect(() => {
+   244→    if (voiceOpen) setVoiceMounted(true)
+   245→  }, [voiceOpen])
+   246→
+   247→  // Listen for "open connect panel" requests from inline email cards
+   248→  useEffect(() => {
+   249→    const handler = () => setConnectOpen(true)
+   250→    window.addEventListener('nexus:open-connect', handler)
+   251→    return () => window.removeEventListener('nexus:open-connect', handler)
+   252→  }, [])
+   253→
+   254→  // Listen for "open legal page" requests (Privacy / Terms) — mirrors the
+   255→  // nexus:open-connect pattern; e.detail.type is 'privacy' | 'terms'.
+   256→  useEffect(() => {
+   257→    const handler = (e: Event) => {
+   258→      const t = (e as CustomEvent<'privacy' | 'terms'>).detail
+   259→      if (t === 'privacy' || t === 'terms') setLegalPage(t)
+   260→    }
+   261→    window.addEventListener('nexus:open-legal', handler as EventListener)
+   262→    return () => window.removeEventListener('nexus:open-legal', handler as EventListener)
+   263→  }, [])
+   264→
+   265→  // Listen for "send this message" requests from answer follow-up chips
+   266→  useEffect(() => {
+   267→    const handler = (e: Event) => {
+   268→      const q = (e as CustomEvent<string>).detail
+   269→      if (typeof q === 'string' && q.trim()) send(q)
+   270→    }
+   271→    window.addEventListener('nexus:send-message', handler as EventListener)
+   272→    return () => window.removeEventListener('nexus:send-message', handler as EventListener)
+   273→  }, [send])
+   274→
+   275→  const handleToolPick = (tool: ToolId, label: string) => {
+   276→    setToolMenuOpen(false)
+   277→    // Connectors opens the Connect panel directly (no prompt needed)
+   278→    if (tool === 'connectors') {
+   279→      setConnectOpen(true)
+   280→      return
+   281→    }
+   282→    toolEngine.setPendingTool(tool)
+   283→    // Focus the textarea so the user can type their prompt immediately
+   284→    setTimeout(() => {
+   285→      const ta = document.querySelector('textarea[name="nexus-input"]') as HTMLTextAreaElement | null
+   286→      ta?.focus()
+   287→    }, 50)
+   288→  }
+   289→
+   290→  const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
+   291→
+   292→  return (
+   293→    <div className="nexus-shell bg-background">
+   294→      {/* Hidden file input for tool uploads — uses the tool engine's ref */}
+   295→      <input
+   296→        ref={toolEngine.fileInputRef}
+   297→        type="file"
+   298→        className="hidden"
+   299→        onChange={toolEngine.onFilePicked}
+   300→      />
+   301→
+   302→      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
+   303→
+   304→      {/* Voice overlay is lazy-mounted — its hooks only evaluate once opened */}
+   305→      {voiceMounted && (
+   306→        <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+   307→      )}
+   308→
+   309→      <ConnectPanel open={connectOpen} onClose={() => setConnectOpen(false)} />
+   310→
+   311→      <ProfileEditModal open={profileEditOpen} onClose={() => setProfileEditOpen(false)} />
+   312→
+   313→      {legalPage !== null && (
+   314→        <LegalPage
+   315→          type={legalPage}
+   316→          onClose={() => setLegalPage(null)}
+   317→          language={language}
+   318→        />
+   319→      )}
+   320→
+   321→      {/* ====== DESKTOP SIDEBAR ====== */}
+   322→      <div className="flex min-h-0 flex-1">
+   323→        <aside className="hidden w-[260px] shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
+   324→          <div className="px-4 pt-5 pb-2">
+   325→            <Image
+   326→              src="/nexus-header-logo.png"
+   327→              alt="Nexus"
+   328→              width={120}
+   329→              height={40}
+   330→              priority
+   331→              className="h-8 w-auto"
+   332→            />
+   333→          </div>
+   334→          <div className="px-3 pt-2">
+   335→            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
+   336→              <Plus className="h-4 w-4" /> New Chat
+   337→            </button>
+   338→          </div>
+   339→          <nav className="flex-1 space-y-1 p-3" aria-label="Navigation">
+   340→            {TABS.map(t => {
+   341→              const Icon = t.icon
+   342→              const active = activeTab === t.id
+   343→              return (
+   344→                <motion.button
+   345→                  key={t.id}
+   346→                  whileTap={{ scale: 0.98 }}
+   347→                  onClick={() => setActiveTab(t.id)}
+   348→                  className={`relative flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left transition ${active ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary/60'}`}
+   349→                >
+   350→                  {active && <motion.span layoutId="side-active" className="absolute left-0 h-5 w-1 rounded-full bg-primary" style={{ top: '50%', transform: 'translateY(-50%)' }} transition={{ type: 'spring', stiffness: 500, damping: 35 }} />}
+   351→                  <Icon className={`h-[18px] w-[18px] ${active ? 'text-primary' : ''}`} aria-hidden />
+   352→                  <span className="text-sm">{t.label}</span>
+   353→                </motion.button>
+   354→              )
+   355→            })}
+   356→          </nav>
+   357→          <div className="border-t border-border p-3">
+   358→            <button onClick={() => setActiveTab('profile')} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary">
+   359→              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">{displayInitial}</span>
+   360→              <span className="truncate text-xs font-medium">{displayName}</span>
+   361→            </button>
+   362→          </div>
+   363→        </aside>
+   364→
+   365→        {/* ====== MAIN CONTENT ====== */}
+   366→        <main className="flex min-w-0 flex-1 flex-col">
+   367→          {/* Wrap chat header + intel dropdown in a relative container so the
+   368→              absolute intel dropdown anchors against the chat header instead
+   369→              of the viewport. */}
+   370→          <div className="relative">
+   371→          {/* Mobile header */}
+   372→          <header className="flex items-center justify-between px-4 py-2.5 lg:hidden">
+   373→            <Image
+   374→              src="/nexus-header-logo.png"
+   375→              alt="Nexus"
+   376→              width={112}
+   377→              height={37}
+   378→              priority
+   379→              className="h-7 w-auto"
+   380→            />
+   381→            <div className="flex items-center gap-2">
+   382→              <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
+   383→                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary/50 text-primary transition hover:bg-secondary"
+   384→              >
+   385→                <Headphones className="h-4 w-4" />
+   386→              </button>
+   387→              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
+   388→                {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+   389→                <span className="capitalize">{intelligence}</span>
+   390→                <ChevronDown className="h-3 w-3" />
+   391→              </button>
+   392→            </div>
+   393→          </header>
+   394→
+   395→          {activeTab === 'chat' && (
+   396→            <div className="hidden items-center justify-between border-b border-border/50 px-5 py-2 lg:flex">
+   397→              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium transition hover:bg-secondary">
+   398→                {intelligence === 'auto' ? <Sparkles className="h-4 w-4" /> : intelligence === 'reasoning' ? <Brain className="h-4 w-4" /> : intelligence === 'vision' ? <Eye className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+   399→                <span className="capitalize">Nexus {intelligence}</span>
+   400→                <ChevronDown className="h-3.5 w-3.5" />
+   401→              </button>
+   402→              <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
+   403→                className="flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-secondary"
+   404→              >
+   405→                <Headphones className="h-3.5 w-3.5" />
+   406→                <span>Voice</span>
+   407→              </button>
+   408→            </div>
+   409→          )}
+   410→
+   411→          <AnimatePresence>
+   412→            {intelOpen && (
+   413→              <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+   414→                className="absolute right-4 top-12 z-50 w-64 rounded-2xl border border-border bg-popover p-2 shadow-xl lg:right-8 lg:top-16"
+   415→              >
+   416→                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Choose intelligence</p>
+   417→                {INTEL_OPTIONS.map(o => {
+   418→                  const Icon = o.icon
+   419→                  return (
+   420→                    <button key={o.id} onClick={() => { setIntelligence(o.id); setIntelOpen(false) }}
+   421→                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${intelligence === o.id ? 'bg-secondary' : 'hover:bg-secondary/60'}`}
+   422→                    >
+   423→                      <Icon className="h-4 w-4" aria-hidden />
+   424→                      <div>
+   425→                        <p className="text-sm font-medium">{o.label}</p>
+   426→                        <p className="text-[11px] text-muted-foreground">{o.desc}</p>
+   427→                      </div>
+   428→                      {intelligence === o.id && <Sparkles className="ml-auto h-3.5 w-3.5 text-primary" />}
+   429→                    </button>
+   430→                  )
+   431→                })}
+   432→              </motion.div>
+   433→            )}
+   434→          </AnimatePresence>
+   435→          </div>
+   436→
+   437→          {/* ====== CONTENT AREA ====== */}
+   438→          {activeTab === 'chat' && (
+   439→            <div className="flex flex-1 flex-col min-h-0">
+   440→              {/* Conversation area */}
+   441→              <div className="omni-scroll flex-1 overflow-y-auto">
+   442→                <div className="mx-auto w-full max-w-3xl px-4 py-6">
+   443→                  {/* Empty state */}
+   444→                  {messages.length === 0 && (
+   445→                    <div className="flex flex-col items-center justify-center py-16">
+   446→                      <motion.div
+   447→                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+   448→                        animate={{ opacity: 1, scale: 1, y: 0 }}
+   449→                        transition={{ type: 'spring', stiffness: 120, damping: 16 }}
+   450→                        className="relative mb-6"
+   451→                      >
+   452→                        <motion.div animate={{ y: [0, -5, 0] }} transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}>
+   453→                          <Image src="/nexus-onboarding-hero.png" alt="Nexus" width={140} height={93} className="h-20 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50" />
+   454→                        </motion.div>
+   455→                        <motion.span aria-hidden className="absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 to-transparent blur-2xl" animate={{ opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 3, repeat: Infinity }} />
+   456→                      </motion.div>
+   457→                      <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-2xl font-semibold">
+   458→                        {displayName !== 'Guest' ? `Hi ${displayName.split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
+   459→                      </motion.h1>
+   460→                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</motion.p>
+   461→                      <div className="mt-8 flex flex-wrap justify-center gap-2">
+   462→                        {SUGGESTIONS.map((s, i) => (
+   463→                          <motion.button
+   464→                            key={s}
+   465→                            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+   466→                            animate={{ opacity: 1, y: 0, scale: 1 }}
+   467→                            transition={{ delay: 0.2 + i * 0.06 }}
+   468→                            whileHover={{ scale: 1.04, y: -1 }}
+   469→                            whileTap={{ scale: 0.97 }}
+   470→                            onClick={() => send(s)}
+   471→                            className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+   472→                          >{s}</motion.button>
+   473→                        ))}
+   474→                      </div>
+   475→                    </div>
+   476→                  )}
+   477→                  {/* Messages */}
+   478→                  <div className="flex flex-col gap-6">
+   479→                    {messages.map(m => (
+   480→                      <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+   481→                        {m.role === 'user' ? (
+   482→                          <div className="max-w-[85%] rounded-3xl rounded-tr-lg bg-secondary px-4 py-2.5 text-[15px]">{m.content}</div>
+   483→                        ) : (
+   484→                          <div className="max-w-[90%]">
+   485→                            <Markdown content={m.content} />
+   486→                            {m.attachments?.map((a, i) => <AttachmentCard key={i} attachment={a} />)}
+   487→                          </div>
+   488→                        )}
+   489→                      </div>
+   490→                    ))}
+   491→                    {(sending || toolRunningLabel) && (
+   492→                      <div className="flex items-center gap-2 px-1">
+   493→                        {toolRunningLabel ? (
+   494→                          <>
+   495→                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+   496→                            <span className="text-xs text-muted-foreground">{toolRunningLabel}</span>
+   497→                          </>
+   498→                        ) : (
+   499→                          <div className="flex flex-col gap-2 rounded-2xl bg-secondary/60 px-4 py-3">
+   500→                            <span className="omni-shimmer h-3 w-24 rounded-full" />
+   501→                            <span className="omni-shimmer h-3 w-32 rounded-full" />
+   502→                            <span className="omni-shimmer h-3 w-20 rounded-full" />
+   503→                          </div>
+   504→                        )}
+   505→                      </div>
+   506→                    )}
+   507→                  </div>
+   508→                </div>
+   509→              </div>
+   510→
+   511→              {/* ====== COMPOSER ====== */}
+   512→              <div className="border-t border-border bg-background">
+   513→                <form className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send() }}>
+   514→                  {/* Pending tool banner */}
+   515→                  {pendingToolDef && (
+   516→                    <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5">
+   517→                      {(() => {
+   518→                        const Icon = TOOL_MENU.flatMap(c => c.items).find(i => i.tool === toolEngine.pendingTool)?.icon || Sparkles
+   519→                        return <Icon className="h-3.5 w-3.5 text-primary" />
+   520→                      })()}
+   521→                      <span className="text-xs font-medium text-primary">{pendingToolDef.label}</span>
+   522→                      {toolEngine.pendingFile && (
+   523→                        <span className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
+   524→                          <Paperclip className="h-2.5 w-2.5" />
+   525→                          {toolEngine.pendingFile.name.slice(0, 20)}
+   526→                          <button type="button" onClick={() => toolEngine.clearPendingFile()} className="ml-0.5">
+   527→                            <X className="h-2.5 w-2.5" />
+   528→                          </button>
+   529→                        </span>
+   530→                      )}
+   531→                      <button type="button" onClick={() => toolEngine.clear()} className="ml-1 text-primary/70 hover:text-primary">
+   532→                        <X className="h-3 w-3" />
+   533→                      </button>
+   534→                    </div>
+   535→                  )}
+   536→                  {/* Tool error */}
+   537→                  {toolEngine.toolError && (
+   538→                    <p className="self-start text-xs text-destructive">{toolEngine.toolError}</p>
+   539→                  )}
+   540→                  <div className="relative flex flex-1 items-end rounded-3xl border border-border bg-card shadow-sm">
+   541→                    <button type="button" onClick={() => setToolMenuOpen(!toolMenuOpen)}
+   542→                      aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-3xl text-muted-foreground transition hover:text-foreground"
+   543→                    >
+   544→                      <Plus className="h-5 w-5" />
+   545→                    </button>
+   546→                    <Textarea name="nexus-input" value={input} onChange={e => setInput(e.target.value)}
+   547→                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+   548→                      placeholder={pendingToolDef?.placeholder || 'Message Nexus...'} rows={1}
+   549→                      className="max-h-40 min-h-[48px] flex-1 resize-none border-0 bg-transparent px-1 py-3 text-[15px] focus-visible:ring-0"
+   550→                    />
+   551→                    <div className="flex items-center pr-1.5 pb-1">
+   552→                      <button type="button" onClick={() => setVoiceOpen(true)}
+   553→                        aria-label="Open voice mode"
+   554→                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-primary"
+   555→                      >
+   556→                        <Mic className="h-[18px] w-[18px]" />
+   557→                      </button>
+   558→                      <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile) || sending || !!toolRunningLabel} aria-label="Send"
+   559→                        className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-30"
+   560→                      >
+   561→                        <Send className="h-4 w-4" />
+   562→                      </button>
+   563→                    </div>
+   564→                  </div>
+   565→                </form>
+   566→              </div>
+   567→
+   568→              {/* Tool menu bottom sheet */}
+   569→              <AnimatePresence>
+   570→                {toolMenuOpen && (
+   571→                  <>
+   572→                    <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setToolMenuOpen(false)} />
+   573→                    <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+   574→                      transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+   575→                      className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background pb-safe"
+   576→                    >
+   577→                      <div className="mx-auto max-w-2xl px-4 py-5">
+   578→                        <div className="mb-4 flex items-center justify-between">
+   579→                          <h3 className="text-sm font-semibold">Tools</h3>
+   580→                          <button onClick={() => setToolMenuOpen(false)} className="text-xs text-muted-foreground">Close</button>
+   581→                        </div>
+   582→                        {TOOL_MENU.map(cat => (
+   583→                          <div key={cat.category} className="mb-4">
+   584→                            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">{cat.category}</p>
+   585→                            <div className="flex flex-wrap gap-2">
+   586→                              {cat.items.map((item, idx) => {
+   587→                                const Icon = item.icon
+   588→                                const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
+   589→                                return (
+   590→                                  <motion.button
+   591→                                    key={`${cat.category}-${item.tool}-${item.label}`}
+   592→                                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+   593→                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+   594→                                    transition={{ delay: idx * 0.03, duration: 0.25 }}
+   595→                                    whileHover={{ scale: 1.04 }}
+   596→                                    whileTap={{ scale: 0.97 }}
+   597→                                    onClick={() => handleToolPick(item.tool, item.label)}
+   598→                                    className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
+   599→                                  >
+   600→                                    <span className={`flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${grad} text-white`}>
+   601→                                      <Icon className="h-3 w-3" aria-hidden />
+   602→                                    </span>
+   603→                                    {item.label}
+   604→                                  </motion.button>
+   605→                                )
+   606→                              })}
+   607→                            </div>
+   608→                          </div>
+   609→                        ))}
+   610→                      </div>
+   611→                    </motion.div>
+   612→                  </>
+   613→                )}
+   614→              </AnimatePresence>
+   615→            </div>
+   616→          )}
+   617→
+   618→          {/* Explore page */}
+   619→          {activeTab === 'explore' && (
+   620→            <div className="omni-scroll flex-1 overflow-y-auto">
+   621→              <div className="mx-auto max-w-2xl px-4 py-8">
+   622→                <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-semibold">Explore Nexus</motion.h1>
+   623→                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</motion.p>
+   624→                {TOOL_MENU.map((cat, ci) => (
+   625→                  <motion.section
+   626→                    key={cat.category}
+   627→                    initial={{ opacity: 0, y: 12 }}
+   628→                    animate={{ opacity: 1, y: 0 }}
+   629→                    transition={{ delay: 0.1 + ci * 0.06 }}
+   630→                    className="mt-6"
+   631→                  >
+   632→                    <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">{cat.category}</h2>
+   633→                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+   634→                      {cat.items.map((item, idx) => {
+   635→                        const Icon = item.icon
+   636→                        const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
+   637→                        return (
+   638→                          <motion.button
+   639→                            key={`${cat.category}-${item.tool}-${item.label}`}
+   640→                            whileHover={{ y: -3, scale: 1.02 }}
+   641→                            whileTap={{ scale: 0.98 }}
+   642→                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+   643→                            onClick={() => { setActiveTab('chat'); handleToolPick(item.tool, item.label) }}
+   644→                            className="group relative flex flex-col items-start gap-2.5 overflow-hidden rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
+   645→                          >
+   646→                            <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${grad} text-white shadow-md`}>
+   647→                              <Icon className="h-5 w-5" aria-hidden />
+   648→                            </span>
+   649→                            <span className="text-sm font-semibold">{item.label}</span>
+   650→                          </motion.button>
+   651→                        )
+   652→                      })}
+   653→                    </div>
+   654→                  </motion.section>
+   655→                ))}
+   656→              </div>
+   657→            </div>
+   658→          )}
+   659→
+   660→          {/* Projects */}
+   661→          {activeTab === 'projects' && (
+   662→            <ProjectsMode />
+   663→          )}
+   664→
+   665→          {/* Library */}
+   666→          {activeTab === 'library' && (
+   667→            <LibraryMode />
+   668→          )}
+   669→
+   670→          {/* Profile */}
+   671→          {activeTab === 'profile' && (
+   672→            <div className="omni-scroll flex-1 overflow-y-auto">
+   673→              <div className="mx-auto max-w-md px-4 py-8">
+   674→                <div className="flex flex-col items-center">
+   675→                  {user?.avatarUrl ? (
+   676→                    <Image
+   677→                      src={user.avatarUrl}
+   678→                      alt={displayName}
+   679→                      width={64}
+   680→                      height={64}
+   681→                      className="h-16 w-16 rounded-full border-2 border-border object-cover"
+   682→                    />
+   683→                  ) : (
+   684→                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 text-xl font-bold text-white">
+   685→                      {displayInitial}
+   686→                    </div>
+   687→                  )}
+   688→                  <h2 className="mt-3 text-lg font-bold">{displayName}</h2>
+   689→                  {user && <span className="text-xs text-muted-foreground">{user.email}</span>}
+   690→                  {user && user.createdAt && (
+   691→                    <span className="mt-1 text-[11px] text-muted-foreground">
+   692→                      Member since {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+   693→                    </span>
+   694→                  )}
+   695→                  <span className="mt-1 text-[11px] text-muted-foreground capitalize">{commStyle} style</span>
+   696→                </div>
+   697→                {!user ? (
+   698→                  <div className="mt-6 grid grid-cols-2 gap-2">
+   699→                    <Button className="rounded-xl bg-primary text-primary-foreground" onClick={() => openAuth('signin')}>
+   700→                      <LogIn className="mr-1.5 h-4 w-4" /> Sign in
+   701→                    </Button>
+   702→                    <Button variant="outline" className="rounded-xl" onClick={() => openAuth('signup')}>
+   703→                      <UserPlus className="mr-1.5 h-4 w-4" /> Sign up
+   704→                    </Button>
+   705→                  </div>
+   706→                ) : (
+   707→                  <div className="mt-6 flex flex-col gap-2">
+   708→                    <Button className="rounded-xl bg-primary text-primary-foreground" onClick={() => setProfileEditOpen(true)}>
+   709→                      <Pencil className="mr-1.5 h-4 w-4" /> Edit profile
+   710→                    </Button>
+   711→                    <Button variant="outline" className="rounded-xl" onClick={() => signOut()}>Sign out</Button>
+   712→                  </div>
+   713→                )}
+   714→                {/* Personalization */}
+   715→                <section className="mt-6">
+   716→                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Personalization</h3>
+   717→                  <div className="space-y-1">
+   718→                    <button onClick={() => setConnectOpen(true)} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   719→                      <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground" /> Email & apps</span>
+   720→                      <Plus className="h-3.5 w-3.5 text-muted-foreground" />
+   721→                    </button>
+   722→                    <button onClick={toggleTheme} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   723→                      <span>Theme</span><span className="text-muted-foreground capitalize">{theme}</span>
+   724→                    </button>
+   725→                    <button onClick={toggleLanguage} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   726→                      <span>Language</span><span className="text-muted-foreground">{language === 'en' ? 'English' : 'العربية'}</span>
+   727→                    </button>
+   728→                    <button onClick={() => resetOnboarding()} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   729→                      <span>Re-run onboarding</span>
+   730→                      <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+   731→                    </button>
+   732→                    <button onClick={() => setLegalPage('privacy')} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   733→                      <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /> Privacy Policy</span>
+   734→                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+   735→                    </button>
+   736→                    <button onClick={() => setLegalPage('terms')} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   737→                      <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /> Terms of Service</span>
+   738→                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+   739→                    </button>
+   740→                  </div>
+   741→                </section>
+   742→                {/* Interests */}
+   743→                {interests.length > 0 && (
+   744→                  <section className="mt-6">
+   745→                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Your interests</h3>
+   746→                    <div className="flex flex-wrap gap-1.5">
+   747→                      {interests.map(i => (
+   748→                        <span key={i} className="rounded-full border border-border bg-card px-3 py-1 text-xs capitalize text-muted-foreground">{i}</span>
+   749→                      ))}
+   750→                    </div>
+   751→                  </section>
+   752→                )}
+   753→                {/* Tiny legal footer — the “Built by” credit lives in the desktop footer (Part E) */}
+   754→                <div className="mt-8 flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
+   755→                  <button onClick={() => setLegalPage('privacy')} className="transition hover:text-foreground">Privacy</button>
+   756→                  <span aria-hidden>·</span>
+   757→                  <button onClick={() => setLegalPage('terms')} className="transition hover:text-foreground">Terms</button>
+   758→                  <span aria-hidden>·</span>
+   759→                  <span>© 2026 NEXUS AI</span>
+   760→                </div>
+   761→              </div>
+   762→            </div>
+   763→          )}
+   764→        </main>
+   765→      </div>
+   766→
+   767→      {/* ====== MOBILE BOTTOM NAV ====== */}
+   768→      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 backdrop-blur lg:hidden" aria-label="Primary">
+   769→        {TABS.map(t => {
+   770→          const Icon = t.icon
+   771→          const active = activeTab === t.id
+   772→          return (
+   773→            <button key={t.id} onClick={() => setActiveTab(t.id)} aria-current={active ? 'page' : undefined}
+   774→              className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2.5"
+   775→            >
+   776→              {active && (
+   777→                <motion.span layoutId="nav-active" className="absolute inset-x-2 inset-y-1 -z-10 rounded-full bg-primary/10" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
+   778→              )}
+   779→              <motion.div animate={{ scale: active ? 1.08 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
+   780→                <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
+   781→              </motion.div>
+   782→              <span className={`text-[10px] ${active ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{t.label}</span>
+   783→            </button>
+   784→          )
+   785→        })}
+   786→      </nav>
+   787→
+   788→      {/* ====== DESKTOP FOOTER ====== */}
+   789→      <footer className="mt-auto hidden h-10 items-center justify-between border-t bg-background/95 px-6 py-3 text-xs text-muted-foreground lg:flex">
+   790→        <span>NEXUS AI · by Mounir Shaaban</span>
+   791→        <div className="flex items-center gap-1.5">
+   792→          <button onClick={() => setLegalPage('privacy')} className="transition hover:text-foreground">Privacy</button>
+   793→          <span aria-hidden>·</span>
+   794→          <button onClick={() => setLegalPage('terms')} className="transition hover:text-foreground">Terms</button>
+   795→          <span aria-hidden>·</span>
+   796→          <span>© 2026</span>
+   797→        </div>
+   798→      </footer>
+   799→    </div>
+   800→  )
+   801→}
+   802→

@@ -31,6 +31,9 @@ import {
   LogIn,
   UserPlus,
   Loader2,
+  ChevronRight,
+  Wand2,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -222,11 +225,11 @@ function NexusApp() {
     email:      'from-orange-500 to-amber-500',
   }
 
-  const SUGGESTIONS = [
-    'Research something',
-    'Analyze a file',
-    'Create something',
-    'Help me code',
+  const SUGGESTIONS: Array<{ title: string; subtitle: string; icon: any; tool?: ToolId }> = [
+    { title: 'Research something', subtitle: 'Deep dive into any topic', icon: Globe, tool: 'search' },
+    { title: 'Analyze a file', subtitle: 'PDFs, docs, code & more', icon: FileSearch, tool: 'documents' },
+    { title: 'Create something', subtitle: 'Images, videos & writing', icon: Wand2, tool: 'image' },
+    { title: 'Help me code', subtitle: 'Write, debug, or explain', icon: Code, tool: 'code' },
   ]
 
   // Display name priority: auth user → preferences name → 'Guest'
@@ -332,8 +335,12 @@ function NexusApp() {
             />
           </div>
           <div className="px-3 pt-2">
-            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
-              <Plus className="h-4 w-4" /> New Chat
+            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
+              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Plus className="h-3.5 w-3.5" />
+              </span>
+              <span>New Chat</span>
+              <kbd className="ml-auto rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">⌘K</kbd>
             </button>
           </div>
           <nav className="flex-1 space-y-1 p-3" aria-label="Navigation">
@@ -355,9 +362,13 @@ function NexusApp() {
             })}
           </nav>
           <div className="border-t border-border p-3">
-            <button onClick={() => setActiveTab('profile')} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">{displayInitial}</span>
-              <span className="truncate text-xs font-medium">{displayName}</span>
+            <button onClick={() => setActiveTab('profile')} className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 transition hover:bg-secondary hover:ring-1 hover:ring-border">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-gradient text-xs font-bold text-primary-foreground ring-2 ring-border">{displayInitial}</span>
+              <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
+                <span className="truncate text-sm font-medium">{displayName}</span>
+                <span className="truncate text-[11px] text-muted-foreground">{user?.email || 'Guest mode'}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
             </button>
           </div>
         </aside>
@@ -369,7 +380,7 @@ function NexusApp() {
               of the viewport. */}
           <div className="relative">
           {/* Mobile header */}
-          <header className="flex items-center justify-between px-4 py-2.5 lg:hidden">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/60 bg-background/80 px-4 py-2.5 backdrop-blur-md lg:hidden">
             <Image
               src="/nexus-header-logo.png"
               alt="Nexus"
@@ -380,11 +391,11 @@ function NexusApp() {
             />
             <div className="flex items-center gap-2">
               <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary/50 text-primary transition hover:bg-secondary"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background/80 text-primary backdrop-blur transition hover:bg-secondary"
               >
                 <Headphones className="h-4 w-4" />
               </button>
-              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
+              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-medium backdrop-blur transition hover:bg-secondary">
                 {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
                 <span className="capitalize">{intelligence}</span>
                 <ChevronDown className="h-3 w-3" />
@@ -411,24 +422,30 @@ function NexusApp() {
           <AnimatePresence>
             {intelOpen && (
               <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                className="absolute right-4 top-12 z-50 w-64 rounded-2xl border border-border bg-popover p-2 shadow-xl lg:right-8 lg:top-16"
+                className="absolute right-4 top-12 z-50 w-72 overflow-hidden rounded-2xl border border-border bg-popover shadow-xl lg:right-8 lg:top-16"
               >
-                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Choose intelligence</p>
-                {INTEL_OPTIONS.map(o => {
-                  const Icon = o.icon
-                  return (
-                    <button key={o.id} onClick={() => { setIntelligence(o.id); setIntelOpen(false) }}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${intelligence === o.id ? 'bg-secondary' : 'hover:bg-secondary/60'}`}
-                    >
-                      <Icon className="h-4 w-4" aria-hidden />
-                      <div>
-                        <p className="text-sm font-medium">{o.label}</p>
-                        <p className="text-[11px] text-muted-foreground">{o.desc}</p>
-                      </div>
-                      {intelligence === o.id && <Sparkles className="ml-auto h-3.5 w-3.5 text-primary" />}
-                    </button>
-                  )
-                })}
+                <div className="border-b border-border/60 bg-gradient-to-b from-primary/10 to-transparent px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">Intelligence</p>
+                </div>
+                <div className="p-2">
+                  {INTEL_OPTIONS.map(o => {
+                    const Icon = o.icon
+                    return (
+                      <button key={o.id} onClick={() => { setIntelligence(o.id); setIntelOpen(false) }}
+                        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${intelligence === o.id ? 'bg-secondary' : 'hover:bg-secondary/60'}`}
+                      >
+                        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${intelligence === o.id ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>
+                          <Icon className="h-4 w-4" aria-hidden />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{o.label}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">{o.desc}</p>
+                        </div>
+                        {intelligence === o.id && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-primary" />}
+                      </button>
+                    )
+                  })}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -442,7 +459,7 @@ function NexusApp() {
                 <div className="mx-auto w-full max-w-3xl px-4 py-6">
                   {/* Empty state */}
                   {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-16">
+                    <div className="flex flex-col items-center justify-center py-14">
                       <motion.div
                         initial={{ opacity: 0, scale: 0.9, y: 10 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -454,23 +471,35 @@ function NexusApp() {
                         </motion.div>
                         <motion.span aria-hidden className="absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 to-transparent blur-2xl" animate={{ opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 3, repeat: Infinity }} />
                       </motion.div>
-                      <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-2xl font-semibold">
-                        {displayName !== 'Guest' ? `Hi ${displayName.split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
+                      <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-[28px] leading-tight font-semibold tracking-tight">
+                        {displayName !== 'Guest' ? <>Hi <span className="text-brand-gradient">{displayName.split(' ')[0]}</span>, what can I help with?</> : <>What can <span className="text-brand-gradient">Nexus</span> help with?</>}
                       </motion.h1>
-                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</motion.p>
-                      <div className="mt-8 flex flex-wrap justify-center gap-2">
-                        {SUGGESTIONS.map((s, i) => (
-                          <motion.button
-                            key={s}
-                            initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            transition={{ delay: 0.2 + i * 0.06 }}
-                            whileHover={{ scale: 1.04, y: -1 }}
-                            whileTap={{ scale: 0.97 }}
-                            onClick={() => send(s)}
-                            className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-primary"
-                          >{s}</motion.button>
-                        ))}
+                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="mt-3 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</motion.p>
+                      <div className="mt-8 h-px w-12 bg-border" aria-hidden />
+                      <div className="mt-6 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                        {SUGGESTIONS.map((s, i) => {
+                          const Icon = s.icon
+                          return (
+                            <motion.button
+                              key={s.title}
+                              initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              transition={{ delay: 0.2 + i * 0.06 }}
+                              whileHover={{ y: -3 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => send(s.title)}
+                              className="group flex items-start gap-3 rounded-2xl border border-border bg-card p-3.5 text-left transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
+                            >
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition group-hover:scale-105">
+                                <Icon className="h-4 w-4" aria-hidden />
+                              </span>
+                              <span className="flex min-w-0 flex-col gap-0.5">
+                                <span className="text-sm font-medium">{s.title}</span>
+                                <span className="text-[11px] text-muted-foreground">{s.subtitle}</span>
+                              </span>
+                            </motion.button>
+                          )
+                        })}
                       </div>
                     </div>
                   )}
@@ -537,7 +566,7 @@ function NexusApp() {
                   {toolEngine.toolError && (
                     <p className="self-start text-xs text-destructive">{toolEngine.toolError}</p>
                   )}
-                  <div className="relative flex flex-1 items-end rounded-3xl border border-border bg-card shadow-sm">
+                  <div className="relative flex flex-1 items-end rounded-3xl border border-border/70 bg-card shadow-sm transition-colors duration-200 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 focus-within:shadow-md focus-within:shadow-primary/5">
                     <button type="button" onClick={() => setToolMenuOpen(!toolMenuOpen)}
                       aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-3xl text-muted-foreground transition hover:text-foreground"
                     >
@@ -569,18 +598,21 @@ function NexusApp() {
               <AnimatePresence>
                 {toolMenuOpen && (
                   <>
-                    <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setToolMenuOpen(false)} />
+                    <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setToolMenuOpen(false)} />
                     <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                       transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                      className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background pb-safe"
+                      className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background pb-safe shadow-2xl"
                     >
-                      <div className="mx-auto max-w-2xl px-4 py-5">
+                      <div className="mx-auto mb-1 mt-2 h-1 w-10 rounded-full bg-border" aria-hidden />
+                      <div className="mx-auto max-w-2xl px-4 py-4">
                         <div className="mb-4 flex items-center justify-between">
                           <h3 className="text-sm font-semibold">Tools</h3>
-                          <button onClick={() => setToolMenuOpen(false)} className="text-xs text-muted-foreground">Close</button>
+                          <button onClick={() => setToolMenuOpen(false)} className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-foreground">
+                            <X className="h-4 w-4" />
+                          </button>
                         </div>
                         {TOOL_MENU.map(cat => (
-                          <div key={cat.category} className="mb-4">
+                          <div key={cat.category} className="mb-4 last:mb-0">
                             <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">{cat.category}</p>
                             <div className="flex flex-wrap gap-2">
                               {cat.items.map((item, idx) => {
@@ -595,9 +627,10 @@ function NexusApp() {
                                     whileHover={{ scale: 1.04 }}
                                     whileTap={{ scale: 0.97 }}
                                     onClick={() => handleToolPick(item.tool, item.label)}
-                                    className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
+                                    className="group relative flex items-center gap-2 overflow-hidden rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
                                   >
-                                    <span className={`flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${grad} text-white`}>
+                                    <span aria-hidden className={`absolute inset-0 -z-10 bg-gradient-to-br ${grad} opacity-0 transition-opacity duration-200 group-hover:opacity-10`} />
+                                    <span className={`flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${grad} text-white shadow-sm`}>
                                       <Icon className="h-3 w-3" aria-hidden />
                                     </span>
                                     {item.label}
@@ -676,12 +709,12 @@ function NexusApp() {
                     <Image
                       src={user.avatarUrl}
                       alt={displayName}
-                      width={64}
-                      height={64}
-                      className="h-16 w-16 rounded-full border-2 border-border object-cover"
+                      width={80}
+                      height={80}
+                      className="h-20 w-20 rounded-full border-2 border-border object-cover shadow-sm"
                     />
                   ) : (
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 text-xl font-bold text-white">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-brand-gradient text-2xl font-bold text-primary-foreground ring-2 ring-border shadow-md shadow-primary/10">
                       {displayInitial}
                     </div>
                   )}
@@ -713,39 +746,42 @@ function NexusApp() {
                 )}
                 {/* Personalization */}
                 <section className="mt-6">
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Personalization</h3>
-                  <div className="space-y-1">
-                    <button onClick={() => setConnectOpen(true)} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                  <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Personalization</h3>
+                  <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+                    <button onClick={() => setConnectOpen(true)} className="flex w-full items-center justify-between rounded-none px-3 py-3 text-sm transition hover:bg-secondary/60">
                       <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground" /> Email & apps</span>
-                      <Plus className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
                     </button>
-                    <button onClick={toggleTheme} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                    <button onClick={toggleTheme} className="flex w-full items-center justify-between rounded-none px-3 py-3 text-sm transition hover:bg-secondary/60">
                       <span>Theme</span><span className="text-muted-foreground capitalize">{theme}</span>
                     </button>
-                    <button onClick={toggleLanguage} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                    <button onClick={toggleLanguage} className="flex w-full items-center justify-between rounded-none px-3 py-3 text-sm transition hover:bg-secondary/60">
                       <span>Language</span><span className="text-muted-foreground">{language === 'en' ? 'English' : 'العربية'}</span>
                     </button>
-                    <button onClick={() => resetOnboarding()} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                    <button onClick={() => resetOnboarding()} className="flex w-full items-center justify-between rounded-none px-3 py-3 text-sm transition hover:bg-secondary/60">
                       <span>Re-run onboarding</span>
-                      <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
                     </button>
-                    <button onClick={() => setLegalPage('privacy')} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                    <button onClick={() => setLegalPage('privacy')} className="flex w-full items-center justify-between rounded-none px-3 py-3 text-sm transition hover:bg-secondary/60">
                       <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /> Privacy Policy</span>
-                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
                     </button>
-                    <button onClick={() => setLegalPage('terms')} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                    <button onClick={() => setLegalPage('terms')} className="flex w-full items-center justify-between rounded-none px-3 py-3 text-sm transition hover:bg-secondary/60">
                       <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /> Terms of Service</span>
-                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
                     </button>
                   </div>
                 </section>
                 {/* Interests */}
                 {interests.length > 0 && (
                   <section className="mt-6">
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Your interests</h3>
+                    <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Your interests</h3>
                     <div className="flex flex-wrap gap-1.5">
                       {interests.map(i => (
-                        <span key={i} className="rounded-full border border-border bg-card px-3 py-1 text-xs capitalize text-muted-foreground">{i}</span>
+                        <span key={i} className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs capitalize text-primary">
+                          <Sparkles className="h-3 w-3" aria-hidden />
+                          {i}
+                        </span>
                       ))}
                     </div>
                   </section>
@@ -774,9 +810,9 @@ function NexusApp() {
               className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2.5"
             >
               {active && (
-                <motion.span layoutId="nav-active" className="absolute inset-x-2 inset-y-1 -z-10 rounded-full bg-primary/10" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
+                <motion.span layoutId="nav-active" className="absolute inset-x-2 inset-y-1 -z-10 rounded-full bg-primary/15 ring-1 ring-inset ring-primary/20 dark:bg-primary/20 dark:ring-primary/30" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
               )}
-              <motion.div animate={{ scale: active ? 1.08 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
+              <motion.div animate={{ scale: active ? 1.15 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
                 <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
               </motion.div>
               <span className={`text-[10px] ${active ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{t.label}</span>
@@ -786,9 +822,19 @@ function NexusApp() {
       </nav>
 
       {/* ====== DESKTOP FOOTER ====== */}
-      <footer className="mt-auto hidden h-10 items-center justify-between border-t bg-background/95 px-6 py-3 text-xs text-muted-foreground lg:flex">
-        <span>NEXUS AI · by Mounir Shaaban</span>
+      <footer className="nexus-footer relative mt-auto hidden h-11 items-center justify-between border-t bg-background/95 px-6 text-xs text-muted-foreground lg:flex">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          </span>
+          <span className="text-muted-foreground/80">All systems operational</span>
+          <span aria-hidden>·</span>
+          <span className="font-semibold text-brand-gradient">NEXUS AI</span>
+        </div>
         <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium">v1.0</span>
           <button onClick={() => setLegalPage('privacy')} className="transition hover:text-foreground">Privacy</button>
           <span aria-hidden>·</span>
           <button onClick={() => setLegalPage('terms')} className="transition hover:text-foreground">Terms</button>

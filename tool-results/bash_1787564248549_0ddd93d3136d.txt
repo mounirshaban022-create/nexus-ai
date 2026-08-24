@@ -1,0 +1,200 @@
+Edits to /home/z/my-project/src/app/api/voice/turn/route.ts (Bug G + Bug J):
+- Bug J: converted module-level `const VOICE_SYSTEM_PROMPT = [...].join('\n')` (which captured `new Date().toISOString()` at module load — stale forever) into a function `buildVoiceSystemPrompt(): string` that runs `new Date().toISOString()` per call. The POST handler now calls `buildVoiceSystemPrompt()` inside the per-request scope, so each turn sees the current time.
+- Bug G: the ZAI-TTS `for (const chunk of chunks) { … await zai.audio.tts.create … }` is now `await Promise.all(chunks.map(async chunk => …))`. Chunking logic (splitTextIntoChunks) unchanged; only the awaits are parallelized.
+
+Edits to /home/z/my-project/src/app/api/tts/route.ts (Bug G):
+- Edge-TTS path: `for (const chunk of chunks) buffers.push(await edgeTts(...))` → `await Promise.all(chunks.map(c => edgeTts(c, voice, speed)))`.
+- ZAI-TTS path: same parallelization — `await Promise.all(chunks.map(async chunk => …))`.
+- The `Buffer.concat` + WAV-header merge logic unchanged (still strips 44-byte headers and rebuilds one valid WAV).
+
+Edits to /home/z/my-project/src/components/omni/voice-asr-fallback.ts (Bug H):
+- Added `import { arrayBufferToBase64 } from './audio-utils'` (function already exists at audio-utils.ts:84-92 with the chunked `0x8000` loop pattern).
+- Replaced `btoa(String.fromCharCode(...new Uint8Array(wavBuffer)))` (which stack-overflows on >64KB WAVs) with `arrayBufferToBase64(wavBuffer)`.
+
+Bug L — dead files:
+- Grep confirmed only the two files themselves match `voice-chat|voice-live-mode|VoiceLiveMode|useVoiceChat|VoiceChatButton` in `src/`. Deleted both:
+  * `src/components/omni/voice-chat.tsx` (248 lines)
+  * `src/components/omni/voice-live-mode.tsx` (603 lines)
+- `kokoro-voice.ts` left in place per spec (just no longer imported by the overlay).
+
+Constraints honored:
+- Did NOT touch `/home/z/my-project/src/app/page.tsx` (another agent owns the lazy-mount there).
+- Did NOT touch `/home/z/my-project/src/components/omni/kokoro-voice.ts` (file preserved; only stopped importing it from voice-mode-overlay).
+- Did NOT change API response shapes — `/api/voice/turn` still returns `{ sessionId, transcript, reply, audio, audioFormat }`; `/api/tts` still returns raw audio bytes.
+
+Verification:
+- `cd /home/z/my-project && bun run lint` → CLEAN (0 errors, 0 warnings).
+- `bunx tsc --noEmit --skipLibCheck` filtered to my files shows 4 errors — ALL PRE-EXISTING (verified by `git stash` + re-run + `git stash pop`):
+  * `voice-mode-overlay.tsx(277,64)` — `setTurns` Turn[]-vs-{user,reply}[] mismatch in startAsrMode call (existed at line 236 before).
+  * `smart-chat.ts(99,50,76)` — `task` not destructured from opts (existed at line 91 before; spec forbids fixing because it would change non-voice behavior).
+  * `smart-chat.ts(110,66)` — `messages` union type vs `ExternalChatMessage[]` (existed at line 102 before).
+  * My one introduced error (`startListening used before declaration` in handleUtterance deps) was fixed by restoring the original stale-closure deps pattern + comment.
+- Dev server log: GET / 200 in 39–46ms (compiles cleanly). No new compile errors from my edits. Pre-existing 429s from z-ai rate limits and the EADDRINUSE noise are unchanged.
+
+Stage Summary:
+- ALL 12 confirmed bugs (A–L) fixed surgically; comments and existing logic structure preserved.
+- Files modified: src/components/omni/voice-mode-overlay.tsx, src/components/omni/voice-asr-fallback.ts, src/lib/smart-chat.ts, src/lib/ai-providers.ts, src/app/api/voice/turn/route.ts, src/app/api/tts/route.ts
+- Files deleted: src/components/omni/voice-chat.tsx, src/components/omni/voice-live-mode.tsx
+- Files NOT touched (per spec): src/app/page.tsx, src/components/omni/kokoro-voice.ts
+- Lint: CLEAN (0 errors, 0 warnings). tsc: 4 pre-existing errors verified via git stash (zero introduced by me).
+- Net effect on user-perceived latency:
+  * Voice reply now plays server-generated TTS audio directly (Bug A) — eliminates the redundant client-side Kokoro/Edge-TTS round-trip.
+  * First-turn freeze eliminated (Bug B) — no more 82MB Kokoro ONNX download + 2.1MB dynamic import in the default path.
+  * Closed-overlay cost ≈ 0 (Bug C) — callbacks no-op via openRef; page.tsx agent can lazy-mount safely.
+  * ~3.3× fewer re-renders during listening (Bug D) + cheaper ambient backdrop (no blur) + slower orb pulses.
+  * No more ASR auto-restart death loop (Bug E) — graceful degradation to record/upload fallback.
+  * Voice LLM call capped at 15s × 2 models = 30s worst case (Bug F) — down from 8 minutes (4 × 120s).
+  * TTS chunk synthesis now parallel (Bug G) — N chunks take max(chunk_time) instead of sum(chunk_time).
+  * Large WAV uploads no longer stack-overflow (Bug H).
+  * AudioContext closed on unmount (Bug I) — no more leaked contexts.
+  * Fresh timestamp per voice turn (Bug J) — "what time is it" works.
+  * In-flight think/speak cancelled on close (Bug K) — no orphan fetches after the user leaves.
+  * 851 lines of dead code removed (Bug L).
+
+---
+Task ID: 4
+Agent: full-stack-developer (auth + profile routes)
+Task: Harden `src/lib/auth.ts` secret resolution, rate-limit signin/signup, expose Task-3's new profile fields in `/api/auth/me`, add new `/api/user/profile` (GET+PATCH) + `/api/user/avatar` (POST) routes, extend the `useAuth` Zustand store with `updateProfile` + `uploadAvatar`.
+
+Work Log:
+- Read worklog.md (chunks) + agent-ctx/7 + Task 3 schema additions to ground in current state
+- Hardened `src/lib/auth.ts` `getSecret()`: in production, throws `new Error('AUTH_SECRET environment variable is required in production')` if `AUTH_SECRET` is empty/missing. Dev fallback `'nexus-dev-secret-change-me'` retained ONLY for non-production. All other primitives (bcrypt 10 rounds, jose HS256, 30-day TTL, httpOnly/lax/secure cookie flags) preserved untouched
+- Rate-limited `src/app/api/auth/signin/route.ts`: `rateLimit('auth-signin:'+clientKey(req), 10, 60_000)` at the top of POST → 429 'Too many attempts. Wait a minute.' on overflow. Existing identical-generic 401 ('Invalid email or password.') preserved for both unknown email AND wrong password — no user enumeration
+- Rate-limited `src/app/api/auth/signup/route.ts`: `rateLimit('auth-signup:'+clientKey(req), 5, 60_000)` → 429. Tightened password zod schema from `min(8)` to `min(8).regex(/[A-Za-z]/).regex(/\d/)` (min 8 chars + ≥1 letter + ≥1 digit). Server-side only (auth-modal.tsx is owned by another agent)
+- Extended `src/app/api/auth/me/route.ts`: calls `getCurrentUser(req)` to verify session, then does a fresh `db.user.findUnique` with extended `select` (adds avatarUrl, bio, location, timezone, language, jobTitle, website, notifications, emailVerified, lastActiveAt, updatedAt). Returns `{ user: {...} | null }`. Fire-and-forget presence ping `void db.user.update({ where:{id}, data:{ lastActiveAt: new Date() }}).catch(()=>{})` — never awaited, never blocks
+- Created `src/app/api/user/profile/route.ts`:
+  * GET: `getCurrentUser(req)` → 401 'Sign in required' if missing. Returns full profile (id, name, email, avatarUrl, bio, location, timezone, language, jobTitle, website, notifications, interests[], commStyle, emailVerified, createdAt, updatedAt)
+  * PATCH: 401 if not signed in, strict-zod parse (any unknown key rejected by `.strict()`): name (1-80), bio (≤500), location (≤120), timezone (≤80 IANA), language (enum en/ar), jobTitle (≤100), website (≤200), notifications (bool), interests (string[] ≤12 items, each ≤40 chars → `JSON.stringify`'d for storage since User.interests is String column), commStyle (enum concise/balanced/detailed/friendly). Builds `data` only from provided keys, runs `db.user.update`, returns updated full profile. Rate-limit `profile-update:${clientKey(req)}` 20/min. `export const maxDuration = 30`
+- Created `src/app/api/user/avatar/route.ts`:
+  * POST: `getCurrentUser(req)` → 401 if missing. Rate-limit `avatar-upload:${clientKey(req)}` 10/min
+  * Parses `req.formData()`, gets `file`. If not a File → 400 'No file uploaded'
+  * Validates `file.type ∈ {image/png, image/jpeg, image/webp}` → else 400 'Only PNG, JPEG, or WebP images are allowed.'
+  * Validates `file.size ≤ 2*1024*1024` (2MB) → else 413 'Image must be under 2MB.'
+  * Reads `arrayBuffer` → `Buffer.from(...)`
+  * Generates safe filename `<base36-timestamp>-<8-hex-random>.<png|jpg|webp>` via `Date.now().toString(36)+'-'+randomBytes(4).toString('hex')` (no external cuid dependency)
+  * `fs.mkdirSync(public/avatars, {recursive:true})` + `fs.writeFileSync`
+  * `db.user.update({ data: { avatarUrl: '/avatars/'+filename }})`
+  * Best-effort cleanup: if previous `avatarUrl.startsWith('/avatars/')`, `fs.unlink` it (callback-style, never fails the upload on cleanup error)
+  * Returns 200 `{ avatarUrl }`. `export const maxDuration = 30`
+- Extended `src/hooks/use-auth.ts`:
+  * `AuthUser` interface now includes all Task-3 fields: avatarUrl?, bio?, location?, timezone?, language, jobTitle?, website?, notifications, emailVerified, lastActiveAt?, updatedAt?
+  * Added exported `ProfilePatch` type for `updateProfile` input
+  * Added `updateProfile(patch: ProfilePatch)`: PATCH /api/user/profile with JSON, sets `user: data.user` on success, throws `Error(message)` on failure
+  * Added `uploadAvatar(file: File)`: POST /api/user/avatar with FormData, spreads current user to preserve other fields, sets `user.avatarUrl`, returns new avatarUrl string
+  * Zustand `create` factory now `(set, get)` so `uploadAvatar` can read current user
+- Created `public/avatars/.gitkeep` so the directory exists in git and the avatar route works on fresh checkout
+- `bun run lint` → exit 0, 0 errors, 0 warnings
+
+Stage Summary:
+- Auth secret now properly enforced in production (no more forge-with-known-dev-secret risk)
+- Signin/signup protected against brute-force (10/min and 5/min respectively, generic 429 message)
+- Password policy tightened server-side (8+ chars + ≥1 letter + ≥1 digit)
+- `/api/auth/me` returns the complete Task-3 profile (avatarUrl, bio, location, timezone, language, jobTitle, website, notifications, emailVerified, lastActiveAt, updatedAt) AND pings `lastActiveAt` for presence tracking without blocking
+- Two new fully-typed, rate-limited, zod-strict routes for profile CRUD and avatar upload — avatar validation (PNG/JPEG/WebP, ≤2MB) + safe filename generation + best-effort cleanup of previous uploads
+- `useAuth` store now exposes `updateProfile(patch)` and `uploadAvatar(file)` so the Profile UI (owned by main agent) can edit bio/location/etc and upload avatars with one-liner calls
+- Detailed code blocks + constraint-compliance notes captured in /agent-ctx/4-full-stack-developer-auth-profile.md
+
+---
+Task ID: 6
+Agent: full-stack-developer (onboarding enhance)
+Task: Enhance src/components/omni/onboarding.tsx from a 5-step local-only flow into a 7-step richer flow that optionally signs the user up inline (step 2) and best-effort-syncs the full profile (bio/location/timezone/interests/commStyle/avatar) to the server when finishing, while keeping every intermediate step non-blocking. Extend src/lib/preferences.ts to mirror the new bio/location/timezone/avatarUrl fields locally.
+
+Work Log:
+- Read worklog.md (chunks), current onboarding.tsx (307 lines, 5-step flow), preferences.ts (81 lines, has name/interests/commStyle + theme/language), use-auth.ts (signUp/updateProfile/uploadAvatar all exist; AuthUser mirrors Task-3 schema; lazy fetchMe on first consumer mount), agent-ctx/4-full-stack-developer-auth-profile.md (Task 4 baseline), eslint.config.mjs (no-img-element OFF, no-explicit-any OFF, no-unused-vars OFF), useToast (variants default/destructive), shadcn Select/Checkbox/Label/Input/Textarea exports, page.tsx line 71 usage `<Onboarding />` (no props).
+- Extended src/lib/preferences.ts: added bio/location/timezone/avatarUrl fields to PreferencesState (all string, default ''), extended completeOnboarding signature to accept optional bio/location/timezone/avatarUrl and persist them (defaulting to '' when undefined), extended resetOnboarding to clear them. Existing name/interests/commStyle/theme/language behavior untouched.
+- Rewrote src/components/omni/onboarding.tsx as a 7-step flow:
+  1. Welcome (unchanged hero + tagline)
+  2. Account (NEW): Email/Password/Name inputs + "Skip — continue as guest" link. Inline validation (EMAIL_RE regex, password min 8 + ≥1 letter + ≥1 digit, matching the API's Task-4 zod schema). Continue does `await signUp({email,password,name})` only when the user filled all 3 fields validly; on failure shows inline error and stays on step (user can fix and retry or click Skip). If only name is filled (no email/pwd), Continue proceeds as guest with that name. If all 3 empty, Continue proceeds as guest with empty name. didSignUp state tracks whether signUp succeeded in this session.
+  3. Interests (unchanged — multi-select chips, same INTERESTS array)
+  4. Communication style (unchanged — 4 options, same STYLES array)
+  5. About you (NEW): Name input (prefilled from step 2's name state), Bio Textarea (sliced to 500 chars + counter), Location Input (sliced to 120), Timezone Select with 12 IANA zones (UTC, Asia/Dubai, Asia/Tokyo, Asia/Shanghai, Asia/Kolkata, Europe/London, Europe/Paris, America/New_York, America/Chicago, America/Los_Angeles, America/Sao_Paulo, Australia/Sydney). All optional, Continue always enabled.
+  6. Avatar (NEW): click-to-upload circle (hidden `<input type="file" accept="image/png,image/jpeg,image/webp">`), plain `<img>` preview via URL.createObjectURL(blob). Validates MIME + 2MB cap, toasts on invalid. "Remove" button when a file is selected. Continue always enabled (optional). File is stored in component state, NOT uploaded yet.
+  7. Legal consent (NEW): two Checkboxes (Privacy Policy + Terms of Service). Each label is a `<button>` that dispatches `window.dispatchEvent(new CustomEvent('nexus:open-legal', { detail: { type: 'privacy'|'terms' } }))` with preventDefault+stopPropagation so it doesn't toggle the checkbox. Enter Nexus button is disabled until BOTH checkboxes are checked. Shows a small "Continuing as a guest — your data stays on this device." note when `!didSignUp`.
+- Final finish() flow (Enter Nexus button): finishedRef guard prevents re-entry; setFinishing(true); if didSignUp: try `await updateProfile({name, bio, location, timezone, interests, commStyle, language:'en'})` (best-effort, try/catch sets syncFailed=true); if avatarFile && !syncFailed: try `await uploadAvatar(avatarFile)` (best-effort, try/catch sets syncFailed=true). For guest with avatarFile under 200KB: convert to data URL via FileReader (best-effort) and pass as avatarUrl to local store. Revoke the blob preview URL. Always call completeOnboarding({...}) locally — this flips onboarded:true which triggers page.tsx to swap to NexusApp. If syncFailed, fire a non-blocking toast "Profile saved locally — sign in later to sync your profile to the cloud." Then call onComplete?.() (optional prop, no-op default — page.tsx still passes no props).
+- Visual style preserved: warm gradient hero with framer-motion step transitions, nexus-ambient wrapper, 7-dot progress bar (same shape as before), same Back/Continue pill buttons, same safe-area bottom padding. Added Loader2 spinner to the primary button during signUp (step 2) and during finish (step 7) so the user sees feedback during the only two blocking awaits in the whole flow.
+- Added optional onComplete prop `{ onComplete?: () => void }` to the Onboarding signature — defaults to no-op so page.tsx's existing `<Onboarding />` usage continues to work unchanged.
+- Constraints honored: ONLY edited src/components/omni/onboarding.tsx and src/lib/preferences.ts. Did NOT touch page.tsx, use-auth.ts, prisma/schema.prisma, or any API route. Did NOT run bun run build.
+
+Stage Summary:
+- Onboarding is now a 7-step richer flow with optional inline signup, profile enrichment (bio/location/timezone), avatar upload, and legal consent gating.
+- Server sync happens ONLY at the very end (Enter Nexus), ONLY if the user signed up in step 2, and is fully non-blocking (try/catch + non-blocking warning toast; onboarding completes locally regardless).
+- preferences.ts now persists bio/location/timezone/avatarUrl locally alongside the existing name/interests/commStyle.
+- bun run lint → exit 0, 0 errors, 0 warnings.
+- /api/auth/signup, /api/user/profile (PATCH), /api/user/avatar (POST) all wired through useAuth() — no new API routes needed.
+- Compatible with existing page.tsx (which calls `<Onboarding />` with no props) thanks to optional onComplete prop.
+
+---
+Task ID: 5-9
+Agent: full-stack-developer (page.tsx mega-update)
+Task: Wire LegalPage + Privacy/Terms links + avatar + Edit Profile modal + voice lazy-mount + 8 visual-polish fixes into src/app/page.tsx, plus create src/components/omni/profile-edit-modal.tsx. Five parts (A–E) in one task.
+
+Work Log:
+- Read worklog.md (Tasks 0–14-verify + 2-a/2-b/13-frontend/12-audit/3/8/10/4) and the four in-scope source files: src/app/page.tsx (722 lines), src/components/omni/legal-page.tsx (117 lines), src/hooks/use-auth.ts (201 lines), src/lib/preferences.ts (80 lines). Confirmed `useAuth()` exposes `user, updateProfile(patch), uploadAvatar(file)`; `LegalPage` is a fixed overlay with `{type:'privacy'|'terms', onClose, language}` props; preferences store has `onboarded, name, interests[], commStyle, theme, language`. Confirmed onboarding.tsx does NOT export `INTERESTS`/`STYLES` (only local consts) → redefined the 8 interests + 4 comm styles locally in the new modal. Verified globals.css already has `.nexus-shell`, `.nexus-footer`, `.omni-shimmer`, `--success`, `--warning`, `bg-brand-gradient`, `text-brand-gradient`, `btn-pill-*`, and `nav[aria-label="Primary"] { padding-bottom: env(safe-area-inset-bottom, 0px) }`. Verified `useToast` is exported from `@/hooks/use-toast` and `Toaster` is mounted in src/app/layout.tsx (so toasts will display).
+
+PART C — NEW src/components/omni/profile-edit-modal.tsx (~285 lines, `'use client'`):
+- Shape mirrors legal-page.tsx: `fixed inset-0 z-50 bg-background` full-screen overlay (no dim — mobile-style takeover), `mx-auto max-w-2xl flex-col h-[100dvh]`, sticky header with X close, scrollable body (`omni-scroll flex-1 overflow-y-auto`), sticky footer with Cancel + Save buttons. Entrance via framer-motion `AnimatePresence` (opacity fade, 0.15s).
+- Fields (all pre-filled from `useAuth().user` via `useEffect` that runs when `open && user`):
+  * Avatar: 80×80 (h-20 w-20) preview — `next/image` `<Image>` if `user.avatarUrl`, else gradient + initial fallback (same orange→rose gradient as Profile section). Hidden `<input type="file" accept="image/png,image/jpeg,image/webp">` triggered by a small Pencil overlay button (-bottom-1 -right-1 absolute). On change → 2MB guard → `await uploadAvatar(file)` → toast success/error. Loading spinner shown on the Pencil button while uploading. Hint "PNG, JPEG, or WebP · max 2 MB" under the avatar.
+  * Name (Input, maxLength 80) — pre-filled from `user.name`.
+  * Bio (Textarea, maxLength 500, char counter `n/500` turns destructive when over) — pre-filled from `user.bio`.
+  * Location (Input, maxLength 120) — pre-filled.
+  * Timezone (Select) — 23 hardcoded IANA zones (UTC, Africa/Cairo, Asia/Dubai, Asia/Riyadh, Asia/Kolkata, Asia/Shanghai, Asia/Tokyo, Asia/Singapore, Asia/Seoul, Asia/Hong_Kong, Europe/London, Europe/Paris, Europe/Berlin, Europe/Istanbul, Europe/Moscow, America/New_York, America/Chicago, America/Denver, America/Los_Angeles, America/Sao_Paulo, America/Toronto, Australia/Sydney, Pacific/Auckland) — pre-filled from `user.timezone`, defaults to UTC.
+  * Language (Select: English / العربية mapping to en/ar) — pre-filled from `user.language`.
+  * Job title (Input, maxLength 100) — pre-filled.
+  * Website (Input, maxLength 200) — pre-filled.
+  * Interests: 8 chips (writing/coding/research/design/business/learning/creative/productivity) redefined locally (onboarding.tsx doesn't export them). Toggle on click, max 12, counter `n/12`. Selected chips get `border-primary bg-primary/10 text-primary`.
+  * Communication style: 4-segment grid (concise/balanced/detailed/friendly) redefined locally with one-line desc each. Selected card gets `border-primary bg-primary/5`.
+  * Notifications: Switch in a bordered card labeled "Product & update emails" with sub-text. Pre-filled from `user.notifications` (defaults true).
+- Save button → calls `await updateProfile({ name, bio, location, timezone, language, jobTitle, website, interests, commStyle, notifications })` (all fields trimmed + length-clamped per `ProfilePatch` type) → toast "Profile saved" → `onClose()`. Shows Check icon + Loader2 spinner while saving; disabled while saving OR uploading.
+- Cancel button → `onClose()` (disabled while saving).
+- Body-scroll lock + ESC-to-close + cleanup on unmount.
+- Only renders content when `open === true` (gated by AnimatePresence), so closed-state cost is ~0.
+- Uses shadcn `Input`, `Textarea`, `Label`, `Switch`, `Button`, `Select` (SelectTrigger/SelectValue/SelectContent/SelectItem) + framer-motion + lucide icons (X, Pencil, Loader2, Check, Sparkles, LucideIcon type).
+
+PART A — Wire LegalPage into page.tsx:
+1. Added `import { LegalPage } from '@/components/omni/legal-page'` (page.tsx:48).
+2. Added `const [legalPage, setLegalPage] = useState<'privacy' | 'terms' | null>(null)` (page.tsx:90).
+3. Added `useEffect` window listener for `'nexus:open-legal'` (page.tsx:254-263) — mirrors the existing `'nexus:open-connect'` listener pattern; reads `e.detail` (`'privacy' | 'terms'`) and calls `setLegalPage`. Removes listener on unmount.
+4. Renders `<LegalPage type={legalPage} onClose={() => setLegalPage(null)} language={language} />` next to `<AuthModal>` / `<ConnectPanel>`, only when `legalPage !== null` (page.tsx:313-319).
+5. Added two new rows in the Profile section Personalization list (page.tsx:732-739): "Privacy Policy" (FileText icon, left + right) → `setLegalPage('privacy')`, "Terms of Service" (FileText icon) → `setLegalPage('terms')`. Same row style as Email & apps / Theme / Language / Re-run onboarding.
+6. Added tiny legal footer at the bottom of the Profile section (page.tsx:753-760): "Privacy · Terms · © 2026 NEXUS AI" — each of Privacy/Terms calls `setLegalPage`, separated by `·` dots. Replaces the old "Built by Mounir Shaaban / Nexus AI © 2026" block (which moved to the new desktop footer per Part E.2).
+
+PART B — Avatar in Profile section + Edit Profile button:
+1. Profile section avatar (page.tsx:675-687): if `user?.avatarUrl` is set, render `<Image src={user.avatarUrl} alt={displayName} width={64} height={64} className="h-16 w-16 rounded-full border-2 border-border object-cover" />`; else keep the existing gradient + initial circle (now in an `else` branch).
+2. Added an "Edit profile" button (Pencil icon) BELOW the avatar (page.tsx:707-710): rendered as the primary action above the existing Sign out button when the user is signed in. Sign in / Sign up buttons (signed out) untouched.
+3. When signed OUT, the existing 2-col Sign in / Sign up grid is unchanged.
+
+PART D — Voice overlay lazy-mount (page.tsx:87, 241-245, 304-307):
+- Added `const [voiceMounted, setVoiceMounted] = useState(false)`.
+- Added `useEffect(() => { if (voiceOpen) setVoiceMounted(true) }, [voiceOpen])`.
+- Changed `<VoiceModeOverlay open={voiceOpen} onClose={...} />` (unconditional) to `{voiceMounted && <VoiceModeOverlay open={voiceOpen} onClose={...} />}` (gated). Until the user opens voice mode the first time, the overlay's ~30 hooks never evaluate on chat-input keystrokes.
+
+PART E — Visual polish (8 fixes, all in page.tsx):
+1. Sticky footer rule: root wrapper changed from `flex h-dvh flex-col bg-background` → `nexus-shell bg-background` (page.tsx:293). Chat-internal-scroll is preserved because the main row retains `flex min-h-0 flex-1` — `min-h-0` lets main row's hypothetical main size be 0 (overriding the default `auto`), so the root stays at its `min-height: 100dvh` even when chat content is tall, and the conversation's `overflow-y-auto` still scrolls within the constrained parent chain. Desktop footer (Part E.2) carries `mt-auto` per spec.
+2. Desktop footer: added `<footer className="mt-auto hidden h-10 items-center justify-between border-t bg-background/95 px-6 py-3 text-xs text-muted-foreground lg:flex">` (page.tsx:788-798) at root level, sibling of the mobile `<nav>`. Left = `NEXUS AI · by Mounir Shaaban` (the credit that was buried at the old Profile section). Right = `Privacy · Terms · © 2026` (each of Privacy/Terms calls `setLegalPage`). Visible only on desktop (lg:flex). Mobile `<nav>` (lg:hidden) remains the mobile "footer".
+3. Mobile nav double safe-area: removed inline `pb-[env(safe-area-inset-bottom)]` from the mobile `<nav>` className (page.tsx:768). globals.css already adds `padding-bottom: env(safe-area-inset-bottom, 0px)` to `nav[aria-label="Primary"]` — no behavior change, just no duplication.
+4. Mobile nav active pill: replaced the thin `absolute -top-px h-0.5 w-10 rounded-full bg-primary` hairline (page.tsx old line 710) with `absolute inset-x-2 inset-y-1 -z-10 rounded-full bg-primary/10` (page.tsx:777). Same `layoutId="nav-active"` so framer-motion still springs the pill between tabs; `-z-10` puts the pill behind the icon+label (Apple/Instagram pattern).
+5. Composer radius: `rounded-[26px]` → `rounded-3xl` and `rounded-l-[26px]` → `rounded-l-3xl` (page.tsx:540, 542). Pending tool banner `bg-primary/8` → `bg-primary/10` (page.tsx:516). Send button `hover:brightness-110` → `hover:bg-primary/90` (page.tsx:559).
+6. Warm TOOL_GRADIENT: changed 4 entries (page.tsx:215-220) — `vision`→`from-orange-500 to-rose-500`, `upload`→`from-amber-500 to-orange-500`, `documents`→`from-rose-500 to-pink-500`, `code`→`from-amber-500 to-yellow-500`. Other entries (image/video/office/search/agent/connectors/email) were already warm and untouched. After edit, ZERO `from-cyan/from-teal/from-emerald/from-green` occurrences remain in page.tsx (verified via grep).
+7. Intel dropdown wrapper: wrapped the chat header (mobile header + desktop chat toolbar + intel AnimatePresence dropdown) in `<div className="relative">…</div>` (page.tsx:370 open, 435 close). The intel dropdown's `absolute right-4 top-12 … lg:right-8 lg:top-16` now anchors against the chat header wrapper instead of the viewport — preserving the existing visual placement (since the chat header sits at the top of main which sits at the top of the viewport) while making the positioning robust to future layout changes. All existing children + classes preserved.
+8. Skeleton typing indicator: replaced the 3 `omni-dot` 1.5×1.5 dots with a left-aligned skeleton bubble (page.tsx:499-503): `rounded-2xl bg-secondary/60 px-4 py-3` containing 3 `omni-shimmer` rounded bars (`h-3 w-24`, `h-3 w-32`, `h-3 w-20`) stacked with `gap-2`. The `toolRunningLabel` branch (Loader2 + label) is untouched. Parent `flex items-center gap-2 px-1` kept.
+
+CONSTRAINTS HONORED:
+- Touched ONLY `src/app/page.tsx` (722→802 lines) and the NEW `src/components/omni/profile-edit-modal.tsx` (~285 lines). No other files modified.
+- Did NOT touch legal-page.tsx, onboarding.tsx, auth-modal.tsx, connect-panel.tsx, voice-mode-overlay.tsx, globals.css, use-auth.ts, or any API route.
+- ALL existing functionality preserved: chat sending/streaming, tool menu bottom-sheet, sessions, 5 tabs (chat/projects/explore/library/profile), model selector, voice mode open button, Connect panel open button, suggestions, empty state, attachments, pending tool banner. Edits were SURGICAL — no rewriting page.tsx from scratch.
+- Added 2 new imports (`LegalPage`, `ProfileEditModal`) + 1 new lucide icon (`Pencil`); `Image`, `FileText`, framer-motion `motion`/`AnimatePresence`, `useAuth`, `usePreferences` were already imported. No existing import removed.
+- 2-space indent, single quotes, className string-concat style matched.
+
+VERIFICATION:
+- `cd /home/z/my-project && bun run lint` → exit 0, ZERO errors, ZERO warnings.
+- `bunx tsc --noEmit --skipLibCheck` filtered to my files (`src/app/page`, `src/components/omni/profile-edit-modal`, `src/components/omni/legal-page`, `src/hooks/use-auth`, `src/lib/preferences`) → ZERO errors. Pre-existing tsc errors in unrelated files (api/agent, api/chat/regenerate, api/code/run, api/documents, api/office/*, examples/websocket, skills/*) were verified as NOT caused by my edits.
+- dev.log: GET / 200 in 39–46ms after edits (compiles cleanly).
+- grep verification: ZERO remaining occurrences of `rounded-[26px]`, `bg-primary/8`, `hover:brightness-110`, `pb-[env(safe-area-inset-bottom)]`, `flex h-dvh flex-col`, `omni-dot`, `from-cyan`, `from-teal`, `from-emerald`, `from-green` in page.tsx.
+
+Stage Summary:
+- 5 parts (A–E) all done in one pass. New file `src/components/omni/profile-edit-modal.tsx` is a full-screen overlay matching legal-page.tsx's shape, with all 10 fields pre-filled from `useAuth().user`, full avatar upload flow with 2MB/type validation, length-clamped strings, framer-motion entrance, ESC + body-scroll lock, and Save → `updateProfile(patch)` + toast.
+- `src/app/page.tsx` now: lazy-mounts the voice overlay (saves ~30 hooks per keystroke before voice is ever opened), wraps the chat header in a `relative` container so the intel dropdown anchors correctly, uses `nexus-shell` for the sticky-footer rule, has a real desktop footer with Privacy/Terms links, has a pill-style mobile nav active indicator, uses warm TOOL_GRADIENT colors only, has a skeleton typing indicator instead of bouncing dots, uses `rounded-3xl` composer + `bg-primary/10` pending banner + `hover:bg-primary/90` send button, and respects the global safe-area rule for mobile nav (no double padding).
+- Profile section is now editable end-to-end: avatar upload + name/bio/location/timezone/language/job-title/website/interests/commStyle/notifications all flow through `useAuth().updateProfile(patch)` → `/api/user/profile` PATCH (Task 4). The Privacy/Terms links are reachable from both the Profile section and the new desktop footer, plus a custom `nexus:open-legal` window event for other components to trigger.
+- Lint CLEAN (0 errors, 0 warnings). tsc CLEAN for my files. Dev server healthy.
+- Detailed record saved to /agent-ctx/5-9-full-stack-developer-page-mega-update.md.
