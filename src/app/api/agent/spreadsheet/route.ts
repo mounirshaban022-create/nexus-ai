@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       XLSX.utils.book_append_sheet(wb, ws, name)
     }
 
-    const dir = path.join(process.cwd(), 'generated-images')
+    const dir = path.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'generated-images')
     await mkdir(dir, { recursive: true })
     const id = randomUUID()
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer

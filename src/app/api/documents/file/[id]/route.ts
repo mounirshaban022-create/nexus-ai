@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import path from 'path'
 
-const UPLOAD_DIR = path.join(process.cwd(), 'generated-documents')
+const IS_VERCEL = Boolean(process.env.VERCEL)
+const UPLOAD_DIR = IS_VERCEL
+  ? path.join('/tmp', 'generated-documents') // Vercel: writable /tmp (ephemeral)
+  : path.join(process.cwd(), 'generated-documents')
 
 const MIME: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

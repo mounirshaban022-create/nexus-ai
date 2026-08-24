@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "bun run build",
+  "installCommand": "bun install",
+  "functions": {
+    "src/app/api/chat/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/answer/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/agent/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/video/create/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/studio/pdf/route.ts": {
+      "maxDuration": 120
+    }
+  }
+}

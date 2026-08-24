@@ -15,7 +15,10 @@ const requestSchema = z.object({
   provider: z.enum(['nexus', 'free']).optional().default('nexus'),
 })
 
-export const IMAGES_DIR = path.join(process.cwd(), 'generated-images')
+export const IS_VERCEL = Boolean(process.env.VERCEL)
+const IMAGES_DIR = IS_VERCEL
+  ? path.join('/tmp', 'generated-images') // Vercel: writable /tmp (ephemeral)
+  : path.join(process.cwd(), 'generated-images')
 
 export async function POST(req: NextRequest) {
   try {

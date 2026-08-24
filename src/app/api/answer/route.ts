@@ -74,7 +74,13 @@ interface ReaderResponse {
 /* Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const READER_URL = 'http://localhost:3000/api/reader'
+/** Resolves the reader URL — dynamic for Vercel deployment. */
+function getReaderUrl(): string {
+  if (process.env.APP_URL) return `${process.env.APP_URL}/api/reader`
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/api/reader`
+  return `http://localhost:${process.env.PORT || 3000}/api/reader`
+}
+const READER_URL = getReaderUrl()
 const MAX_PAGE_CHARS = 3000
 const MAX_SYNTHESIS_CHARS = 12000
 const READ_TIMEOUT_MS = 20_000

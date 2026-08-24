@@ -21,7 +21,10 @@ export const maxDuration = 120
  * PUT  /api/documents (edit + re-export)
  */
 
-const UPLOAD_DIR = path.join(process.cwd(), 'generated-documents')
+const IS_VERCEL = Boolean(process.env.VERCEL)
+const UPLOAD_DIR = IS_VERCEL
+  ? path.join('/tmp', 'generated-documents') // Vercel: writable /tmp (ephemeral)
+  : path.join(process.cwd(), 'generated-documents')
 
 interface ParsedDoc {
   id: string

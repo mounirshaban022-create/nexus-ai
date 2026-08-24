@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
     // Files are stored in the shared generated-files dir and served through
     // /api/office/file/[id] (same pattern as the office exports).
-    const dir = path.join(process.cwd(), 'generated-images')
+    const dir = path.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'generated-images')
     await mkdir(dir, { recursive: true })
     const id = randomUUID()
     const filename = `${id}.${format}`

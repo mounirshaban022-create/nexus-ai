@@ -25,6 +25,16 @@ import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat } from '@/lib/ai-providers'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 
+/** Resolves the app's own origin — works on localhost, Vercel previews,
+ *  and production (falls back to localhost for direct dev calls). */
+function appOrigin(req: NextRequest): string {
+  return process.env.APP_URL
+    || (req.headers.get('x-forwarded-host')
+      ? `${req.headers.get('x-forwarded-proto') || 'https'}://${req.headers.get('x-forwarded-host')}`
+      : `http://localhost:${process.env.PORT || 3000}`)
+}
+
+
 export const maxDuration = 120
 
 /**
@@ -442,11 +452,12 @@ interface ActiveDoc {
 }
 
 async function executeChatTool(
+  req: NextRequest,
   toolId: string,
   args: Record<string, unknown>,
   activeDoc: ActiveDoc | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
-  const origin = 'http://localhost:3000'
+  const origin = appOrigin(req)
 
   if (toolId === 'generate_image') {
     const prompt = String(args.prompt ?? '').slice(0, 2000)
@@ -707,7 +718,7 @@ async function executeChatTool(
     const { randomUUID } = await import('crypto')
     const { mkdir, writeFile } = await import('fs/promises')
     const pathMod = await import('path')
-    const dir = pathMod.join(process.cwd(), 'generated-images')
+    const dir = pathMod.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'generated-images')
     await mkdir(dir, { recursive: true })
     const id = randomUUID()
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
@@ -825,7 +836,7 @@ export async function POST(req: NextRequest) {
         const ext = attachment.filename.split('.').pop()?.toLowerCase() ?? ''
         const formatMap: Record<string, string> = { pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', md: 'md', csv: 'csv' }
         const fmt = formatMap[ext] ?? 'txt'
-        const origin = 'http://localhost:3000'
+        const origin = appOrigin(req)
         const res = await fetch(`${origin}/api/documents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1238,7 +1249,7 @@ export async function POST(req: NextRequest) {
               let result: unknown
               let attachment: Record<string, unknown> | undefined
               try {
-                const executed = await executeChatTool(toolCall.tool, toolCall.args, activeDoc)
+                const executed = await executeChatTool(req, toolCall.tool, toolCall.args, activeDoc)
                 result = executed.result
                 attachment = executed.attachment
               } catch (error) {

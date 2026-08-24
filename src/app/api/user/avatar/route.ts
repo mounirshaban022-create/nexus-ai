@@ -9,7 +9,10 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
-const AVATARS_DIR = path.join(process.cwd(), 'public', 'avatars')
+const IS_VERCEL = Boolean(process.env.VERCEL)
+const AVATARS_DIR = IS_VERCEL
+  ? path.join('/tmp', 'avatars') // Vercel: writable /tmp
+  : path.join(process.cwd(), 'public', 'avatars')
 
 const ALLOWED_TYPES: Record<string, string> = {
   'image/png': 'png',

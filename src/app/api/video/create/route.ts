@@ -27,7 +27,10 @@ const execFileAsync = promisify(execFile)
  * Jobs run in the background; poll GET /api/video/status/[id].
  */
 
-const VIDEO_DIR = path.join(process.cwd(), 'generated-videos')
+const IS_VERCEL = Boolean(process.env.VERCEL)
+const VIDEO_DIR = IS_VERCEL
+  ? path.join('/tmp', 'generated-videos') // Vercel: writable /tmp (ephemeral)
+  : path.join(process.cwd(), 'generated-videos')
 const FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 const W = 1024
 const H = 576

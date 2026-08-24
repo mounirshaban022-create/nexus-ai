@@ -194,7 +194,14 @@ export async function POST(req: NextRequest) {
     }
     const { operation, file, file2, params = {} } = parsed.data
 
-    // Self-heal the engine before use
+    // Self-heal the engine before use (only when running locally with a
+    // JVM — on Vercel serverless there's no JVM, so we fail gracefully)
+    if (process.env.VERCEL) {
+      throw new Error(
+        'PDF tools require the Stirling-PDF engine, which needs a JVM server. ' +
+        'Deploy Stirling-PDF separately (Railway/Render free tier) and set STIRLING_URL in your environment variables to enable PDF tools.'
+      )
+    }
     await ensureStirling()
 
     const fileBuf = decodeDataUrl(file)

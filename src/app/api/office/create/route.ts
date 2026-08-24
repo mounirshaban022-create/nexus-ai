@@ -7,7 +7,10 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 export const maxDuration = 120
 
-const FILES_DIR = path.join(process.cwd(), 'generated-images') // shared generated-files dir
+const IS_VERCEL = Boolean(process.env.VERCEL)
+const FILES_DIR = IS_VERCEL
+  ? path.join('/tmp', 'generated-images') // Vercel: writable /tmp (ephemeral)
+  : path.join(process.cwd(), 'generated-images') // shared generated-files dir
 
 /**
  * Office Studio generation endpoint.

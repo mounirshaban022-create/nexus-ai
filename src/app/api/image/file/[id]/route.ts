@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import path from 'path'
 
-const IMAGES_DIR = path.join(process.cwd(), 'generated-images')
+const IS_VERCEL = Boolean(process.env.VERCEL)
+const IMAGES_DIR = IS_VERCEL
+  ? path.join('/tmp', 'generated-images') // Vercel: writable /tmp (ephemeral)
+  : path.join(process.cwd(), 'generated-images')
 
 type RouteContext = { params: Promise<{ id: string }> }
 
