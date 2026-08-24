@@ -6,6 +6,7 @@ import path from 'path'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { smartChat } from '@/lib/smart-chat'
 import { db } from '@/lib/db'
+import { supabaseUpsert } from '@/lib/supabase'
 import { getCurrentUser } from '@/lib/auth'
 import { extractPdfText } from '@/lib/pdf-text'
 
@@ -358,7 +359,7 @@ export async function PUT(req: NextRequest) {
 
     // Persist the exported document to the library DB.
     try {
-      await db.generatedDocument.create({
+      const docRecord = await db.generatedDocument.create({
         data: {
           filename: doc.filename,
           format: ext,
@@ -369,6 +370,18 @@ export async function PUT(req: NextRequest) {
           userId: user?.id ?? null,
         },
       })
+      // Mirror to Supabase — no-op when unconfigured
+      if (docRecord.userId) {
+        void supabaseUpsert('generated_documents', {
+          id: docRecord.id,
+          user_id: docRecord.userId,
+          filename: docRecord.filename,
+          format: docRecord.format,
+          title: docRecord.title,
+          download_url: docRecord.downloadUrl,
+          size: docRecord.size,
+        }, { onConflict: 'id' })
+      }
     } catch (e) {
       console.error('[documents] db save failed:', e)
     }

@@ -5,16 +5,7 @@ import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { getActiveAiProvider } from '@/lib/ai-providers'
 import { getSession } from '@/lib/auth'
-
-// Supabase admin client (server-side, service role) for cloud persistence
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-async function getSupabaseAdmin() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null
-  const { createClient } = await import('@supabase/supabase-js')
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
-}
+import { getSupabaseAdmin, supabaseUpsert } from '@/lib/supabase' 
 
 /**
  * Phase 0 Bug 2 fix: derives the user id from a VERIFIED session cookie
@@ -874,13 +865,12 @@ export async function POST(req: NextRequest) {
       })
       // Mirror to Supabase (cloud) if user is authenticated
       if (verifiedUserId) {
-        const admin = await getSupabaseAdmin()
-        if (admin) {
-          await admin
-            .from('chat_sessions')
-            .insert({ id: session.id, user_id: verifiedUserId, title: session.title, kind: 'chat' })
-            .then(r => console.log('[supabase-sync] session saved'), e => console.error('[supabase-sync] FAILED:', e.message))
-        }
+        await supabaseUpsert('chat_sessions', {
+          id: session.id,
+          user_id: verifiedUserId,
+          title: session.title,
+          kind: 'chat',
+        }, { onConflict: 'id' })
       }
     }
 
@@ -990,15 +980,13 @@ export async function POST(req: NextRequest) {
           // Mirror to Supabase (Phase 0 Bug 2: verifiedUserId replaces the
           // forged-header path; the cloud row is only written for an
           // authenticated user, with their verified id)
-          {
-            if (verifiedUserId) {
-              const admin = await getSupabaseAdmin()
-              if (admin) {
-                admin.from('chat_messages')
-                  .insert({ id: userMessage.id, session_id: session!.id, role: 'user', content: trimmed })
-                  .then(r => console.log('[supabase-sync] user msg saved'), e => console.error('[supabase-sync] user msg FAILED:', e.message))
-              }
-            }
+          if (verifiedUserId) {
+            void supabaseUpsert('chat_messages', {
+              id: userMessage.id,
+              session_id: session!.id,
+              role: 'user',
+              content: trimmed,
+            }, { onConflict: 'id' })
           }
           send({ type: 'user', id: userMessage.id, content: trimmed })
 
@@ -1210,13 +1198,29 @@ export async function POST(req: NextRequest) {
               // directives from the visible prose (leaving the model's
               // one-line acknowledgement like "Done — shortened the intro.").
               const finalAnswer = stripToolCall(content) || 'I could not complete that. Try rephrasing.'
-              await db.chatMessage.create({
+              const assistantMessage = await db.chatMessage.create({
                 data: { sessionId: session!.id, role: 'assistant', content: finalAnswer },
               })
               await db.chatSession.update({
                 where: { id: session!.id },
                 data: { updatedAt: new Date() },
               })
+              // Mirror the assistant message + session timestamp to Supabase
+              if (verifiedUserId) {
+                void supabaseUpsert('chat_messages', {
+                  id: assistantMessage.id,
+                  session_id: session!.id,
+                  role: 'assistant',
+                  content: finalAnswer,
+                }, { onConflict: 'id' })
+                void supabaseUpsert('chat_sessions', {
+                  id: session!.id,
+                  user_id: verifiedUserId,
+                  title: session!.title,
+                  kind: 'chat',
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: 'id' })
+              }
 
               if (didStream) {
                 // The streamed content IS the final answer. Just close the

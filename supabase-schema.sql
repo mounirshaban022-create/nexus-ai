@@ -49,6 +49,20 @@ CREATE TABLE IF NOT EXISTS generated_videos (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ===== GENERATED DOCUMENTS =====
+CREATE TABLE IF NOT EXISTS generated_documents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  filename TEXT,
+  format TEXT,
+  title TEXT,
+  summary TEXT,
+  download_url TEXT,
+  size BIGINT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_documents_user ON generated_documents(user_id, created_at);
+
 -- ===== USER AI PROVIDERS (encrypted API keys per user) =====
 CREATE TABLE IF NOT EXISTS user_ai_providers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -97,6 +111,7 @@ CREATE POLICY "own messages" ON chat_messages FOR ALL USING (
 );
 CREATE POLICY "own images" ON generated_images FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "own videos" ON generated_videos FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "own documents" ON generated_documents FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "own providers" ON user_ai_providers FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "own emails" ON user_email_accounts FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 

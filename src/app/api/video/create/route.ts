@@ -9,6 +9,7 @@ import { getZAI } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { videoJobs, pruneVideoJobs, type VideoJob } from '@/lib/video-jobs'
 import { db } from '@/lib/db'
+import { supabaseUpsert } from '@/lib/supabase'
 import { getCurrentUser } from '@/lib/auth'
 
 export const maxDuration = 300
@@ -246,7 +247,7 @@ export async function POST(req: NextRequest) {
 
         // Persist the finished video to the library DB.
         try {
-          await db.generatedVideo.create({
+          const videoRecord = await db.generatedVideo.create({
             data: {
               prompt,
               scenes: sceneCount,
@@ -258,6 +259,16 @@ export async function POST(req: NextRequest) {
               userId: user?.id ?? null,
             },
           })
+          // Mirror to Supabase — no-op when unconfigured
+          if (videoRecord.userId) {
+            void supabaseUpsert('generated_videos', {
+              id: videoRecord.id,
+              user_id: videoRecord.userId,
+              prompt: videoRecord.prompt,
+              status: 'done',
+              url: videoRecord.url,
+            }, { onConflict: 'id' })
+          }
         } catch (e) {
           console.error('[video] db save failed:', e)
         }
