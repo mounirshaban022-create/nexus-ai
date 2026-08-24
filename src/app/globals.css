@@ -160,8 +160,12 @@
   background: radial-gradient(120% 60% at 50% 0%, oklch(0.635 0.13 45 / 5%) 0%, transparent 60%);
 }
 
-/* ---- Sticky-footer shell: min-h-screen flex col + footer mt-auto ---- */
-.nexus-shell { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+/* ---- Sticky-footer shell: height = 100dvh flex col + footer mt-auto ----
+   NOTE: We use `height` (not `min-height`) so the shell never grows past
+   the viewport. This keeps the mobile bottom nav visible at all times —
+   content scrolls INSIDE the chat view's overflow-y-auto container, not
+   the page itself. The desktop footer uses mt-auto to stick to bottom. */
+.nexus-shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 .nexus-footer { margin-top: auto; }
 
 /* ---- Premium card hover: subtle lift + brand-tinted ring ---- */

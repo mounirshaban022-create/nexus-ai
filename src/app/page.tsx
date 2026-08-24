@@ -184,16 +184,29 @@ function NexusApp() {
     }, []),
   )
 
-  // Send: routes through tool engine if a tool is pending, else plain chat
+  // Send: routes through tool engine if a tool is pending, else plain chat.
+  // Allows empty text when a tool with a file attachment is pending — e.g.
+  // user picks a PDF via "Upload file" and just hits Send to get a summary,
+  // without being forced to type a question first.
   const send = useCallback(async (text?: string) => {
     const msg = (text ?? input).trim()
-    if (!msg || sending) return
-    setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: msg }])
+    const hasPendingFile = !!toolEngine.pendingFile
+    const hasPendingTool = !!toolEngine.pendingTool
+    // Block only when there's truly nothing to send
+    if (sending) return
+    if (!msg && !hasPendingFile) return
+    // For plain chat (no tool), still require text
+    if (!msg && !hasPendingTool) return
+    // Display the user's text (or the file name as a placeholder)
+    const userDisplay = msg || (hasPendingFile ? `📄 ${toolEngine.pendingFile?.name ?? ''}`.trim() : '')
+    if (userDisplay) {
+      setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: userDisplay }])
+    }
     setInput('')
     setSending(true)
     try {
       // If a tool is pending, route to the tool engine
-      if (toolEngine.pendingTool) {
+      if (hasPendingTool) {
         await toolEngine.execute(msg)
         return
       }
@@ -443,8 +456,8 @@ function NexusApp() {
               absolute intel dropdown anchors against the chat header instead
               of the viewport. */}
           <div className="relative">
-          {/* Mobile header */}
-          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/60 bg-background/80 px-4 py-2.5 backdrop-blur-md lg:hidden">
+          {/* Mobile header — solid bg (no backdrop-blur to avoid repaint cost on scroll) */}
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/60 bg-background px-4 py-2.5 lg:hidden">
             <Image
               src="/nexus-header-logo.png"
               alt="Nexus"
@@ -455,11 +468,11 @@ function NexusApp() {
             />
             <div className="flex items-center gap-2">
               <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background/80 text-primary backdrop-blur transition hover:bg-secondary"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background text-primary transition hover:bg-secondary"
               >
                 <Headphones className="h-4 w-4" />
               </button>
-              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-medium backdrop-blur transition hover:bg-secondary">
+              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
                 {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
                 <span className="capitalize">{intelligence}</span>
                 <ChevronDown className="h-3 w-3" />
@@ -520,48 +533,46 @@ function NexusApp() {
             <div className="flex flex-1 flex-col min-h-0">
               {/* Conversation area */}
               <div className="omni-scroll flex-1 overflow-y-auto">
-                <div className="mx-auto w-full max-w-3xl px-4 py-6">
-                  {/* Empty state */}
+                <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:py-6">
+                  {/* Empty state — compact on mobile so the bottom nav stays
+                      visible without the page scrolling past the viewport. */}
                   {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-14">
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        transition={{ type: 'spring', stiffness: 120, damping: 16 }}
-                        className="relative mb-6"
-                      >
-                        <motion.div animate={{ y: [0, -5, 0] }} transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}>
-                          <Image src="/nexus-onboarding-hero.png" alt="Nexus" width={140} height={93} className="h-20 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50" />
-                        </motion.div>
-                        <motion.span aria-hidden className="absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 to-transparent blur-2xl" animate={{ opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 3, repeat: Infinity }} />
-                      </motion.div>
-                      <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-[28px] leading-tight font-semibold tracking-tight">
-                        {displayName !== 'Guest' ? <>{tr.emptyTitleUser} <span className="text-brand-gradient">{displayName.split(' ')[0]}</span>، بمَ يمكنني مساعدتك؟</> : <>{tr.emptyTitleGuest} <span className="text-brand-gradient">Nexus</span> {language === 'ar' ? 'أن يُساعدك؟' : 'help with?'}</>}
-                      </motion.h1>
-                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="mt-3 text-sm text-muted-foreground">{tr.emptyHelp}</motion.p>
-                      <div className="mt-8 h-px w-12 bg-border" aria-hidden />
-                      <div className="mt-6 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="flex flex-col items-center justify-center py-6 sm:py-10">
+                      {/* Static hero (removed infinite-y bobble + blur-2xl pulse to
+                          cut layout thrash on mobile that contributed to "freezes"). */}
+                      <div className="relative mb-4 sm:mb-5">
+                        <Image src="/nexus-onboarding-hero.png" alt="Nexus" width={140} height={93} className="h-16 sm:h-20 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50" />
+                      </div>
+                      <h1 className="text-2xl sm:text-[28px] leading-tight font-semibold tracking-tight text-center">
+                        {displayName !== 'Guest' ? (
+                          language === 'ar'
+                            ? <>{tr.emptyTitleUser} <span className="text-brand-gradient">{displayName.split(' ')[0]}</span>، بمَ يمكنني مساعدتك؟</>
+                            : <>{tr.emptyTitleUser} <span className="text-brand-gradient">{displayName.split(' ')[0]}</span>, what can I help with?</>
+                        ) : (
+                          language === 'ar'
+                            ? <>{tr.emptyTitleGuest} <span className="text-brand-gradient">Nexus</span> أن يُساعدك؟</>
+                            : <>{tr.emptyTitleGuest} <span className="text-brand-gradient">Nexus</span> help with?</>
+                        )}
+                      </h1>
+                      <p className="mt-2 sm:mt-3 text-sm text-muted-foreground text-center">{tr.emptyHelp}</p>
+                      <div className="mt-5 sm:mt-6 h-px w-12 bg-border" aria-hidden />
+                      <div className="mt-4 sm:mt-6 grid w-full max-w-2xl grid-cols-2 gap-2 sm:gap-3">
                         {SUGGESTIONS.map((s, i) => {
                           const Icon = s.icon
                           return (
-                            <motion.button
+                            <button
                               key={s.title}
-                              initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              transition={{ delay: 0.2 + i * 0.06 }}
-                              whileHover={{ y: -3 }}
-                              whileTap={{ scale: 0.98 }}
                               onClick={() => send(s.title)}
-                              className="group flex items-start gap-3 rounded-2xl border border-border bg-card p-3.5 text-left transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
+                              className="group flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl border border-border bg-card p-3 sm:p-3.5 text-left transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
                             >
-                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition group-hover:scale-105">
+                              <span className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-primary/10 text-primary">
                                 <Icon className="h-4 w-4" aria-hidden />
                               </span>
                               <span className="flex min-w-0 flex-col gap-0.5">
-                                <span className="text-sm font-medium">{s.title}</span>
-                                <span className="text-[11px] text-muted-foreground">{s.subtitle}</span>
+                                <span className="text-xs sm:text-sm font-medium">{s.title}</span>
+                                <span className="text-[10px] sm:text-[11px] text-muted-foreground">{s.subtitle}</span>
                               </span>
-                            </motion.button>
+                            </button>
                           )
                         })}
                       </div>
@@ -662,7 +673,7 @@ function NexusApp() {
               <AnimatePresence>
                 {toolMenuOpen && (
                   <>
-                    <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setToolMenuOpen(false)} />
+                    <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setToolMenuOpen(false)} />
                     <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                       transition={{ type: 'spring', damping: 30, stiffness: 300 }}
                       className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background pb-safe shadow-2xl"
@@ -785,7 +796,7 @@ function NexusApp() {
       </div>
 
       {/* ====== MOBILE BOTTOM NAV ====== */}
-      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 backdrop-blur lg:hidden" aria-label="Primary">
+      <nav className="flex items-stretch justify-around border-t border-border bg-background lg:hidden" aria-label="Primary">
         {TABS.map(tab => {
           const Icon = tab.icon
           const active = activeTab === tab.id
@@ -806,13 +817,10 @@ function NexusApp() {
       </nav>
 
       {/* ====== DESKTOP FOOTER ====== */}
-      <footer className="nexus-footer relative mt-auto hidden h-11 items-center justify-between border-t bg-background/95 px-6 text-xs text-muted-foreground lg:flex">
+      <footer className="nexus-footer relative mt-auto hidden h-11 items-center justify-between border-t bg-background px-6 text-xs text-muted-foreground lg:flex">
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
         <div className="flex items-center gap-2">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          </span>
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
           <span className="text-muted-foreground/80">{tr.allSystemsOperational}</span>
           <span aria-hidden>·</span>
           <span className="font-semibold text-brand-gradient">NEXUS AI</span>

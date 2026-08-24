@@ -82,7 +82,7 @@ export function AuthLanding({
         aria-label="NEXUS AI welcome"
       >
         {/* ---------- Top: 56px header ---------- */}
-        <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-border/60 bg-background/80 px-4 backdrop-blur-md sm:px-6">
+        <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-border/60 bg-background px-4 sm:px-6">
           <Image
             src="/nexus-header-logo.png"
             alt="NEXUS AI"
