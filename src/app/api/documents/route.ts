@@ -43,7 +43,7 @@ const globalForDocs = globalThis as unknown as { docStore?: Map<string, ParsedDo
 const docStore = globalForDocs.docStore ?? (globalForDocs.docStore = new Map<string, ParsedDoc>())
 
 const requestSchema = z.object({
-  file: z.string().min(20).max(35_000_000), // base64
+  file: z.string().min(20).max(40_000_000), // base64
   filename: z.string().min(1).max(200),
   format: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv']),
 })

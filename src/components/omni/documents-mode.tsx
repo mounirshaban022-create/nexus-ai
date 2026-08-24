@@ -19,8 +19,10 @@ import { Markdown } from './markdown'
 import { useToast } from '@/hooks/use-toast'
 
 /**
- * DOCUMENTS STUDIO — Claude-level document intelligence.
- * Upload any document → AI reads it → chat about it → edit it → export.
+ * DOCUMENTS STUDIO — rebuilt to be bulletproof.
+ * Supports: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV
+ * Features: Upload → Parse → AI Summary → Q&A → AI Edit → Export
+ * Any file size up to 25MB.
  */
 
 interface DocMeta {
@@ -41,10 +43,17 @@ interface DocMeta {
   summary: string
 }
 
-interface QA {
-  question: string
-  answer: string
-}
+interface QA { question: string; answer: string }
+
+const FORMATS = [
+  { ext: 'pdf', icon: '📕', label: 'PDF' },
+  { ext: 'docx', icon: '📄', label: 'Word' },
+  { ext: 'xlsx', icon: '📊', label: 'Excel' },
+  { ext: 'pptx', icon: '📽️', label: 'PowerPoint' },
+  { ext: 'txt', icon: '📝', label: 'Text' },
+  { ext: 'md', icon: '📝', label: 'Markdown' },
+  { ext: 'csv', icon: '📊', label: 'CSV' },
+]
 
 export function DocumentsMode() {
   const { toast } = useToast()
@@ -59,49 +68,58 @@ export function DocumentsMode() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
 
-  const upload = useCallback(
-    async (file: File) => {
-      const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-      const formatMap: Record<string, string> = {
-        pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', md: 'md', csv: 'csv',
+  const upload = useCallback(async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+    const formatMap: Record<string, string> = {
+      pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', md: 'md', csv: 'csv',
+    }
+    const format = formatMap[ext]
+    if (!format) {
+      toast({ title: 'Unsupported format', description: 'PDF, Word, Excel, PowerPoint, TXT, MD, CSV', variant: 'destructive' })
+      return
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      toast({ title: 'File too large', description: 'Max 25MB. Try splitting your document.', variant: 'destructive' })
+      return
+    }
+
+    setParsing(true)
+    setDoc(null)
+    setQaHistory([])
+    setEditResult(null)
+
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('Could not read file'))
+        reader.readAsDataURL(file)
+      })
+
+      const res = await fetch('/api/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: b64, filename: file.name, format }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Upload failed')
       }
-      const format = formatMap[ext]
-      if (!format) {
-        toast({ title: 'Unsupported format', description: 'PDF, Word, Excel, PowerPoint, TXT, MD, CSV', variant: 'destructive' })
-        return
-      }
-      if (file.size > 25 * 1024 * 1024) {
-        toast({ title: 'File too large', description: 'Max 25MB.', variant: 'destructive' })
-        return
-      }
-      setParsing(true)
-      setDoc(null)
-      setQaHistory([])
-      setEditResult(null)
-      try {
-        const b64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.onerror = () => reject(new Error('Read failed'))
-          reader.readAsDataURL(file)
-        })
-        const res = await fetch('/api/documents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file: b64, filename: file.name, format }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error || 'Upload failed.')
-        setDoc(data.document)
-        toast({ title: 'Document analyzed ✓', description: `${data.document.metadata.wordCount} words · ${data.document.sectionCount} sections` })
-      } catch (error) {
-        toast({ title: 'Upload failed', description: error instanceof Error ? error.message : 'Try again.', variant: 'destructive' })
-      } finally {
-        setParsing(false)
-      }
-    },
-    [toast]
-  )
+
+      setDoc(data.document)
+      toast({ title: '✓ Document analyzed', description: `${data.document.metadata.wordCount} words · ${data.document.sectionCount} sections` })
+    } catch (error) {
+      toast({
+        title: 'Upload failed',
+        description: error instanceof Error ? error.message.slice(0, 120) : 'Try a different file',
+        variant: 'destructive',
+        duration: 8000,
+      })
+    } finally {
+      setParsing(false)
+    }
+  }, [toast])
 
   const ask = useCallback(async () => {
     if (!doc || !question.trim() || asking) return
@@ -111,10 +129,10 @@ export function DocumentsMode() {
     try {
       const res = await fetch(`/api/documents?id=${doc.id}&q=${encodeURIComponent(q)}`)
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Query failed.')
-      setQaHistory((prev) => [...prev, { question: q, answer: data.answer }])
+      if (!res.ok) throw new Error(data.error || 'Query failed')
+      setQaHistory(prev => [...prev, { question: q, answer: data.answer }])
     } catch (error) {
-      toast({ title: 'Query failed', description: error instanceof Error ? error.message : 'Try again.', variant: 'destructive' })
+      toast({ title: 'Query failed', description: error instanceof Error ? error.message : 'Try again', variant: 'destructive' })
     } finally {
       setAsking(false)
     }
@@ -131,11 +149,11 @@ export function DocumentsMode() {
         body: JSON.stringify({ id: doc.id, instruction: editInstruction.trim(), outputFormat: 'docx' }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Edit failed.')
+      if (!res.ok) throw new Error(data.error || 'Edit failed')
       setEditResult(data.edited)
-      toast({ title: 'Document edited ✓', description: 'Download the updated version below.' })
+      toast({ title: '✓ Document edited', description: 'Download the updated version' })
     } catch (error) {
-      toast({ title: 'Edit failed', description: error instanceof Error ? error.message : 'Try again.', variant: 'destructive' })
+      toast({ title: 'Edit failed', description: error instanceof Error ? error.message : 'Try again', variant: 'destructive' })
     } finally {
       setEditing(false)
     }
@@ -149,9 +167,21 @@ export function DocumentsMode() {
             <FileText className="h-5 w-5 text-primary" aria-hidden /> Documents Studio
           </h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Upload any document — AI reads it, answers questions, and edits it. Claude-level document intelligence.
+            Upload any document — AI reads it, answers questions, and edits it.
           </p>
         </header>
+
+        {/* Format badges */}
+        <div className="mb-4 flex flex-wrap gap-2">
+          {FORMATS.map(f => (
+            <span key={f.ext} className="rounded-full border border-border bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">
+              {f.icon} {f.label}
+            </span>
+          ))}
+          <span className="rounded-full border border-border bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">
+            Max 25MB
+          </span>
+        </div>
 
         {/* Upload zone */}
         {!doc && (
@@ -160,10 +190,10 @@ export function DocumentsMode() {
             tabIndex={0}
             aria-label="Upload a document"
             onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(e) => e.key === 'Enter' && fileInputRef.current?.click()}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+            onKeyDown={e => e.key === 'Enter' && fileInputRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
             onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
+            onDrop={e => {
               e.preventDefault()
               setDragging(false)
               const f = e.dataTransfer.files?.[0]
@@ -181,10 +211,10 @@ export function DocumentsMode() {
               </>
             ) : (
               <>
-                <UploadCloud className="mb-3 h-8 w-8 text-muted-foreground/70" aria-hidden />
+                <UploadCloud className="mb-3 h-10 w-10 text-muted-foreground/70" aria-hidden />
                 <p className="text-sm font-medium">Drop a document here, or click to browse</p>
-                <p className="mt-1 text-xs text-muted-foreground">PDF · Word · Excel · PowerPoint · TXT · MD · CSV · Max 25MB</p>
-                <p className="mt-2 text-xs text-muted-foreground/60">Ask questions · Edit · Export — like Claude</p>
+                <p className="mt-1 text-xs text-muted-foreground">PDF · Word · Excel · PowerPoint · TXT · MD · CSV</p>
+                <p className="mt-3 text-xs text-primary">Click anywhere in this box to select a file</p>
               </>
             )}
             <input
@@ -192,7 +222,7 @@ export function DocumentsMode() {
               type="file"
               accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv"
               className="hidden"
-              onChange={(e) => {
+              onChange={e => {
                 const f = e.target.files?.[0]
                 if (f) upload(f)
                 e.target.value = ''
@@ -207,7 +237,7 @@ export function DocumentsMode() {
             {/* Doc header */}
             <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-lg">
-                {doc.format === 'pdf' ? '📕' : doc.format === 'docx' ? '📄' : doc.format === 'xlsx' ? '📊' : doc.format === 'pptx' ? '📽️' : '📝'}
+                {FORMATS.find(f => f.ext === doc.format)?.icon || '📄'}
               </span>
               <div className="min-w-0 flex-1">
                 <h3 className="truncate text-sm font-semibold">{doc.filename}</h3>
@@ -217,7 +247,6 @@ export function DocumentsMode() {
                   {doc.metadata.slideCount ? ` · ${doc.metadata.slideCount} slides` : ''}
                   {doc.metadata.sheetNames?.length ? ` · ${doc.metadata.sheetNames.length} sheets` : ''}
                   {doc.sectionCount > 0 ? ` · ${doc.sectionCount} sections` : ''}
-                  {doc.tableCount > 0 ? ` · ${doc.tableCount} tables` : ''}
                 </p>
                 {doc.summary && (
                   <p className="mt-2 rounded-lg bg-secondary/60 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
@@ -245,31 +274,22 @@ export function DocumentsMode() {
                   {qaHistory.map((qa, i) => (
                     <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
                       <p className="text-sm font-medium">{qa.question}</p>
-                      <div className="mt-1 rounded-xl bg-card px-4 py-3">
+                      <div className="mt-1 rounded-xl bg-card px-4 py-3 border border-border">
                         <Markdown content={qa.answer} />
                       </div>
                     </motion.div>
                   ))}
                 </div>
               )}
-              <form
-                className="flex gap-2"
-                onSubmit={(e) => { e.preventDefault(); ask() }}
-              >
+              <form className="flex gap-2" onSubmit={e => { e.preventDefault(); ask() }}>
                 <Input
                   value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
+                  onChange={e => setQuestion(e.target.value)}
                   placeholder="e.g. What are the key findings? Summarize section 2…"
                   disabled={asking}
                   className="h-11 flex-1 rounded-full border-border bg-card px-4 focus-visible:ring-primary/40"
                 />
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={!question.trim() || asking}
-                  aria-label="Ask"
-                  className="h-11 w-11 rounded-full bg-primary text-primary-foreground"
-                >
+                <Button type="submit" size="icon" disabled={!question.trim() || asking} aria-label="Ask" className="h-11 w-11 rounded-full bg-primary text-primary-foreground">
                   {asking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </form>
@@ -282,7 +302,7 @@ export function DocumentsMode() {
               </h4>
               <Textarea
                 value={editInstruction}
-                onChange={(e) => setEditInstruction(e.target.value)}
+                onChange={e => setEditInstruction(e.target.value)}
                 placeholder="e.g. Make the tone more formal · Add an executive summary · Shorten to 1 page · Fix grammar…"
                 rows={2}
                 className="resize-none rounded-2xl border-border bg-card focus-visible:ring-primary/40"
@@ -300,10 +320,7 @@ export function DocumentsMode() {
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-4 overflow-hidden rounded-2xl border border-border">
                   <div className="flex items-center justify-between bg-secondary/60 px-4 py-2.5">
                     <span className="text-xs font-medium">Edited version</span>
-                    <a
-                      href={`${editResult.downloadUrl}&download=1`}
-                      className="rounded-full bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground"
-                    >
+                    <a href={`${editResult.downloadUrl}&download=1`} className="rounded-full bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground">
                       Download .docx
                     </a>
                   </div>
