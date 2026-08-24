@@ -14,6 +14,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import type { ChatAttachment } from './modes'
+import { AnswerCard, EmailSentCard } from './answer-card'
 
 /**
  * Inline attachment cards rendered inside chat messages —
@@ -124,7 +125,9 @@ export function AttachmentCard({ attachment }: { attachment: ChatAttachment }) {
               <p className="truncate text-[13px] font-medium text-foreground">{r.title}</p>
               <p className="flex items-center gap-1 truncate text-[11px] text-primary">
                 <Globe className="h-3 w-3 shrink-0" aria-hidden />
-                {new URL(r.url).hostname}
+                {(() => {
+                  try { return new URL(r.url).hostname } catch { return r.url }
+                })()}
               </p>
               {r.snippet && (
                 <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{r.snippet}</p>
@@ -133,6 +136,37 @@ export function AttachmentCard({ attachment }: { attachment: ChatAttachment }) {
           ))}
         </div>
       </motion.div>
+    )
+  }
+
+  if (attachment.type === 'answer') {
+    return (
+      <AnswerCard
+        query={attachment.query ?? ''}
+        steps={attachment.steps}
+        sources={attachment.sources}
+        answer={attachment.answer}
+        followUps={attachment.followUps}
+        emailMatches={attachment.emailMatches}
+      />
+    )
+  }
+
+  if (attachment.type === 'email') {
+    return (
+      <EmailSentCard
+        to={attachment.to}
+        subject={attachment.subject}
+        body={attachment.body}
+        messageId={attachment.messageId}
+        needsConnect={attachment.needsConnect}
+        onConnect={() => {
+          // Decoupled: dispatch a global event that page.tsx listens for
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('nexus:open-connect'))
+          }
+        }}
+      />
     )
   }
 

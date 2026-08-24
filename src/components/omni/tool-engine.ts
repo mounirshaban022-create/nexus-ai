@@ -242,21 +242,95 @@ export function useToolEngine(
           break
         }
         case 'search': {
-          // Use the existing search route
-          const r = await safeJsonFetch<any>('/api/search', {
+          // Perplexity-style answer engine — stream NDJSON events from /api/answer
+          // and build a single 'answer' attachment with plan + sources + cited answer + follow-ups.
+          const res = await fetch('/api/answer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: prompt }),
-          }, { timeoutMs: 60_000, label: 'Web search' })
-          if (!r.ok || !r.data?.results) throw new Error(r.error || 'Search failed.')
-          const results = (r.data.results || []).slice(0, 6).map((rr: any) => ({
-            title: rr.title || rr.name || 'Untitled',
-            url: rr.url || rr.link || '#',
-            snippet: rr.snippet || rr.description || '',
-          }))
+            body: JSON.stringify({ query: prompt, mode: 'pro', includeEmail: true }),
+          })
+          const ct = res.headers.get('content-type') ?? ''
+          if (!res.ok || ct.includes('text/html') || ct.includes('text/plain')) {
+            // Read body for error context, then surface a friendly message
+            const txt = await res.text().catch(() => '')
+            const msg = res.status === 429
+              ? 'You are searching a bit too fast. Please wait a moment and try again.'
+              : res.status >= 500
+                ? 'The answer engine is busy right now. Please try again.'
+                : (txt.slice(0, 200) || 'Search failed. Please try again.')
+            throw new Error(msg)
+          }
+          const reader = res.body!.getReader()
+          const decoder = new TextDecoder()
+          let buf = ''
+          const steps: Array<{ id: string; query: string; reason: string }> = []
+          let sources: Array<{ n: number; title: string; url: string; host: string; snippet?: string; favicon?: string; date?: string }> = []
+          const emailMatches: Array<{ subject: string; from: string; date: string | null; snippet: string }> = []
+          let answer = ''
+          let followUps: string[] = []
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buf += decoder.decode(value, { stream: true })
+            const lines = buf.split('\n')
+            buf = lines.pop() ?? ''
+            for (const line of lines) {
+              if (!line.trim()) continue
+              try {
+                const e = JSON.parse(line)
+                switch (e.type) {
+                  case 'plan':
+                    steps.push(...(e.steps || []))
+                    onToolRunning(true, `Answer · planned ${steps.length || 'a few'} searches`)
+                    break
+                  case 'search_start':
+                    onToolRunning(true, `Answer · searching the web…`)
+                    break
+                  case 'search_done':
+                    // results are accumulated server-side; we get the final list in 'sources'
+                    break
+                  case 'read_start':
+                    try { onToolRunning(true, `Answer · reading ${new URL(e.url).hostname}`) } catch { /* */ }
+                    break
+                  case 'email_search_done':
+                    emailMatches.push(...(e.matches || []))
+                    break
+                  case 'email_skipped':
+                    break
+                  case 'synthesize_start':
+                    onToolRunning(true, 'Answer · synthesizing cited answer…')
+                    break
+                  case 'answer':
+                    answer = e.content || ''
+                    break
+                  case 'sources':
+                    if (Array.isArray(e.sources)) sources = e.sources
+                    break
+                  case 'followups':
+                    followUps = e.questions || []
+                    break
+                  case 'error':
+                    throw new Error(e.message || 'The answer engine ran into a problem.')
+                    break
+                }
+              } catch {
+                /* ignore individual line parse errors */
+              }
+            }
+          }
           result = {
-            content: `Here's what I found on the web for: "${prompt}"`,
-            attachments: results.length > 0 ? [{ type: 'search', results }] : [],
+            content: answer
+              ? `Here's a researched answer for: "${prompt}"`
+              : `I searched but couldn't synthesize an answer for "${prompt}". Try rephrasing.`,
+            attachments: [{
+              type: 'answer',
+              query: prompt,
+              steps,
+              sources,
+              answer,
+              followUps,
+              emailMatches,
+            }],
           }
           break
         }
@@ -288,8 +362,138 @@ export function useToolEngine(
           }
           break
         }
+        case 'email': {
+          // Step 1: Draft the email via /api/chat with a strict JSON-only instruction.
+          const draftInstruction =
+            'You are Nexus\'s email drafting assistant. Based on the user\'s request, draft a professional email. ' +
+            'Respond with ONLY a JSON object (no markdown fences, no prose before or after) in EXACTLY this shape:\n' +
+            '{"to": "<recipient email address, or empty string if the user did not specify one>", ' +
+            '"subject": "<a concise, professional subject line>", ' +
+            '"body": "<the email body, professional tone, well-structured, signed with your name>"}\n\n' +
+            'Rules:\n' +
+            '- If the user did not specify a recipient, set "to" to "" (empty string).\n' +
+            '- Never invent a recipient email address.\n' +
+            '- The body should be 2-6 short paragraphs as one string with \\n line breaks.\n' +
+            '- Sign off as "Best regards,\\nNexus" unless the user specified a sender name.\n\n' +
+            'User request: ' + prompt
+
+          onToolRunning(true, 'Email · drafting…')
+          const draftRes = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: draftInstruction }),
+          })
+          const draftCt = draftRes.headers.get('content-type') ?? ''
+          if (!draftRes.ok || draftCt.includes('text/html')) {
+            throw new Error('Could not draft the email. Please try again.')
+          }
+          // Collect streamed NDJSON assistant content
+          const dReader = draftRes.body!.getReader()
+          const dDecoder = new TextDecoder()
+          let dBuf = ''
+          let draftText = ''
+          for (;;) {
+            const { done, value } = await dReader.read()
+            if (done) break
+            dBuf += dDecoder.decode(value, { stream: true })
+            const lines = dBuf.split('\n')
+            dBuf = lines.pop() ?? ''
+            for (const line of lines) {
+              if (!line.trim()) continue
+              try {
+                const e = JSON.parse(line)
+                if (e.type === 'assistant' && typeof e.content === 'string') {
+                  draftText += e.content
+                }
+                if (e.type === 'error') throw new Error(e.message || 'Drafting failed.')
+              } catch (pe: any) {
+                // A parse error on one line shouldn't kill the whole stream —
+                // but if it's our own thrown error, re-throw it.
+                if (pe.message && /Drafting failed|failed/i.test(pe.message)) throw pe
+              }
+            }
+          }
+          // Extract the JSON object from the drafted text (brace-matching, string-aware)
+          const jsonStr = extractJsonObject(draftText)
+          if (!jsonStr) {
+            result = {
+              content: `I couldn't draft a valid email from that request. Try: "Send an email to jane@example.com about tomorrow's meeting at 3pm."`,
+              attachments: [],
+            }
+            break
+          }
+          let draft: { to?: string; subject?: string; body?: string }
+          try {
+            draft = JSON.parse(jsonStr)
+          } catch {
+            result = {
+              content: `The drafted email wasn't valid JSON. Please try rephrasing your request.`,
+              attachments: [],
+            }
+            break
+          }
+
+          // Step 2: If no recipient, ask the user to provide one.
+          if (!draft.to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(draft.to)) {
+            result = {
+              content: `I drafted your email${draft.subject ? ` "${draft.subject}"` : ''}, but you didn't tell me who to send it to. Reply with the recipient's email address and I'll send it right away.`,
+              attachments: [{
+                type: 'email',
+                subject: draft.subject || '',
+                body: draft.body || '',
+                needsConnect: false,
+              }],
+            }
+            break
+          }
+
+          // Step 3: Send via /api/email/send
+          onToolRunning(true, `Email · sending to ${draft.to}…`)
+          const sendRes = await safeJsonFetch<any>('/api/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: draft.to,
+              subject: draft.subject || '(no subject)',
+              body: draft.body || '',
+            }),
+          }, { timeoutMs: 45_000, label: 'Email send' })
+
+          if (!sendRes.ok) {
+            // Check if it's the "needs connect" case (status 400 + needsConnect)
+            if (sendRes.status === 400 && /no email account/i.test(sendRes.error || '')) {
+              result = {
+                content: `I drafted your email to ${draft.to}, but no email account is connected yet. Connect your email to send it.`,
+                attachments: [{
+                  type: 'email',
+                  to: draft.to,
+                  subject: draft.subject || '',
+                  body: draft.body || '',
+                  needsConnect: true,
+                }],
+              }
+            } else {
+              throw new Error(sendRes.error || 'Could not send the email. Please try again.')
+            }
+            break
+          }
+
+          result = {
+            content: `I've sent your email to **${draft.to}**. ✉️`,
+            attachments: [{
+              type: 'email',
+              to: draft.to,
+              subject: draft.subject || '',
+              body: draft.body || '',
+              messageId: sendRes.data?.messageId,
+              needsConnect: false,
+            }],
+          }
+          break
+        }
         default:
-          // agent, connectors, email — fall back to plain chat routing
+          // agent, connectors — fall back to plain chat routing
+          // (connectors is intercepted by page.tsx and opens the ConnectPanel)
           return false
       }
 
@@ -345,4 +549,36 @@ function detectFormat(filename: string): 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'txt
   if (ext === 'md') return 'md'
   if (ext === 'csv') return 'csv'
   return 'txt'
+}
+
+/**
+ * Balanced-brace JSON extraction (string-aware). Finds the first complete
+ * top-level {...} object in `text` and returns it as a string. Returns
+ * null if no valid object is found. Used to extract the drafted email JSON
+ * from an LLM response that may contain surrounding prose/markdown fences.
+ */
+function extractJsonObject(text: string): string | null {
+  // Strip markdown code fences first
+  const cleaned = text.replace(/```(?:json)?\s*/g, '').replace(/```/g, '')
+  const start = cleaned.indexOf('{')
+  if (start === -1) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return cleaned.slice(start, i + 1)
+    }
+  }
+  return null
 }

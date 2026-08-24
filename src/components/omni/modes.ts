@@ -371,8 +371,31 @@ export type AgentEvent =
 /* Unified chat stream events + inline attachments                     */
 /* ------------------------------------------------------------------ */
 
+export interface AnswerSource {
+  n: number
+  title: string
+  url: string
+  host: string
+  snippet?: string
+  favicon?: string
+  date?: string
+}
+
+export interface AnswerStep {
+  id: string
+  query: string
+  reason: string
+}
+
+export interface EmailMatch {
+  subject: string
+  from: string
+  date: string | null
+  snippet: string
+}
+
 export interface ChatAttachment {
-  type: 'image' | 'document' | 'code' | 'search'
+  type: 'image' | 'document' | 'code' | 'search' | 'answer' | 'email'
   url?: string
   title?: string
   format?: string
@@ -382,6 +405,19 @@ export interface ChatAttachment {
   stderr?: string
   exitCode?: number | null
   results?: Array<{ title: string; url: string; snippet?: string }>
+  // Perplexity-style answer attachment
+  query?: string
+  steps?: AnswerStep[]
+  sources?: AnswerSource[]
+  answer?: string
+  followUps?: string[]
+  emailMatches?: EmailMatch[]
+  // Email attachment (sent confirmation)
+  to?: string
+  subject?: string
+  body?: string
+  messageId?: string
+  needsConnect?: boolean
 }
 
 export type ChatEvent =

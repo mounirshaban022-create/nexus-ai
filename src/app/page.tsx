@@ -43,6 +43,7 @@ import { ProjectsMode } from '@/components/omni/projects-mode'
 import { LibraryMode } from '@/components/omni/library-mode'
 import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
 import { VoiceModeOverlay } from '@/components/omni/voice-mode-overlay'
+import { ConnectPanel } from '@/components/omni/connect-panel'
 import { Headphones, Mic } from 'lucide-react'
 
 // ============ TYPES ============
@@ -80,6 +81,7 @@ function NexusApp() {
   const { user, signOut, fetchMe } = useAuth()
   const [authOpen, setAuthOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
+  const [connectOpen, setConnectOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
 
   // Navigation
@@ -230,8 +232,30 @@ function NexusApp() {
     setAuthOpen(true)
   }
 
+  // Listen for "open connect panel" requests from inline email cards
+  useEffect(() => {
+    const handler = () => setConnectOpen(true)
+    window.addEventListener('nexus:open-connect', handler)
+    return () => window.removeEventListener('nexus:open-connect', handler)
+  }, [])
+
+  // Listen for "send this message" requests from answer follow-up chips
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const q = (e as CustomEvent<string>).detail
+      if (typeof q === 'string' && q.trim()) send(q)
+    }
+    window.addEventListener('nexus:send-message', handler as EventListener)
+    return () => window.removeEventListener('nexus:send-message', handler as EventListener)
+  }, [send])
+
   const handleToolPick = (tool: ToolId, label: string) => {
     setToolMenuOpen(false)
+    // Connectors opens the Connect panel directly (no prompt needed)
+    if (tool === 'connectors') {
+      setConnectOpen(true)
+      return
+    }
     toolEngine.setPendingTool(tool)
     // Focus the textarea so the user can type their prompt immediately
     setTimeout(() => {
@@ -255,6 +279,8 @@ function NexusApp() {
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
 
       <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+
+      <ConnectPanel open={connectOpen} onClose={() => setConnectOpen(false)} />
 
       {/* ====== DESKTOP SIDEBAR ====== */}
       <div className="flex min-h-0 flex-1">
@@ -633,6 +659,10 @@ function NexusApp() {
                 <section className="mt-6">
                   <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Personalization</h3>
                   <div className="space-y-1">
+                    <button onClick={() => setConnectOpen(true)} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                      <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground" /> Email & apps</span>
+                      <Plus className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
                     <button onClick={toggleTheme} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
                       <span>Theme</span><span className="text-muted-foreground capitalize">{theme}</span>
                     </button>
