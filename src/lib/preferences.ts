@@ -3,9 +3,22 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export type CommStyle = 'concise' | 'balanced' | 'detailed' | 'friendly'
+export type Interest = 'writing' | 'coding' | 'research' | 'design' | 'business' | 'learning' | 'creative' | 'productivity'
+
 interface PreferencesState {
+  // Onboarding
+  onboarded: boolean
+  name: string
+  interests: Interest[]
+  commStyle: CommStyle
+  // Appearance
   theme: 'light' | 'dark'
   language: 'en' | 'ar'
+  // Actions: onboarding
+  completeOnboarding: (data: { name: string; interests: Interest[]; commStyle: CommStyle }) => void
+  resetOnboarding: () => void
+  // Actions: appearance
   toggleTheme: () => void
   setTheme: (t: 'light' | 'dark') => void
   toggleLanguage: () => void
@@ -15,8 +28,16 @@ interface PreferencesState {
 export const usePreferences = create<PreferencesState>()(
   persist(
     (set) => ({
+      onboarded: false,
+      name: '',
+      interests: [],
+      commStyle: 'balanced',
       theme: 'light',
       language: 'en',
+      completeOnboarding: ({ name, interests, commStyle }) =>
+        set({ name, interests, commStyle, onboarded: true }),
+      resetOnboarding: () =>
+        set({ onboarded: false, name: '', interests: [], commStyle: 'balanced' }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
       setTheme: (theme) => set({ theme }),
       toggleLanguage: () => set((s) => ({ language: s.language === 'en' ? 'ar' : 'en' })),

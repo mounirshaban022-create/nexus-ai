@@ -8,8 +8,6 @@ import {
   Library,
   MessageSquare,
   Plus,
-  Search,
-  Settings,
   User,
   Sparkles,
   Mic,
@@ -27,7 +25,6 @@ import {
   Mail,
   BookOpen,
   ScanEye,
-  AudioLines,
   FileSearch,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -38,6 +35,9 @@ import { Markdown } from '@/components/omni/markdown'
 import { ChatToolStep, AttachmentCard } from '@/components/omni/chat-attachments'
 import { ArtifactPanel, useArtifact } from '@/components/omni/artifact-panel'
 import { puterChat, puterSignIn, isPuterReady } from '@/components/omni/puter-engine'
+import { Onboarding } from '@/components/omni/onboarding'
+import { ProjectsMode } from '@/components/omni/projects-mode'
+import { LibraryMode } from '@/components/omni/library-mode'
 
 // ============ TYPES ============
 type TabId = 'chat' | 'projects' | 'explore' | 'library' | 'profile'
@@ -58,8 +58,21 @@ interface ToolMenuItem {
 
 // ============ MAIN COMPONENT ============
 export default function Page() {
-  // Preferences (theme + language)
-  const { theme, language, toggleTheme, toggleLanguage } = usePreferences()
+  // Preferences (theme + language + onboarding)
+  const { theme, language, onboarded } = usePreferences()
+  useEffect(() => { applyPreferences(theme, language) }, [theme, language])
+
+  // Onboarding gate — show onboarding flow until user completes it once
+  if (!onboarded) {
+    return <Onboarding />
+  }
+
+  return <NexusApp />
+}
+
+// ============ APP (post-onboarding) ============
+function NexusApp() {
+  const { theme, language, toggleTheme, toggleLanguage, name, interests, commStyle, resetOnboarding } = usePreferences()
   useEffect(() => { applyPreferences(theme, language) }, [theme, language])
 
   // Navigation
@@ -178,6 +191,10 @@ export default function Page() {
     'Help me code',
   ]
 
+  // Display name priority: preferences name → auth email → 'Guest'
+  const displayName = name.trim() || user?.email || 'Guest'
+  const displayInitial = (name.trim() || user?.email || 'G')[0].toUpperCase()
+
   return (
     <div className="flex h-dvh flex-col bg-background">
       {/* ====== DESKTOP SIDEBAR ====== */}
@@ -187,7 +204,7 @@ export default function Page() {
             <span className="text-base font-bold">Nexus</span>
           </div>
           <div className="px-3 pt-2">
-            <button onClick={() => setActiveTab('chat')} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
+            <button onClick={() => { setActiveTab('chat'); setMessages([]) }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
               <Plus className="h-4 w-4" /> New Chat
             </button>
           </div>
@@ -205,17 +222,10 @@ export default function Page() {
             })}
           </nav>
           <div className="border-t border-border p-3">
-            {user ? (
-              <button onClick={() => setActiveTab('profile')} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">{(user.email ?? '?')[0]}</span>
-                <span className="truncate text-xs font-medium">{user.email}</span>
-              </button>
-            ) : (
-              <button onClick={() => setActiveTab('profile')} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-xs">?</span>
-                <span className="text-xs font-medium">Sign in</span>
-              </button>
-            )}
+            <button onClick={() => setActiveTab('profile')} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">{displayInitial}</span>
+              <span className="truncate text-xs font-medium">{displayName}</span>
+            </button>
           </div>
         </aside>
 
@@ -281,7 +291,9 @@ export default function Page() {
                       <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 shadow-lg">
                         <Sparkles className="h-7 w-7 text-white" />
                       </div>
-                      <h1 className="text-2xl font-semibold">What can I help you with?</h1>
+                      <h1 className="text-2xl font-semibold">
+                        {name.trim() ? `Hi ${name.trim().split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
+                      </h1>
                       <p className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</p>
                       <div className="mt-8 flex flex-wrap justify-center gap-2">
                         {SUGGESTIONS.map(s => (
@@ -416,27 +428,14 @@ export default function Page() {
             </div>
           )}
 
-          {/* Projects (placeholder) */}
+          {/* Projects */}
           {activeTab === 'projects' && (
-            <div className="flex flex-1 items-center justify-center">
-              <div className="text-center">
-                <FolderKanban className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" aria-hidden />
-                <h3 className="text-sm font-medium">No projects yet</h3>
-                <p className="mt-1 text-xs text-muted-foreground">Create a project to organize your work.</p>
-                <Button className="mt-4 gap-2 rounded-full bg-primary text-primary-foreground"><Plus className="h-4 w-4" /> New Project</Button>
-              </div>
-            </div>
+            <ProjectsMode />
           )}
 
-          {/* Library (placeholder) */}
+          {/* Library */}
           {activeTab === 'library' && (
-            <div className="flex flex-1 items-center justify-center">
-              <div className="text-center">
-                <Library className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" aria-hidden />
-                <h3 className="text-sm font-medium">Your library is empty</h3>
-                <p className="mt-1 text-xs text-muted-foreground">Files, images, and saved outputs appear here.</p>
-              </div>
-            </div>
+            <LibraryMode />
           )}
 
           {/* Profile */}
@@ -445,10 +444,11 @@ export default function Page() {
               <div className="mx-auto max-w-md px-4 py-8">
                 <div className="flex flex-col items-center">
                   <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 text-xl font-bold text-white">
-                    {user ? (user.email ?? '?')[0].toUpperCase() : 'G'}
+                    {displayInitial}
                   </div>
-                  <h2 className="mt-3 text-lg font-bold">{user ? user.email : 'Guest'}</h2>
-                  {user && <span className="text-xs text-muted-foreground">Nexus member</span>}
+                  <h2 className="mt-3 text-lg font-bold">{displayName}</h2>
+                  {user && <span className="text-xs text-muted-foreground">{user.email}</span>}
+                  <span className="mt-1 text-[11px] text-muted-foreground capitalize">{commStyle} style</span>
                 </div>
                 {!user ? (
                   <Button className="mt-6 w-full rounded-xl bg-primary text-primary-foreground" onClick={() => signOut()}>Sign in</Button>
@@ -465,8 +465,23 @@ export default function Page() {
                     <button onClick={toggleLanguage} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
                       <span>Language</span><span className="text-muted-foreground">{language === 'en' ? 'English' : 'العربية'}</span>
                     </button>
+                    <button onClick={() => resetOnboarding()} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                      <span>Re-run onboarding</span>
+                      <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
                   </div>
                 </section>
+                {/* Interests */}
+                {interests.length > 0 && (
+                  <section className="mt-6">
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Your interests</h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      {interests.map(i => (
+                        <span key={i} className="rounded-full border border-border bg-card px-3 py-1 text-xs capitalize text-muted-foreground">{i}</span>
+                      ))}
+                    </div>
+                  </section>
+                )}
                 {/* Creator */}
                 <div className="mt-8 text-center">
                   <p className="text-xs text-muted-foreground">Built by Mounir Shaaban</p>
