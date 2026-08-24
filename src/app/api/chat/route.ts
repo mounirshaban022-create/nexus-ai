@@ -67,6 +67,17 @@ const requestSchema = z.object({
   // the project's customInstructions + ProjectFile contents are injected
   // into the system prompt so NEXUS has persistent project context.
   projectId: z.string().max(64).optional().nullable(),
+  // Document/PDF attachment: when the user attaches a file in the composer,
+  // the server parses it, injects its content into the conversation, and
+  // the AI can discuss it, edit it, or run PDF operations on it — directly
+  // from chat.
+  attachment: z
+    .object({
+      dataUrl: z.string().min(20).max(20_000_000),
+      filename: z.string().min(1).max(200),
+    })
+    .optional()
+    .nullable(),
 })
 
 const MAX_TOOL_CALLS = 4
@@ -88,6 +99,19 @@ const CHAT_TOOL_DEFS: Array<{
     description:
       'Create a real Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) document from content you provide. Returns a download link.',
     params: 'format (docx|xlsx|pptx, required), title (required), content (required: the document text/structure)',
+  },
+  {
+    id: 'edit_document',
+    description:
+      'EDIT the user\'s attached document with natural-language instructions (fix tone, restructure, translate, shorten, add sections, change anything). The full edited document is returned as a real .docx download. Use this whenever the user attached a document and asks to change/edit/enhance/rewrite it.',
+    params: 'instructions (required: what to change), title (optional: new document title)',
+  },
+  {
+    id: 'pdf_operation',
+    description:
+      'Run a REAL PDF operation on the user\'s attached PDF file (powered by Stirling-PDF — operates on the actual PDF binary). Use when the user asks to rotate, delete pages, reorder pages, split, watermark, flatten to a single page, or convert their PDF.',
+    params:
+      'operation (required: rotate|removePages|rearrange|split|watermark|singlePage|toHtml|toImages), params (object with the operation\'s options: angle for rotate; pageNumbers like "1,3-5" for removePages; newPageOrder like "3,1,2" for rearrange; pages for split; watermarkText/fontSize/opacity/rotation for watermark)',
   },
   {
     id: 'run_code',
@@ -253,6 +277,7 @@ function buildSystemPrompt(
     '   - Use markdown only when it earns its keep. For plain conversational replies, plain text is fine.',
     languageInstruction,
     '7. THINK BEFORE ACTING: for multi-step requests, plan which tools to use in which order.',
+    '8. DOCUMENTS & PDFs: when the user attached a document (its content appears in the conversation), answer questions about it directly. If they ask to EDIT/CHANGE/REWRITE it, call edit_document with clear instructions. If they ask for PDF operations (rotate/delete/reorder/split/watermark pages), call pdf_operation. If they attach a file with no question, give a brief summary and offer next steps.',
   ].join('\n')
 }
 
@@ -444,10 +469,21 @@ function parseRememberDirective(message: string): string | null {
   return null
 }
 
-/** Executes a chat-ability tool (image/doc/code), returning an attachment. */
+/** Context for the currently-attached document (set when the user
+ *  attaches a file in the composer). Lets the edit_document and
+ *  pdf_operation tools operate on it. */
+interface ActiveDoc {
+  title: string
+  text: string
+  format: string
+  filename: string
+  dataUrl: string
+}
+
 async function executeChatTool(
   toolId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  activeDoc: ActiveDoc | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
   const origin = 'http://localhost:3000'
 
@@ -539,6 +575,115 @@ async function executeChatTool(
     }
   }
 
+  if (toolId === 'edit_document') {
+    // AI-DRIVEN DOCUMENT EDITING: applies natural-language edit
+    // instructions to the attached document, returns the edited .docx.
+    if (!activeDoc) {
+      throw new Error('No document is attached in this conversation. Ask the user to attach one first (paperclip button).')
+    }
+    const instructions = String(args.instructions ?? '').slice(0, 4000)
+    if (!instructions) throw new Error('instructions required')
+    const newTitle = String(args.title ?? activeDoc.title).slice(0, 200)
+
+    // Step 1: AI applies the edits → new markdown
+    const editedMarkdown = await smartChat(
+      [
+        {
+          role: 'assistant',
+          content:
+            'You are NEXUS\'s document editor. Apply the requested edits to the document below. ' +
+            'Return the COMPLETE edited document in Markdown — every section, nothing omitted, with all your changes applied. ' +
+            'Preserve the original structure and formatting unless the instruction says otherwise. ' +
+            'Respond ONLY with the edited Markdown document.',
+        },
+        {
+          role: 'user',
+          content: `DOCUMENT "${activeDoc.title}":\n\n${activeDoc.text.slice(0, 40000)}\n\nEDIT INSTRUCTIONS: ${instructions}`,
+        },
+      ],
+      { maxTokens: 4000, task: 'documents' }
+    )
+    const cleaned = editedMarkdown
+      .replace(/^```(?:markdown|md)?\s*\n?/i, '')
+      .replace(/\n?```\s*$/i, '')
+      .trim()
+    if (!cleaned || cleaned.length < 20) throw new Error('The edit produced an empty document. Try more specific instructions.')
+
+    // Step 2: build the real .docx (same pipeline as Studio export)
+    const res = await fetch(`${origin}/api/studio/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ format: 'docx', title: newTitle, markdown: cleaned }),
+    })
+    const data = await res.json()
+    if (!res.ok || !data.file) throw new Error(data.error || 'Edited document export failed')
+    const artifactId = `doc-edit-${data.file.id ?? Date.now()}`
+    return {
+      result: {
+        downloadUrl: `${data.file.url}?download=1&title=${encodeURIComponent(newTitle)}`,
+        format: 'docx',
+        note: 'Edited document ready — give the user the download link and summarize what you changed.',
+      },
+      attachment: {
+        type: 'document',
+        url: `${data.file.url}?download=1&title=${encodeURIComponent(newTitle)}`,
+        title: newTitle,
+        format: 'docx',
+        size: data.file.size,
+        artifactId,
+        sourceContent: cleaned,
+      },
+    }
+  }
+
+  if (toolId === 'pdf_operation') {
+    // STIRLING-PDF OPERATIONS on the attached PDF — real binary edits.
+    if (!activeDoc) {
+      throw new Error('No PDF is attached in this conversation. Ask the user to attach one first (paperclip button).')
+    }
+    if (activeDoc.format !== 'pdf') {
+      throw new Error(`The attached file is a ${activeDoc.format.toUpperCase()}, not a PDF. PDF operations need a PDF attachment.`)
+    }
+    const operation = String(args.operation ?? '').trim()
+    const allowed = ['rotate', 'removePages', 'rearrange', 'split', 'watermark', 'singlePage', 'toHtml', 'toImages', 'info']
+    if (!allowed.includes(operation)) {
+      throw new Error(`Unknown PDF operation "${operation}". Allowed: ${allowed.join(', ')}`)
+    }
+    // Pass through operation params (angle, pageNumbers, newPageOrder, etc.)
+    const rawParams = (args.params ?? {}) as Record<string, unknown>
+    const params: Record<string, string | number> = {}
+    for (const [k, v] of Object.entries(rawParams)) {
+      if (v !== null && v !== undefined) params[k] = typeof v === 'number' ? v : String(v)
+    }
+
+    const res = await fetch(`${origin}/api/studio/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation, file: activeDoc.dataUrl, params }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || `PDF ${operation} failed`)
+    if (data.info) {
+      return { result: { info: data.info, note: 'PDF analysis result — report it to the user.' } }
+    }
+    const f = data.file
+    const label = `PDF ${operation} result`
+    return {
+      result: {
+        downloadUrl: `${f.url}?download=1&title=${encodeURIComponent(label)}`,
+        format: f.format,
+        note: `PDF ${operation} completed — give the user the download link.`,
+      },
+      attachment: {
+        type: 'document',
+        url: `${f.url}?download=1&title=${encodeURIComponent(label)}`,
+        title: label,
+        format: f.format,
+        size: f.size,
+      },
+    }
+  }
+
   if (toolId === 'run_code') {
     const language = String(args.language ?? 'javascript').toLowerCase()
     const code = String(args.code ?? '')
@@ -611,8 +756,62 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Message is required (max 8000 chars).' }, { status: 400 })
     }
-    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact, projectId } = parsed.data
+    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact, projectId, attachment } = parsed.data
     const trimmed = message.trim()
+
+    /* ------------------------------------------------------------------
+     * DOCUMENT/PDF ATTACHMENT — parse the attached file and build the
+     * activeDoc context. The parsed content is injected into the LLM
+     * conversation so the AI can discuss it, and the edit_document /
+     * pdf_operation tools can operate on it.
+     * ------------------------------------------------------------------ */
+    let activeDoc: ActiveDoc | null = null
+    let attachmentContextMessage = ''
+    if (attachment) {
+      try {
+        const ext = attachment.filename.split('.').pop()?.toLowerCase() ?? ''
+        const formatMap: Record<string, string> = { pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', md: 'md', csv: 'csv' }
+        const fmt = formatMap[ext] ?? 'txt'
+        const origin = 'http://localhost:3000'
+        const res = await fetch(`${origin}/api/documents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: attachment.dataUrl, filename: attachment.filename, format: fmt }),
+        })
+        const data = await res.json()
+        if (res.ok && data.document) {
+          // Fetch the full parse (sections + text) from the GET endpoint
+          const fullRes = await fetch(`${origin}/api/documents?id=${encodeURIComponent(data.document.id)}`)
+          const fullData = await fullRes.json()
+          const doc = fullData.document ?? data.document
+          const parts: string[] = []
+          if (Array.isArray(doc.sections) && doc.sections.length > 0) {
+            for (const s of doc.sections) parts.push(`## ${s.heading}\n${s.content}`)
+          } else if (doc.text) {
+            parts.push(doc.text)
+          } else if (doc.preview) {
+            parts.push(doc.preview)
+          }
+          activeDoc = {
+            title: doc.title || attachment.filename,
+            text: parts.join('\n\n').slice(0, 40000),
+            format: fmt,
+            filename: attachment.filename,
+            dataUrl: attachment.dataUrl,
+          }
+          const pageCount = doc.metadata?.pages ? ` (${doc.metadata.pages} pages)` : ''
+          attachmentContextMessage =
+            `[The user attached the document "${attachment.filename}"${pageCount}. Its full parsed content is below.\n\n` +
+            `DOCUMENT "${activeDoc.title}":\n${activeDoc.text.slice(0, 24000)}\n` +
+            `You can answer questions about this document directly from its content. If the user asks to EDIT/CHANGE/REWRITE the document, use the edit_document tool. ` +
+            `${fmt === 'pdf' ? 'If the user asks for PDF operations (rotate/delete pages/reorder/split/watermark etc.), use the pdf_operation tool.' : ''}]`
+          console.log(`[api/chat] attachment parsed: ${attachment.filename} (${fmt}, ${activeDoc.text.length} chars)`)
+        }
+      } catch (attErr) {
+        console.error('[api/chat] attachment parse failed:', attErr)
+        attachmentContextMessage = `[The user attached "${attachment.filename}" but it could not be parsed. Tell them politely and suggest checking the file.]`
+      }
+    }
 
     // Phase 0 Bug 2: derive the verified user id ONCE (JWT verification is
     // not free) and reuse for both session ownership (Bug 3) and Supabase
@@ -810,6 +1009,14 @@ export async function POST(req: NextRequest) {
           ]
           // Include the new user message (history was fetched before insert)
           llmMessages.push({ role: 'user', content: trimmed })
+          // Document attachment context: inject the parsed document content
+          // BEFORE the user's message so the AI sees it as context.
+          if (attachmentContextMessage) {
+            llmMessages.splice(llmMessages.length - 1, 0, {
+              role: 'user',
+              content: attachmentContextMessage,
+            })
+          }
 
           // Optional thinking phase
           if (thinkingEnabled) {
@@ -957,7 +1164,7 @@ export async function POST(req: NextRequest) {
               let result: unknown
               let attachment: Record<string, unknown> | undefined
               try {
-                const executed = await executeChatTool(toolCall.tool, toolCall.args)
+                const executed = await executeChatTool(toolCall.tool, toolCall.args, activeDoc)
                 result = executed.result
                 attachment = executed.attachment
               } catch (error) {

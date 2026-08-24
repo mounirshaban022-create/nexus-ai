@@ -475,7 +475,7 @@ export function ProfilePage(props: ProfilePageProps) {
             to save a key.
         =========================================================== */}
         <section className="mt-6" aria-label="AI Models & Providers">
-          <AiModelsMode />
+          <AiModelsMode embedded />
         </section>
 
         {/* ===========================================================

@@ -35,6 +35,7 @@ import {
   Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/hooks/use-toast'
 import { Textarea } from '@/components/ui/textarea'
 import { usePreferences, applyPreferences, t } from '@/lib/preferences'
 import { useAuth } from '@/hooks/use-auth'
@@ -145,6 +146,7 @@ function AuthGate({ isGuest, onContinueAsGuest, language, onToggleLanguage }: {
 // ============ APP (post-onboarding) ============
 function NexusApp() {
   const { theme, language, toggleTheme, toggleLanguage, name, interests, commStyle, resetOnboarding } = usePreferences()
+  const { toast } = useToast()
   useEffect(() => { applyPreferences(theme, language) }, [theme, language])
 
   // Real auth
@@ -184,6 +186,27 @@ function NexusApp() {
   const [sending, setSending] = useState(false)
   const [streamingActive, setStreamingActive] = useState(false)
   const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
+
+  // Document attachment (paperclip): any file the user attaches goes to
+  // the chat with the message — the server parses it and the AI can read,
+  // edit, or run PDF operations on it directly in the conversation.
+  const [chatAttachment, setChatAttachment] = useState<{ dataUrl: string; filename: string; size: number } | null>(null)
+  const chatFileInputRef = useRef<HTMLInputElement>(null)
+
+  const onChatFilePicked = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > 12 * 1024 * 1024) {
+      toast({ title: 'File too large', description: 'Attachments up to 12MB.', variant: 'destructive' })
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setChatAttachment({ dataUrl: reader.result as string, filename: file.name, size: file.size })
+    }
+    reader.readAsDataURL(file)
+  }, [toast])
 
   // AUTO-SCROLL (streaming UX): follow the assistant's output as it
   // streams in — unless the user deliberately scrolled up to read.
@@ -267,11 +290,11 @@ function NexusApp() {
     const hasPendingTool = !!toolEngine.pendingTool
     // Block only when there's truly nothing to send
     if (sending) return
-    if (!msg && !hasPendingFile) return
-    // For plain chat (no tool), still require text
-    if (!msg && !hasPendingTool) return
+    if (!msg && !hasPendingFile && !chatAttachment) return
+    // For plain chat (no tool), still require text OR an attachment
+    if (!msg && !hasPendingTool && !chatAttachment) return
     // Display the user's text (or the file name as a placeholder)
-    const userDisplay = msg || (hasPendingFile ? `📄 ${toolEngine.pendingFile?.name ?? ''}`.trim() : '')
+    const userDisplay = msg || (hasPendingFile ? `📄 ${toolEngine.pendingFile?.name ?? ''}`.trim() : '') || (chatAttachment ? `📎 ${chatAttachment.filename}` : '')
     if (userDisplay) {
       setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: userDisplay }])
     }
@@ -279,6 +302,10 @@ function NexusApp() {
     // following the incoming reply (even if they had scrolled up before).
     userScrolledUp.current = false
     setInput('')
+    // Capture + clear the attachment for THIS request (it travels with the
+    // message; the server parses it and gives the AI full document powers).
+    const attachmentForRequest = chatAttachment
+    setChatAttachment(null)
     setSending(true)
     try {
       // If a tool is pending, route to the tool engine
@@ -317,6 +344,7 @@ function NexusApp() {
           sessionId: currentChatSessionId,
           projectId: activeProjectId,
           openArtifact: openArtifactPayload,
+          attachment: attachmentForRequest ? { dataUrl: attachmentForRequest.dataUrl, filename: attachmentForRequest.filename } : null,
         }),
       })
       const reader = res.body!.getReader()
@@ -587,6 +615,16 @@ function NexusApp() {
         type="file"
         className="hidden"
         onChange={toolEngine.onFilePicked}
+      />
+
+      {/* Hidden file input for chat attachments (paperclip) — parsed
+          server-side; the AI can read/edit/PDF-operate on the file. */}
+      <input
+        ref={chatFileInputRef}
+        type="file"
+        accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv"
+        className="hidden"
+        onChange={onChatFilePicked}
       />
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
@@ -922,6 +960,18 @@ function NexusApp() {
                   {toolEngine.toolError && (
                     <p className="self-start text-xs text-destructive">{toolEngine.toolError}</p>
                   )}
+                  {/* Chat attachment chip — the attached document travels with
+                      the next message; the AI can read, edit, or run PDF ops on it. */}
+                  {chatAttachment && !pendingToolDef && (
+                    <div className="flex items-center gap-2 self-start rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5">
+                      <Paperclip className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                      <span className="max-w-[220px] truncate text-xs font-medium text-emerald-700">{chatAttachment.filename}</span>
+                      <span className="text-[10px] text-emerald-600/70">{(chatAttachment.size / 1024).toFixed(0)}KB · AI can edit this</span>
+                      <button type="button" onClick={() => setChatAttachment(null)} aria-label="Remove attachment" className="text-emerald-700/70 hover:text-emerald-700">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
                   <div className="relative flex flex-1 items-end rounded-3xl border border-border/70 bg-card shadow-sm transition-colors duration-200 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 focus-within:shadow-md focus-within:shadow-primary/5">
                     <button type="button" onClick={() => setToolMenuOpen(!toolMenuOpen)}
                       aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-3xl text-muted-foreground transition hover:text-foreground"
@@ -934,13 +984,20 @@ function NexusApp() {
                       className="max-h-40 min-h-[48px] flex-1 resize-none border-0 bg-transparent px-1 py-3 text-[15px] focus-visible:ring-0"
                     />
                     <div className="flex items-center pr-1.5 pb-1">
+                      <button type="button" onClick={() => chatFileInputRef.current?.click()}
+                        aria-label="Attach a document or PDF"
+                        title="Attach a document — the AI can read, edit, and transform it"
+                        className={`flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-secondary ${chatAttachment ? 'text-emerald-600' : 'text-muted-foreground hover:text-foreground'}`}
+                      >
+                        <Paperclip className="h-[18px] w-[18px]" />
+                      </button>
                       <button type="button" onClick={() => setVoiceOpen(true)}
                         aria-label="Open voice mode"
                         className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-primary"
                       >
                         <Mic className="h-[18px] w-[18px]" />
                       </button>
-                      <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile) || sending || !!toolRunningLabel} aria-label="Send"
+                      <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile && !chatAttachment) || sending || !!toolRunningLabel} aria-label="Send"
                         className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-30"
                       >
                         <Send className="h-4 w-4" />

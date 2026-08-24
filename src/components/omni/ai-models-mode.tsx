@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import {
   BrainCircuit,
   Check,
+  ChevronDown,
   ExternalLink,
   KeyRound,
   Loader2,
@@ -43,7 +44,7 @@ interface ConnectedProvider {
 /** Provider ids that need NO API key — always anonymous. */
 const ANONYMOUS_IDS = new Set(['llm7', 'ovhcloud', 'kilocode'])
 
-export function AiModelsMode() {
+export function AiModelsMode({ embedded = false }: { embedded?: boolean }) {
   const { toast } = useToast()
   const [presets, setPresets] = useState<ProviderPreset[]>([])
   const [providers, setProviders] = useState<ConnectedProvider[]>([])
@@ -186,8 +187,33 @@ export function AiModelsMode() {
   const anonPresets = presets.filter((p) => ANONYMOUS_IDS.has(p.id))
   const keyPresets = presets.filter((p) => !ANONYMOUS_IDS.has(p.id))
 
+  // Embedded mode (inside Profile): collapsed by default, no scroll wrapper
+  const [expanded, setExpanded] = useState(!embedded)
+
+  if (embedded && !expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="flex w-full items-center gap-3 rounded-2xl border border-border bg-card/70 p-4 text-left transition hover:border-primary/40"
+        aria-expanded={false}
+        aria-label="Show AI models and providers"
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <BrainCircuit className="h-5 w-5" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold">AI Models &amp; Providers</span>
+          <span className="block truncate text-xs text-muted-foreground">
+            3 zero-setup engines · {presets.length} free providers — tap to expand
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
+    )
+  }
+
   return (
-    <div className="omni-scroll h-full overflow-y-auto">
+    <div className={embedded ? '' : 'omni-scroll h-full overflow-y-auto'}>
       <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
         <header className="mb-6">
           <h2 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
