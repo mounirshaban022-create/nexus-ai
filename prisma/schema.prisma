@@ -3,7 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  // Supabase Postgres — the SAME database for local dev AND production.
+  // Local dev: point DATABASE_URL at your Supabase connection string too
+  // (from Supabase Dashboard → Settings → Database → Connection string).
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
