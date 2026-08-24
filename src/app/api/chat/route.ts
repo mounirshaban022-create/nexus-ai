@@ -682,6 +682,11 @@ export async function POST(req: NextRequest) {
       'web_search', 'read_page', 'wikipedia', 'weather', 'crypto', 'currency',
       'translate', 'dictionary', 'github', 'hacker_news', 'time', 'calculator',
       'recipes', 'nasa', 'news', 'trivia', 'pokemon', 'games', 'forecast',
+      // Public-API additions (free, no API key, no rate limit — bypass Z.ai 429s):
+      // - space_news: Spaceflight News API (dedicated aerospace news, distinct from BBC news + rocket launches)
+      // - air_quality: Open-Meteo air pollution (PM2.5/PM10/CO/O3/NO2/SO2) — pairs with geocode + weather
+      // - music: iTunes Search API (songs, podcasts, audiobooks, albums) — no equivalent existed before
+      'space_news', 'air_quality', 'music',
     ]
 
     // Phase 1 P3: verify ownership of the projectId when starting a NEW

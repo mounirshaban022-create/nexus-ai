@@ -1340,6 +1340,195 @@ export const CONNECTORS: ConnectorDefinition[] = [
       }
     },
   },
+
+  /* ----- Public-API additions (free, no key, HTTPS+ CORS) ----- */
+
+  // Source: https://api.spaceflightnewsapi.net/v4/articles/ (public-apis: News → Spaceflight News)
+  // Free, no API key, no rate limit for non-commercial use. Returns JSON {count, results[]}.
+  // Distinct from the existing `news` connector (BBC World headlines) and the `space`
+  // connector (rocket launch schedule) — this is dedicated spaceflight *news articles*
+  // with full text, source site, image, and publish time. Useful for "what's new in space"
+  // questions, current mission coverage, and aerospace industry news.
+  {
+    id: 'space_news',
+    name: 'Spaceflight News',
+    category: 'web',
+    description: 'Latest spaceflight news articles from major outlets (SpaceNews, NASA, ESA, etc.).',
+    llmDescription:
+      'Gets the latest spaceflight and aerospace news articles. Each result has a title, source site, summary, image, URL, and publish time. Use for current space news, mission coverage, SpaceX/NASA updates, satellite industry, and "what\'s new in space" questions.',
+    params: [
+      { name: 'query', type: 'string', description: 'Optional search term (e.g. "Starship", "Mars", "Artemis"). Omit for top headlines.', required: false },
+      { name: 'limit', type: 'string', description: 'Optional count (1-6, default 4)', required: false },
+    ],
+    sampleArgs: { query: 'Starship' },
+    execute: async (args) => {
+      const limit = Math.min(Math.max(parseInt(String(args.limit ?? '4')) || 4, 1), 6)
+      const query = args.query ? String(args.query).trim().slice(0, 100) : ''
+      const url = query
+        ? `https://api.spaceflightnewsapi.net/v4/articles/?limit=${limit}&search=${encodeURIComponent(query)}`
+        : `https://api.spaceflightnewsapi.net/v4/articles/?limit=${limit}`
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'NEXUS-AI/1.0' },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!res.ok) throw new Error(`Spaceflight News API responded ${res.status}`)
+      const data = (await res.json()) as {
+        count?: number
+        results?: Array<{
+          title?: string
+          summary?: string
+          url?: string
+          image_url?: string
+          news_site?: string
+          published_at?: string
+        }>
+      }
+      const items = (data.results ?? []).slice(0, limit)
+      if (items.length === 0) throw new Error(query ? `No spaceflight news found for "${query}"` : 'No spaceflight news available right now')
+      return {
+        query: query || null,
+        totalAvailable: data.count,
+        articles: items.map((a) => ({
+          title: a.title ?? '',
+          source: a.news_site ?? null,
+          summary: (a.summary ?? '').replace(/\s+/g, ' ').trim().slice(0, 280),
+          url: a.url ?? null,
+          imageUrl: a.image_url ?? null,
+          publishedAt: a.published_at ?? null,
+        })),
+      }
+    },
+  },
+
+  // Source: https://air-quality-api.open-meteo.com/v1/air-quality (public-apis: Environment → Open-Meteo)
+  // Free, no API key, no auth. Same vendor as the existing `forecast` connector.
+  // Returns PM2.5, PM10, carbon monoxide, ozone, NO2, SO2 — common air-quality metrics.
+  // Pairs naturally with geocode → air_quality (place → coords → pollution) and complements
+  // the weather/forecast connectors for health-conscious "is the air safe today" questions.
+  {
+    id: 'air_quality',
+    name: 'Air Quality',
+    category: 'web',
+    description: 'Current air pollution levels (PM2.5, PM10, CO, O3, NO2, SO2) by coordinates.',
+    llmDescription:
+      'Gets current air quality readings for latitude/longitude coordinates. Returns PM2.5, PM10 (particulates), carbon monoxide (CO), ozone (O3), nitrogen dioxide (NO2), sulphur dioxide (SO2) in μg/m³. Chain after the geocode connector for "air quality in [city]" questions, or use directly when the user gives coordinates. Use for health, asthma, pollution, outdoor activity, and "is the air safe" questions.',
+    params: [
+      { name: 'latitude', type: 'string', description: 'Latitude, e.g. 25.1972', required: true },
+      { name: 'longitude', type: 'string', description: 'Longitude, e.g. 55.2744', required: true },
+    ],
+    sampleArgs: { latitude: '25.1972', longitude: '55.2744' },
+    execute: async (args) => {
+      const lat = String(args.latitude).replace(/[^0-9.\-]/g, '')
+      const lon = String(args.longitude).replace(/[^0-9.\-]/g, '')
+      if (!lat || !lon) throw new Error('latitude and longitude are required')
+      // NOTE: use fetchJson() helper (not raw fetch) — Open-Meteo rejects requests
+      // without a User-Agent header (returns ETIMEDOUT). The helper sets one.
+      const url =
+        `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}` +
+        `&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,uv_index` +
+        `&timezone=auto`
+      const data = (await fetchJson(url)) as {
+        current?: Record<string, number | string>
+        current_units?: Record<string, string>
+      }
+      const c = data.current ?? {}
+      const units = data.current_units ?? {}
+      // Translate raw field names into friendly labels for the LLM
+      return {
+        coordinates: { lat, lon },
+        measuredAt: c.time ?? null,
+        readings: {
+          pm25: { value: c.pm2_5 ?? null, unit: units.pm2_5 ?? 'μg/m³' },
+          pm10: { value: c.pm10 ?? null, unit: units.pm10 ?? 'μg/m³' },
+          carbonMonoxide: { value: c.carbon_monoxide ?? null, unit: units.carbon_monoxide ?? 'μg/m³' },
+          nitrogenDioxide: { value: c.nitrogen_dioxide ?? null, unit: units.nitrogen_dioxide ?? 'μg/m³' },
+          sulphurDioxide: { value: c.sulphur_dioxide ?? null, unit: units.sulphur_dioxide ?? 'μg/m³' },
+          ozone: { value: c.ozone ?? null, unit: units.ozone ?? 'μg/m³' },
+          uvIndex: { value: c.uv_index ?? null, unit: units.uv_index ?? 'index' },
+        },
+        // WHO 24-hour guideline benchmarks — let the LLM contextualise for the user
+        benchmarks: {
+          pm25_who_24h_ugm3: 15,
+          pm10_who_24h_ugm3: 45,
+          note: 'WHO 2021 24-hour air-quality guidelines. Higher = worse. PM2.5 above 15 μg/m³ exceeds the daily limit.',
+        },
+      }
+    },
+  },
+
+  // Source: https://itunes.apple.com/search (public-apis: Music → iTunes Search API)
+  // Free, no API key, no auth. Returns rich JSON: track name, artist, album, artwork, preview clip URL,
+  // release date, genre. Supports entity filter for song/podcast/audiobook/movie/tv-episode.
+  // Distinct from the existing `poetry` connector (classic poems only) — this is popular
+  // music, podcasts, audiobooks, and media. Useful for "find me a song by X", "podcasts about Y",
+  // audiobook discovery, and song identification.
+  {
+    id: 'music',
+    name: 'Music & Podcasts',
+    category: 'knowledge',
+    description: 'Search songs, podcasts, audiobooks, and albums on the iTunes catalog.',
+    llmDescription:
+      'Searches the iTunes / Apple Music catalog for songs, podcasts, audiobooks, and albums. Returns the track name, artist, album/collection, artwork URL, preview clip URL (30-second audio), release date, and genre. Use entity=song for music, entity=podcast for shows, entity=audiobook for audiobooks. Use for "find me a song by [artist]", "podcasts about [topic]", "audiobooks by [author]", music discovery, or "what album is X from" questions.',
+    params: [
+      { name: 'query', type: 'string', description: 'Search term: song name, artist, album, or podcast topic', required: true },
+      { name: 'entity', type: 'string', description: 'Optional: song, podcast, audiobook, musicArtist, or album (default song)', required: false },
+      { name: 'limit', type: 'string', description: 'Optional count (1-6, default 4)', required: false },
+    ],
+    sampleArgs: { query: 'Daft Punk', entity: 'song' },
+    execute: async (args) => {
+      const term = String(args.query).trim().slice(0, 100)
+      if (!term) throw new Error('A search term is required')
+      const entityRaw = args.entity ? String(args.entity).trim().toLowerCase() : 'song'
+      const entity = ['song', 'podcast', 'audiobook', 'musicalbum', 'musicartist', 'album'].includes(entityRaw)
+        ? entityRaw
+        : 'song'
+      const limit = Math.min(Math.max(parseInt(String(args.limit ?? '4')) || 4, 1), 6)
+      const params = new URLSearchParams({
+        term,
+        entity,
+        limit: String(limit),
+        media: entity === 'audiobook' ? 'audiobook' : entity === 'podcast' ? 'podcast' : 'music',
+      })
+      const res = await fetch(`https://itunes.apple.com/search?${params}`, {
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!res.ok) throw new Error(`iTunes Search API responded ${res.status}`)
+      const data = (await res.json()) as {
+        resultCount?: number
+        results?: Array<{
+          trackName?: string
+          artistName?: string
+          collectionName?: string
+          artworkUrl100?: string
+          previewUrl?: string
+          trackViewUrl?: string
+          collectionViewUrl?: string
+          releaseDate?: string
+          primaryGenreName?: string
+          trackTimeMillis?: number
+          kind?: string
+        }>
+      }
+      const items = (data.results ?? []).slice(0, limit)
+      if (items.length === 0) throw new Error(`No results for "${term}"`)
+      return {
+        query: term,
+        entity,
+        resultCount: data.resultCount ?? items.length,
+        results: items.map((r) => ({
+          title: r.trackName ?? r.collectionName ?? null,
+          artist: r.artistName ?? null,
+          album: r.collectionName ?? null,
+          genre: r.primaryGenreName ?? null,
+          artwork: r.artworkUrl100 ?? null,
+          previewUrl: r.previewUrl ?? null,
+          itunesUrl: r.trackViewUrl ?? r.collectionViewUrl ?? null,
+          releaseDate: r.releaseDate ?? null,
+          durationMs: r.trackTimeMillis ?? null,
+        })),
+      }
+    },
+  },
 ]
 
 export const CONNECTOR_MAP = new Map(CONNECTORS.map((c) => [c.id, c]))
