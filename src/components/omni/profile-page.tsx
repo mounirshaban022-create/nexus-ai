@@ -18,6 +18,15 @@ import {
   MessageSquare,
   Calendar,
   MapPin,
+  Sun,
+  Moon,
+  Languages,
+  RotateCcw,
+  CloudCog,
+  ShieldCheck,
+  Scale,
+  BadgeCheck,
+  BrainCircuit,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth, type AuthUser } from '@/hooks/use-auth'
@@ -397,9 +406,14 @@ export function ProfilePage(props: ProfilePageProps) {
                       onClick={onOpenConnect}
                       className="flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-secondary/60"
                     >
-                      <span className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-muted-foreground" aria-hidden />
-                        Email &amp; apps
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                          <Mail className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span className="flex flex-col items-start leading-tight">
+                          <span className="font-medium">Email &amp; apps</span>
+                          <span className="text-[11px] text-muted-foreground">Connect Gmail and other services</span>
+                        </span>
                       </span>
                       <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
@@ -408,15 +422,27 @@ export function ProfilePage(props: ProfilePageProps) {
                       onClick={onToggleTheme}
                       className="flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-secondary/60"
                     >
-                      <span>Theme</span>
-                      <span className="text-muted-foreground capitalize">{theme}</span>
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600">
+                          {theme === 'light' ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
+                        </span>
+                        <span className="font-medium">Appearance</span>
+                      </span>
+                      <span className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-[11px] font-medium capitalize text-muted-foreground">
+                        {theme === 'light' ? '☀' : '☾'} {theme}
+                      </span>
                     </button>
                     <button
                       type="button"
                       onClick={onToggleLanguage}
                       className="flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-secondary/60"
                     >
-                      <span>Language</span>
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600">
+                          <Languages className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span className="font-medium">Language</span>
+                      </span>
                       <span className="text-muted-foreground">
                         {language === 'en' ? 'English' : 'العربية'}
                       </span>
@@ -426,7 +452,15 @@ export function ProfilePage(props: ProfilePageProps) {
                       onClick={onRerunOnboarding}
                       className="flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-secondary/60"
                     >
-                      <span>Re-run onboarding</span>
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/10 text-rose-600">
+                          <RotateCcw className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span className="flex flex-col items-start leading-tight">
+                          <span className="font-medium">Personalize NEXUS</span>
+                          <span className="text-[11px] text-muted-foreground">Re-run the setup wizard</span>
+                        </span>
+                      </span>
                       <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
                     <button
@@ -434,9 +468,11 @@ export function ProfilePage(props: ProfilePageProps) {
                       onClick={onOpenPrivacy}
                       className="flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-secondary/60"
                     >
-                      <span className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-                        Privacy Policy
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+                          <ShieldCheck className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span className="font-medium">Privacy Policy</span>
                       </span>
                       <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>
@@ -445,9 +481,11 @@ export function ProfilePage(props: ProfilePageProps) {
                       onClick={onOpenTerms}
                       className="flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-secondary/60"
                     >
-                      <span className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-                        Terms of Service
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+                          <Scale className="h-4 w-4" aria-hidden />
+                        </span>
+                        <span className="font-medium">Terms of Service</span>
                       </span>
                       <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
                     </button>

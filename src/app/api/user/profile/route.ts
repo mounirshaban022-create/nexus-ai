@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { supabaseUpsert } from '@/lib/supabase'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -143,6 +144,24 @@ export async function PATCH(req: NextRequest) {
     data,
     select: PROFILE_SELECT,
   })
+
+  // Cloud sync: mirror the profile to Supabase (no-op when unconfigured)
+  void supabaseUpsert('profiles', {
+    id: updated.id,
+    email: updated.email,
+    name: updated.name,
+    avatar_url: updated.avatarUrl,
+    bio: updated.bio,
+    location: updated.location,
+    timezone: updated.timezone,
+    language: updated.language,
+    job_title: updated.jobTitle,
+    website: updated.website,
+    notifications: updated.notifications,
+    interests: updated.interests,
+    comm_style: updated.commStyle,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' })
 
   let interests: string[] = []
   try {

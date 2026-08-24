@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { hashPassword, signToken, setSessionCookie } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { supabaseUpsert } from '@/lib/supabase'
 
 export const runtime = 'nodejs'
 
@@ -62,6 +63,14 @@ export async function POST(req: NextRequest) {
     },
     select: { id: true, email: true, name: true },
   })
+
+  // Cloud sync: create the profile row in Supabase (no-op when unconfigured)
+  void supabaseUpsert('profiles', {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    created_at: new Date().toISOString(),
+  }, { onConflict: 'id' })
 
   const token = await signToken({ userId: user.id })
   const res = NextResponse.json({ user }, { status: 201 })

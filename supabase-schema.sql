@@ -4,6 +4,25 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- ===== USER PROFILES (local auth mirror) =====
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY,
+  email TEXT UNIQUE,
+  name TEXT,
+  avatar_url TEXT,
+  bio TEXT,
+  location TEXT,
+  timezone TEXT,
+  language TEXT,
+  job_title TEXT,
+  website TEXT,
+  notifications TEXT DEFAULT '{}',
+  interests TEXT DEFAULT '[]',
+  comm_style TEXT DEFAULT 'balanced',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ===== CHAT SESSIONS =====
 CREATE TABLE IF NOT EXISTS chat_sessions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

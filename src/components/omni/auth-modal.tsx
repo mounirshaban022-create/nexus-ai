@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2, X } from 'lucide-react'
+import { Loader2, LogIn, Mail, ShieldCheck, UserPlus, X } from 'lucide-react'
+import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/hooks/use-auth'
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export interface AuthModalProps {
   open: boolean
@@ -13,50 +16,27 @@ export interface AuthModalProps {
   initialMode?: 'signin' | 'signup'
 }
 
-const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
-
 export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalProps) {
   const auth = useAuth()
   const [mode, setMode] = useState<'signin' | 'signup'>(initialMode)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [localError, setLocalError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [localError, setLocalError] = useState<string | null>(null)
+  const firstFieldRef = useRef<HTMLInputElement>(null)
 
-  const firstFieldRef = useRef<HTMLInputElement | null>(null)
-
-  // Sync the mode with the initialMode prop whenever the modal opens.
-  // auth.clearError is a stable zustand action; intentionally omitted from deps.
   useEffect(() => {
     if (open) {
       setMode(initialMode)
       setLocalError(null)
       auth.clearError()
+      setTimeout(() => firstFieldRef.current?.focus(), 120)
     }
   }, [open, initialMode])
 
-  // Auto-focus the first input when the modal opens.
   useEffect(() => {
-    if (open && firstFieldRef.current) {
-      const id = window.setTimeout(() => firstFieldRef.current?.focus(), 30)
-      return () => window.clearTimeout(id)
-    }
-  }, [open, mode])
-
-  // Close on Escape.
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  // Show store errors inline (e.g. "Invalid email or password.").
-  useEffect(() => {
-    if (auth.error) setLocalError(auth.error)
+    if (auth.error) setLocalError(null)
   }, [auth.error])
 
   if (!open) return null
@@ -64,9 +44,7 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
   const isSignup = mode === 'signup'
 
   function validate(): string | null {
-    if (isSignup) {
-      if (!name.trim()) return 'Please enter your name.'
-    }
+    if (isSignup && !name.trim()) return 'Please enter your name.'
     if (!EMAIL_REGEX.test(email.trim())) return 'Please enter a valid email address.'
     if (password.length < 8) return 'Password must be at least 8 characters.'
     return null
@@ -90,7 +68,6 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
       } else {
         await auth.signIn(email.trim(), password)
       }
-      // Success — close modal & reset fields.
       setName('')
       setEmail('')
       setPassword('')
@@ -103,91 +80,68 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
     }
   }
 
+  const errorText = localError ?? auth.error
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={isSignup ? 'Create account' : 'Sign in'}
       onClick={onClose}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
+        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 8 }}
         transition={{ duration: 0.18, ease: 'easeOut' }}
-        className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl"
+        className="w-full max-w-sm overflow-hidden rounded-3xl border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex rounded-xl border border-border p-1">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('signin')
-                setLocalError(null)
-                auth.clearError()
-              }}
-              aria-pressed={mode === 'signin'}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === 'signin'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('signup')
-                setLocalError(null)
-                auth.clearError()
-              }}
-              aria-pressed={mode === 'signup'}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === 'signup'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Create account
-            </button>
-          </div>
+        {/* Brand header */}
+        <div className="relative border-b border-border/60 bg-gradient-to-b from-primary/[0.07] to-transparent px-6 pb-5 pt-6">
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
+          <div className="flex items-center gap-3">
+            <Image src="/nexus-mark.png" alt="NEXUS" width={44} height={44} className="h-11 w-11 rounded-2xl shadow-md shadow-primary/20" />
+            <div>
+              <h2 className="text-lg font-semibold leading-tight">
+                {isSignup ? 'Create your account' : 'Welcome back'}
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {isSignup
+                  ? 'Save chats, projects & files across devices'
+                  : 'Continue where you left off'}
+              </p>
+            </div>
+          </div>
         </div>
 
-        <h2 className="text-lg font-semibold">
-          {isSignup ? 'Create your NEXUS account' : 'Welcome back to NEXUS'}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {isSignup
-            ? 'Sign up to save chats, projects, and generated files.'
-            : 'Sign in to continue where you left off.'}
-        </p>
-
-        <form onSubmit={submit} className="mt-4 flex flex-col gap-3">
+        {/* Form */}
+        <form onSubmit={submit} className="flex flex-col gap-3.5 px-6 py-5">
           {isSignup && (
             <div className="flex flex-col gap-1.5">
               <label htmlFor="auth-name" className="text-xs font-medium text-foreground">
                 Name
               </label>
-              <Input
-                id="auth-name"
-                ref={firstFieldRef}
-                type="text"
-                autoComplete="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                className="h-11 rounded-xl"
-              />
+              <div className="relative">
+                <UserPlus className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" aria-hidden />
+                <Input
+                  id="auth-name"
+                  ref={firstFieldRef}
+                  type="text"
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  className="h-11 rounded-xl pl-10"
+                />
+              </div>
             </div>
           )}
 
@@ -195,67 +149,77 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
             <label htmlFor="auth-email" className="text-xs font-medium text-foreground">
               Email
             </label>
-            <Input
-              id="auth-email"
-              ref={isSignup ? undefined : firstFieldRef}
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="h-11 rounded-xl"
-            />
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" aria-hidden />
+              <Input
+                id="auth-email"
+                ref={isSignup ? undefined : firstFieldRef}
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="h-11 rounded-xl pl-10"
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="auth-password" className="text-xs font-medium text-foreground">
               Password
             </label>
-            <Input
-              id="auth-password"
-              type="password"
-              autoComplete={isSignup ? 'new-password' : 'current-password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
-              className="h-11 rounded-xl"
-            />
+            <div className="relative">
+              <ShieldCheck className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" aria-hidden />
+              <Input
+                id="auth-password"
+                type="password"
+                autoComplete={isSignup ? 'new-password' : 'current-password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className="h-11 rounded-xl pl-10"
+              />
+            </div>
           </div>
 
-          {localError && (
+          {errorText && (
             <p
               role="alert"
               className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             >
-              {localError}
+              {errorText}
             </p>
           )}
 
+          {/* ONE clear primary action */}
           <Button
             type="submit"
             disabled={submitting || auth.loading}
-            className="mt-1 h-11 w-full gap-2 rounded-xl bg-primary text-primary-foreground"
+            className="mt-1 h-12 w-full gap-2 rounded-xl bg-primary text-[15px] font-semibold text-primary-foreground shadow-md shadow-primary/20 transition hover:brightness-110"
           >
             {submitting || auth.loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
-            ) : null}
+            ) : (
+              <LogIn className="h-4 w-4" aria-hidden />
+            )}
             {isSignup ? 'Create account' : 'Sign in'}
           </Button>
-        </form>
 
-        <button
-          type="button"
-          onClick={() => {
-            setMode(isSignup ? 'signin' : 'signup')
-            setLocalError(null)
-            auth.clearError()
-          }}
-          className="mt-4 w-full text-center text-xs text-muted-foreground hover:text-foreground"
-        >
-          {isSignup
-            ? 'Already have an account? Sign in'
-            : "Don't have an account? Create one"}
-        </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode(isSignup ? 'signin' : 'signup')
+              setLocalError(null)
+              auth.clearError()
+            }}
+            className="mt-1 w-full text-center text-xs text-muted-foreground transition hover:text-foreground"
+          >
+            {isSignup ? 'Already have an account? ' : "Don't have an account? "}
+            <span className="font-semibold text-primary">
+              {isSignup ? 'Sign in' : 'Create one'}
+            </span>
+          </button>
+        </form>
       </motion.div>
     </div>
   )

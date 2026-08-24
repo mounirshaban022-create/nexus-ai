@@ -808,7 +808,15 @@ export async function POST(req: NextRequest) {
      * activeDoc context. The parsed content is injected into the LLM
      * conversation so the AI can discuss it, and the edit_document /
      * pdf_operation tools can operate on it.
+     *
+     * SESSION DOCUMENT MEMORY: the parsed document is remembered per
+     * session, so FOLLOW-UP messages ("what about page 2?", "now edit
+     * the intro") still see it. This fixes the "AI doesn't see my
+     * document" problem on the second and later messages.
      * ------------------------------------------------------------------ */
+    const globalForDocs = globalThis as unknown as { chatSessionDocs?: Map<string, ActiveDoc> }
+    const sessionDocs = globalForDocs.chatSessionDocs ?? (globalForDocs.chatSessionDocs = new Map())
+
     let activeDoc: ActiveDoc | null = null
     let attachmentContextMessage = ''
     if (attachment) {
@@ -852,7 +860,7 @@ export async function POST(req: NextRequest) {
             `DOCUMENT "${activeDoc.title}":\n${activeDoc.text.slice(0, 24000)}\n` +
             `You can answer questions about this document directly from its content (for spreadsheet data, compute real numbers — use run_code for calculations). If the user asks to EDIT/CHANGE/REWRITE the document, use the edit_document tool. ` +
             `${fmt === 'pdf' ? 'If the user asks for PDF operations (rotate/delete pages/reorder/split/watermark etc.), use the pdf_operation tool. ' : ''}` +
-            `If they want this data as an Excel file, use create_spreadsheet.]`
+            `If they want this data as an Excel file, use create_spreadsheet. This document stays available for the REST of the conversation — answer follow-up questions about it without being re-attached.]`
           console.log(`[api/chat] attachment parsed: ${attachment.filename} (${fmt}, ${activeDoc.text.length} chars)`)
         }
       } catch (attErr) {
@@ -1053,6 +1061,25 @@ export async function POST(req: NextRequest) {
           ]
           // Include the new user message (history was fetched before insert)
           llmMessages.push({ role: 'user', content: trimmed })
+
+          // SESSION DOCUMENT MEMORY (follow-up messages): if this message
+          // has NO new attachment but the session already has a document
+          // (attached earlier in the conversation), restore it so the AI
+          // can still answer questions about it and edit/PDF-operate on it.
+          if (!attachment && session?.id) {
+            const stored = sessionDocs.get(session.id)
+            if (stored) {
+              activeDoc = stored
+              attachmentContextMessage =
+                `[CONTEXT — the user attached the document "${stored.filename}" earlier in this conversation. Its full content remains available below.\n\n` +
+                `DOCUMENT "${stored.title}":\n${stored.text.slice(0, 24000)}\n` +
+                `Continue answering follow-up questions about this document from its content. The edit_document and ${stored.format === 'pdf' ? 'pdf_operation' : 'file'} tools can still operate on it.]`
+            }
+          } else if (attachment && session?.id && activeDoc) {
+            // Remember the newly-attached document for the rest of the session
+            sessionDocs.set(session.id, activeDoc)
+          }
+
           // Document attachment context: inject the parsed document content
           // BEFORE the user's message so the AI sees it as context.
           if (attachmentContextMessage) {
