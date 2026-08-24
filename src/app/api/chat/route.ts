@@ -44,7 +44,7 @@ export const maxDuration = 120
  */
 
 const requestSchema = z.object({
-  message: z.string().min(1).max(8000),
+  message: z.string().max(8000).default(''), // can be empty when only an attachment is sent
   sessionId: z.string().max(64).optional().nullable(),
   thinking: z.boolean().optional().default(false),
   language: z.enum(['en', 'ar']).optional().default('en'),
@@ -814,6 +814,12 @@ export async function POST(req: NextRequest) {
     }
     const { message, sessionId, thinking: thinkingEnabled, language, openArtifact, projectId, attachment } = parsed.data
     const trimmed = message.trim()
+    // Empty message with no attachment = nothing to process
+    if (!trimmed && !attachment) {
+      return NextResponse.json({ error: 'Type a message or attach a file.' }, { status: 400 })
+    }
+    // Attachment-only send: give the AI a default prompt so it summarizes
+    const effectiveMessage = trimmed || 'The user attached a document. Briefly summarize what it contains and offer to help with it.'
 
     /* ------------------------------------------------------------------
      * DOCUMENT/PDF ATTACHMENT — parse the attached file and build the
@@ -1039,7 +1045,7 @@ export async function POST(req: NextRequest) {
             'I was created by **Mounir Shaaban** — the creator and owner of NEXUS AI. ' +
             "He's from **Mansoura, Egypt**. 🇪🇬🚀 If you'd like, tell me what you want to build today!" 
           const userMsg = await db.chatMessage.create({
-            data: { sessionId: session!.id, role: 'user', content: trimmed },
+            data: { sessionId: session!.id, role: 'user', content: trimmed || '[attached file]' },
           })
           const saved = await db.chatMessage.create({
             data: { sessionId: session!.id, role: 'assistant', content: answer },
@@ -1053,7 +1059,7 @@ export async function POST(req: NextRequest) {
         try {
           // Persist user message
           const userMessage = await db.chatMessage.create({
-            data: { sessionId: session!.id, role: 'user', content: trimmed },
+            data: { sessionId: session!.id, role: 'user', content: trimmed || '[attached file]' },
           })
           // Mirror to Supabase (Phase 0 Bug 2: verifiedUserId replaces the
           // forged-header path; the cloud row is only written for an
@@ -1074,7 +1080,7 @@ export async function POST(req: NextRequest) {
             ...history.slice(-MAX_HISTORY).map((m) => ({ role: m.role, content: m.content })),
           ]
           // Include the new user message (history was fetched before insert)
-          llmMessages.push({ role: 'user', content: trimmed })
+          llmMessages.push({ role: 'user', content: effectiveMessage })
 
           // SESSION DOCUMENT MEMORY: persist the attachment context as a
           // DATABASE chat message when first attached, so it survives

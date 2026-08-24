@@ -292,8 +292,17 @@ function NexusApp() {
     // Block only when there's truly nothing to send
     if (sending) return
     if (!msg && !hasPendingFile && !chatAttachment) return
-    // For plain chat (no tool), still require text OR an attachment
-    if (!msg && !hasPendingTool && !chatAttachment) return
+
+    // REBUILT ATTACHMENT FLOW: If a chat attachment exists AND a tool is
+    // pending, CANCEL the pending tool — the user clearly wants the AI to
+    // process the attached file in chat, not run a tool. This fixes the
+    // bug where attachments were silently dropped when a tool was active.
+    let effectiveHasPendingTool = hasPendingTool
+    if (hasPendingTool && chatAttachment) {
+      toolEngine.clear()
+      effectiveHasPendingTool = false
+    }
+
     // Display the user's text (or the file name as a placeholder)
     const userDisplay = msg || (hasPendingFile ? `📄 ${toolEngine.pendingFile?.name ?? ''}`.trim() : '') || (chatAttachment ? `📎 ${chatAttachment.filename}` : '')
     if (userDisplay) {
@@ -309,8 +318,9 @@ function NexusApp() {
     setChatAttachment(null)
     setSending(true)
     try {
-      // If a tool is pending, route to the tool engine
-      if (hasPendingTool) {
+      // If a tool is pending (and NO attachment — attachment cancels tools
+      // above), route to the tool engine
+      if (effectiveHasPendingTool) {
         await toolEngine.execute(msg)
         return
       }
@@ -763,7 +773,7 @@ function NexusApp() {
             />
           </div>
           <div className="px-3 pt-2">
-            <button onClick={() => { switchTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null) }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
+            <button onClick={() => { switchTab('chat'); setMessages([]); toolEngine.clear(); setCurrentChatSessionId(null); setActiveProjectId(null); setActiveProjectName(null); setChatAttachment(null) }} className="flex h-10 w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 text-sm font-medium transition hover:border-primary/30 hover:bg-secondary/60 hover:shadow-sm">
               <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Plus className="h-3.5 w-3.5" />
               </span>
@@ -1049,7 +1059,7 @@ function NexusApp() {
                   )}
                   {/* Chat attachment chip — the attached document travels with
                       the next message; the AI can read, edit, or run PDF ops on it. */}
-                  {chatAttachment && !pendingToolDef && (
+                  {chatAttachment && (
                     <div className="flex items-center gap-2 self-start rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5">
                       <PaperclipHorizontal className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
                       <span className="max-w-[220px] truncate text-xs font-medium text-emerald-700">{chatAttachment.filename}</span>
