@@ -469,7 +469,14 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
                       <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/70">Nexus voices</p>
                       <div className="space-y-1">
                         {NEXUS_VOICES.map(v => (
-                          <VoiceRow key={v.id} v={v} active={ttsVoice === v.id} onPick={() => { setTtsVoice(v.id); setShowVoicePicker(false); toast({ title: `Voice: ${v.label}`, description: v.language }) }} />
+                          <VoiceRow key={v.id} v={v} active={ttsVoice === v.id} onPick={() => {
+                            setTtsVoice(v.id)
+                            setShowVoicePicker(false)
+                            // If we're mid-listen, restart recognition so the
+                            // next utterance synthesizes with the new voice.
+                            if (stateRef.current === 'listening') { stopRecognition(); setTimeout(() => startListening(), 150) }
+                            toast({ title: `Voice: ${v.label}`, description: v.language })
+                          }} />
                         ))}
                       </div>
                     </div>
@@ -477,7 +484,14 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
                       <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/70">Neural voices · {LANGUAGES.find(l => l.code === lang)?.label}</p>
                       <div className="space-y-1">
                         {voicesForLang(lang).filter(v => v.provider === 'edge').map(v => (
-                          <VoiceRow key={v.id} v={v} active={ttsVoice === v.id} onPick={() => { setTtsVoice(v.id); setShowVoicePicker(false); toast({ title: `Voice: ${v.label}`, description: v.language }) }} />
+                          <VoiceRow key={v.id} v={v} active={ttsVoice === v.id} onPick={() => {
+                            setTtsVoice(v.id)
+                            setShowVoicePicker(false)
+                            // Restart an active listening session so the next
+                            // turn uses the new voice immediately.
+                            if (stateRef.current === 'listening') { stopRecognition(); setTimeout(() => startListening(), 150) }
+                            toast({ title: `Voice: ${v.label}`, description: v.language })
+                          }} />
                         ))}
                       </div>
                     </div>
@@ -503,7 +517,15 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {LANGUAGES.map(l => (
-                      <button key={l.code} onClick={() => { setLang(l.code); setTtsVoice(l.voice); setShowLangPicker(false) }}
+                      <button key={l.code} onClick={() => {
+                        setLang(l.code)
+                        setTtsVoice(l.voice)
+                        setShowLangPicker(false)
+                        // Restart an active listening session so speech
+                        // recognition switches to the new language IMMEDIATELY
+                        // (the old recognition instance keeps its old lang).
+                        if (stateRef.current === 'listening') { stopRecognition(); setTimeout(() => startListening(), 150) }
+                      }}
                         className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition ${lang === l.code ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-secondary text-foreground'}`}>
                         <span>{l.label}</span>
                         {lang === l.code && <Check className="h-3.5 w-3.5" />}

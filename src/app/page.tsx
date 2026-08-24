@@ -354,6 +354,55 @@ function NexusApp() {
 
       // Helper: process one NDJSON line. Returns true if a streaming bubble
       // was opened (so the caller can hide the shimmer placeholder).
+      //
+      // WORD-BY-WORD RENDERING: raw deltas arrive in irregular bursts (a
+      // multi-word chunk, then silence, then another). To make replies feel
+      // ALIVE, deltas are fed into a smooth-drip queue that emits one small
+      // fragment (~1-2 words) every ~24ms — like a person typing. The
+      // queue always drains fully before the bubble finalizes.
+      let dripQueue: string[] = []
+      let dripTimer: number | null = null
+      let dripTargetId: string | null = null
+      const appendToMessage = (id: string, fragment: string) => {
+        setMessages(prev => {
+          if (!id) return prev
+          const next = [...prev]
+          const idx = next.findIndex(m => m.id === id)
+          if (idx >= 0) {
+            const m = next[idx]
+            next[idx] = { ...m, content: (m.content || '') + fragment }
+          }
+          return next
+        })
+      }
+      const startDrip = () => {
+        if (dripTimer !== null) return
+        dripTimer = window.setInterval(() => {
+          if (dripQueue.length === 0) {
+            // Nothing queued — pause the timer (restarted on next delta)
+            if (dripTimer !== null) { window.clearInterval(dripTimer); dripTimer = null }
+            return
+          }
+          // Emit 1 fragment per tick (~24ms) — feels like typing
+          const frag = dripQueue.shift()!
+          if (dripTargetId) appendToMessage(dripTargetId, frag)
+        }, 24)
+      }
+      const queueDelta = (id: string, delta: string) => {
+        dripTargetId = id
+        // Split the delta into word-ish fragments (keep trailing spaces)
+        const words = delta.match(/\S+\s*|\s+/g) ?? [delta]
+        dripQueue.push(...words)
+        startDrip()
+      }
+      const flushDrip = () => {
+        if (dripTimer !== null) { window.clearInterval(dripTimer); dripTimer = null }
+        const rest = dripQueue.join('')
+        dripQueue = []
+        if (rest && dripTargetId) appendToMessage(dripTargetId, rest)
+        dripTargetId = null
+      }
+
       const handleLine = (line: string) => {
         const trimmed = line.trim()
         if (!trimmed) return
@@ -371,20 +420,12 @@ function NexusApp() {
           } else if (e.type === 'assistant_delta') {
             const delta = e.delta ?? ''
             if (!delta) return
-            // Capture the current streamingId locally so the updater sees the
-            // correct value even if streamingId has since been mutated.
-            const id = streamingId
-            setMessages(prev => {
-              if (!id) return prev
-              const next = [...prev]
-              const idx = next.findIndex(m => m.id === id)
-              if (idx >= 0) {
-                const m = next[idx]
-                next[idx] = { ...m, content: (m.content || '') + delta }
-              }
-              return next
-            })
+            // Smooth word-by-word drip (feels alive vs. burst-append)
+            if (streamingId) queueDelta(streamingId, delta)
           } else if (e.type === 'assistant_end') {
+            // Flush any pending drip fragments BEFORE finalizing so the
+            // complete text is present when attachments are applied.
+            flushDrip()
             // Capture the current streamingId locally so the updater sees the
             // correct value even if streamingId has since been mutated. This
             // is the bug that previously caused the second assistant_end's
@@ -452,6 +493,9 @@ function NexusApp() {
       buf += decoder.decode() // flush remaining UTF-8 bytes
       if (buf.trim()) handleLine(buf)
       buf = ''
+      // Final safety: drain any remaining drip fragments (e.g. when the
+      // stream ended without an assistant_end event).
+      flushDrip()
     } catch (err: any) {
       setStreamingActive(false)
       setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: `⚠️ ${err.message || 'Something went wrong.'}` }])

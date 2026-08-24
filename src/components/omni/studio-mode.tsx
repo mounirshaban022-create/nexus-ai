@@ -692,7 +692,7 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
             {/* Document tab */}
             <div className={tab === 'doc' ? 'flex h-full' : 'hidden'}>
               {/* Editor area */}
-              <div className="min-w-0 flex-1">
+              <div className="min-h-0 min-w-0 flex-1">
                 {!docStarted && !initialMarkdown ? (
                   <div className="omni-scroll h-full overflow-y-auto">
                     <div className="mx-auto max-w-3xl px-4 py-10">
@@ -729,7 +729,9 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
                     </div>
                   </div>
                 ) : (
-                  <div className="mx-auto h-full w-full max-w-4xl px-2 sm:px-6">
+                  /* The editor area SCROLLS: overflow-y-auto gives long
+                     documents a proper scroll container (was clipped). */
+                  <div className="omni-scroll mx-auto h-full w-full max-w-4xl overflow-y-auto px-2 pb-16 sm:px-6 sm:pb-10">
                     <StudioDocEditor
                       key={initialMarkdown === undefined ? 'fresh' : `md-${initialMarkdown.length}-${initialMarkdown.slice(0, 40)}`}
                       initialMarkdown={initialMarkdown}
