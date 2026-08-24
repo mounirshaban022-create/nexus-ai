@@ -46,6 +46,7 @@ import { usePreferences } from '@/lib/preferences'
 import { useToast } from '@/hooks/use-toast'
 import { Markdown } from './markdown'
 import { STUDIO_TEMPLATES, TEMPLATE_CATEGORIES, type StudioTemplate } from './studio-templates'
+import { StudioPdf } from './studio-pdf'
 
 // Heavy editor is lazy-loaded (client only) — keeps the main bundle fast.
 const StudioDocEditor = dynamic(
@@ -77,7 +78,7 @@ type CanvasApiLike = {
   loadSeeds: (seeds: CanvasElementSeed[]) => void
 }
 
-type StudioTab = 'doc' | 'canvas'
+type StudioTab = 'doc' | 'canvas' | 'pdf'
 
 export interface StudioModeProps {
   open: boolean
@@ -497,6 +498,15 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
               >
                 <PenLine className="h-3.5 w-3.5" aria-hidden /> Canvas
               </button>
+              <button
+                onClick={() => setTab('pdf')}
+                aria-pressed={tab === 'pdf'}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  tab === 'pdf' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <FileDown className="h-3.5 w-3.5" aria-hidden /> PDF
+              </button>
             </div>
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -832,6 +842,16 @@ export function StudioMode({ open, onClose }: StudioModeProps) {
               <StudioCanvas
                 onReady={(api) => {
                   canvasRef.current = api as unknown as CanvasApiLike
+                }}
+              />
+            </div>
+
+            {/* PDF Tools tab — Stirling-PDF engine */}
+            <div className={tab === 'pdf' ? 'absolute inset-0' : 'hidden'}>
+              <StudioPdf
+                onDownloadFile={(file) => {
+                  setExportedFile(file)
+                  setTab('pdf')
                 }}
               />
             </div>

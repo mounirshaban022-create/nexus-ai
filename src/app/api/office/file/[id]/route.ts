@@ -12,6 +12,8 @@ const MIME_TYPES: Record<string, string> = {
   pdf: 'application/pdf',
   html: 'text/html; charset=utf-8',
   txt: 'text/plain; charset=utf-8',
+  zip: 'application/zip',
+  png: 'image/png',
 }
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -24,7 +26,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     }
 
     // Find the file regardless of extension
-    for (const ext of ['docx', 'xlsx', 'pptx', 'md', 'pdf', 'html', 'txt']) {
+    for (const ext of ['docx', 'xlsx', 'pptx', 'md', 'pdf', 'html', 'txt', 'zip', 'png']) {
       try {
         const filePath = path.join(FILES_DIR, `${id}.${ext}`)
         const buffer = await readFile(filePath)
