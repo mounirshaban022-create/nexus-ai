@@ -10,6 +10,7 @@ import {
   Loader2,
   PlugZap,
   Power,
+  ShieldOff,
   Sparkles,
   Trash2,
   X,
@@ -39,6 +40,9 @@ interface ConnectedProvider {
   statusMessage: string
 }
 
+/** Provider ids that need NO API key — always anonymous. */
+const ANONYMOUS_IDS = new Set(['llm7', 'ovhcloud', 'kilocode'])
+
 export function AiModelsMode() {
   const { toast } = useToast()
   const [presets, setPresets] = useState<ProviderPreset[]>([])
@@ -48,6 +52,7 @@ export function AiModelsMode() {
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [saving, setSaving] = useState(false)
+  const [connectingAnon, setConnectingAnon] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -109,6 +114,37 @@ export function AiModelsMode() {
     [apiKey, model, toast, load]
   )
 
+  /** One-click connect for anonymous zero-key providers. */
+  const connectAnonymous = useCallback(
+    async (presetId: string, label: string) => {
+      setConnectingAnon(presetId)
+      try {
+        const res = await fetch('/api/ai-providers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerId: presetId }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to connect.')
+        toast({
+          title: `${label} connected`,
+          description: 'No API key needed — this provider works anonymously and is always available.',
+          duration: 5000,
+        })
+        load()
+      } catch (error) {
+        toast({
+          title: 'Could not connect',
+          description: error instanceof Error ? error.message : undefined,
+          variant: 'destructive',
+        })
+      } finally {
+        setConnectingAnon(null)
+      }
+    },
+    [toast, load]
+  )
+
   const remove = useCallback(
     async (id: string) => {
       try {
@@ -146,6 +182,10 @@ export function AiModelsMode() {
     [toast]
   )
 
+  // Split presets into "zero-setup" (anonymous) and "bring-your-own-key".
+  const anonPresets = presets.filter((p) => ANONYMOUS_IDS.has(p.id))
+  const keyPresets = presets.filter((p) => !ANONYMOUS_IDS.has(p.id))
+
   return (
     <div className="omni-scroll h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
@@ -154,9 +194,9 @@ export function AiModelsMode() {
             <BrainCircuit className="h-5 w-5 text-primary" aria-hidden /> AI Models
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Plug in free API keys from the best open-source AI providers — NEXUS routes Office
-            Studio and future tools through your models. The built-in NEXUS engine stays as
-            fallback.
+            NEXUS now ships 3 zero-setup anonymous LLM gateways (LLM7.io, OVHcloud, Kilo Code)
+            that bypass Z.ai rate limits automatically — even with no key and no signup. Plus
+            4 new free-key providers (Cohere, Cloudflare, NVIDIA NIM, Ollama Cloud).
           </p>
         </header>
 
@@ -247,6 +287,81 @@ export function AiModelsMode() {
           </div>
         </section>
 
+        {/* ZERO-SETUP ANONYMOUS PROVIDERS — bypass Z.ai 429 with no key */}
+        <section className="mb-6" aria-label="Zero-setup anonymous providers">
+          <div className="rounded-2xl border-2 border-emerald-500/30 bg-emerald-500/5 p-5">
+            <div className="flex items-center gap-2">
+              <ShieldOff className="h-4 w-4 text-emerald-700" aria-hidden />
+              <h3 className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
+                Zero-setup fallbacks — bypass Z.ai rate limits
+              </h3>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Three OpenAI-compatible LLM gateways verified live from{' '}
+              <a
+                href="https://github.com/mnfst/awesome-free-llm-apis"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                awesome-free-llm-apis
+              </a>
+              . No API key, no signup — NEXUS auto-falls through these when Z.ai hits 429.
+              Connect one (or all) to also use its models directly as your primary provider.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {anonPresets.length === 0 && (
+                <div className="col-span-full text-xs text-muted-foreground">Loading…</div>
+              )}
+              {anonPresets.map((preset) => {
+                const connected = providers.find((p) => p.providerId === preset.id)
+                const isConnecting = connectingAnon === preset.id
+                return (
+                  <div
+                    key={preset.id}
+                    className={`flex flex-col rounded-xl border bg-card/70 p-3 backdrop-blur ${
+                      connected?.status === 'connected' ? 'border-emerald-500/40' : 'border-border/60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <PlugZap className="h-4 w-4 text-emerald-600" aria-hidden />
+                      {connected?.status === 'connected' && (
+                        <Badge
+                          className="gap-1 rounded-full border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-700"
+                          variant="outline"
+                        >
+                          <Check className="h-3 w-3" aria-hidden /> on
+                        </Badge>
+                      )}
+                    </div>
+                    <h5 className="mt-2 text-xs font-semibold">{preset.label}</h5>
+                    <p className="mt-1 flex-1 text-[11px] leading-snug text-muted-foreground">
+                      {preset.freeNote}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant={connected ? 'outline' : 'default'}
+                      className="mt-3 h-7 gap-1.5 rounded-lg text-[11px]"
+                      disabled={isConnecting}
+                      onClick={() => connectAnonymous(preset.id, preset.label)}
+                    >
+                      {isConnecting ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : connected ? (
+                        <Check className="h-3 w-3" />
+                      ) : (
+                        <PlugZap className="h-3 w-3" />
+                      )}
+                      {connected ? 'Connected' : 'One-click connect'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </section>
+
         {/* Available providers */}
         <section aria-label="Available providers">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -260,7 +375,7 @@ export function AiModelsMode() {
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              {presets.map((preset, i) => {
+              {keyPresets.map((preset, i) => {
                 const connected = providers.find((p) => p.providerId === preset.id)
                 return (
                   <motion.div
@@ -373,11 +488,12 @@ export function AiModelsMode() {
               <Sparkles className="h-4 w-4" aria-hidden /> How it works
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              All six providers offer genuinely free tiers with OpenAI-compatible APIs. Grab a key
-              with one click (no credit card needed), paste it here — keys are encrypted
-              (AES-256-GCM) and stored only on this machine. Once connected, Office Studio and
-              other NEXUS tools automatically route through your chosen model, with the built-in
-              NEXUS engine as fallback. More provider-powered features are on the way.
+              The NEXUS smart router tries each layer in order: (1) your Puter browser engine,
+              (2) any server provider you connected, (3) the built-in Z.ai engine, and finally
+              (4) the three anonymous fallbacks above. If Z.ai returns a 429 (the global rate
+              limit you may have hit before), LLM7.io → OVHcloud → Kilo Code take over
+              automatically — your chat keeps working with zero setup. All keys are encrypted
+              (AES-256-GCM) and stored only on this machine.
             </p>
           </div>
         </section>

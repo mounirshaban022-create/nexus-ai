@@ -908,9 +908,27 @@ export async function POST(req: NextRequest) {
             if (!hasUserProvider) {
               // Open a new assistant message bubble on the client
               send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
-              content = await streamZaiChat(llmMessages, (delta) => {
-                send({ type: 'assistant_delta', delta })
-              })
+              try {
+                content = await streamZaiChat(llmMessages, (delta) => {
+                  send({ type: 'assistant_delta', delta })
+                })
+              } catch (streamErr) {
+                // Z.ai streaming failed (typically the global 429 rate
+                // limit). Fall back to smartChat — which now chains:
+                // user provider → Z.ai non-streamed → anonymous free-LLM
+                // gateways (LLM7.io / OVHcloud / Kilo Code). The result
+                // arrives as one chunk; the bubble is already open.
+                console.error(
+                  '[api/chat] Z.ai stream failed, falling back to smart chat:',
+                  streamErr instanceof Error ? streamErr.message : streamErr
+                )
+                content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
+                // Emit only the visible prelude (text before any
+                // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
+                // peek-buffer behaviour of the normal streaming path.
+                const prelude = stripToolCall(content)
+                if (prelude) send({ type: 'assistant_delta', delta: prelude })
+              }
               didStream = true
               if (!content.trim()) throw new Error('Empty model response.')
             } else {

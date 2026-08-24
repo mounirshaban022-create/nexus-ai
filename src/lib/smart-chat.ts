@@ -1,4 +1,4 @@
-import { getActiveAiProvider, externalChatCompletion, type ExternalChatMessage } from './ai-providers'
+import { getActiveAiProvider, externalChatCompletion, anonymousFallbackChat, type ExternalChatMessage } from './ai-providers'
 import { getZAI } from './zai'
 
 /**
@@ -35,6 +35,66 @@ export interface SmartChatOptions {
  *  DeepSeek (when connected+funded) takes priority — it's the strongest direct API.
  *  OpenRouter free models are the fallback specialists. */
 const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
+  // ── Anonymous zero-key providers (added 2026-09 from awesome-free-llm-apis)
+  // When a user "connects" one of these as their primary, smart-chat picks
+  // task-appropriate models from this map before falling to anonymousFallbackChat.
+  llm7: {
+    code: ['DeepSeek-V4-Flash-0731', 'mistral-Nemo-Instruct-2407'],
+    reasoning: ['minimax-m2.7', 'DeepSeek-V4-Flash-0731'],
+    chat: ['mistral-Nemo-Instruct-2407'],
+    voice: ['mistral-Nemo-Instruct-2407'],
+    documents: ['DeepSeek-V4-Flash-0731', 'mistral-Nemo-Instruct-2407'],
+    fast: ['mistral-Nemo-Instruct-2407'],
+  },
+  ovhcloud: {
+    code: ['Qwen3-32B', 'Mistral-Small-3.2-24B-Instruct'],
+    reasoning: ['Meta-Llama-3_3-70B-Instruct', 'Qwen3-32B'],
+    chat: ['Mistral-7B-Instruct-v0.3', 'Mistral-Nemo-Instruct-2407'],
+    voice: ['Mistral-7B-Instruct-v0.3', 'Qwen3.5-9B'],
+    documents: ['Mistral-Small-3.2-24B-Instruct', 'Meta-Llama-3_3-70B-Instruct'],
+    fast: ['Mistral-7B-Instruct-v0.3', 'Qwen3.5-9B'],
+  },
+  kilocode: {
+    code: ['cohere/north-mini-code:free', 'liquid/lfm-2.5-2.6b:free'],
+    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free'],
+    chat: ['openrouter/free', 'liquid/lfm-2.5-2.6b:free'],
+    voice: ['liquid/lfm-2.5-2.6b:free'],
+    documents: ['openrouter/free', 'cohere/north-mini-code:free'],
+    fast: ['liquid/lfm-2.5-2.6b:free'],
+  },
+  // ── New free-key providers (added 2026-09 from awesome-free-llm-apis)
+  cohere: {
+    code: ['command-r-08-2024', 'command-a-03-2025'],
+    reasoning: ['command-a-03-2025', 'command-r-plus-08-2024'],
+    chat: ['command-r-08-2024', 'command-r7b-08-2024'],
+    voice: ['command-r7b-08-2024'],
+    documents: ['command-a-03-2025', 'command-r-plus-08-2024'],
+    fast: ['command-r7b-08-2024'],
+  },
+  cloudflare: {
+    code: ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+    reasoning: ['@cf/openai/gpt-oss-120b', '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b'],
+    chat: ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/zai-org/glm-4.7-flash'],
+    voice: ['@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+    documents: ['@cf/google/gemma-4-26b-a4b-it', '@cf/openai/gpt-oss-120b'],
+    fast: ['@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+  },
+  nvidia: {
+    code: ['mistralai/mistral-large-2-instruct', 'meta/llama-3.3-70b-instruct'],
+    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-super-120b-a12b'],
+    chat: ['nvidia/nemotron-3-super-120b-a12b', 'meta/llama-3.3-70b-instruct'],
+    voice: ['openai/gpt-oss-20b', 'meta/llama-3.3-70b-instruct'],
+    documents: ['mistralai/mistral-large-2-instruct', 'nvidia/nemotron-3-super-120b-a12b'],
+    fast: ['openai/gpt-oss-20b'],
+  },
+  ollama: {
+    code: ['gpt-oss:120b', 'deepseek-v4-flash'],
+    reasoning: ['deepseek-v4-pro', 'mistral-large-3:675b'],
+    chat: ['deepseek-v4-flash', 'minimax-m3'],
+    voice: ['deepseek-v4-flash', 'gpt-oss:120b'],
+    documents: ['deepseek-v4-pro', 'kimi-k3'],
+    fast: ['deepseek-v4-flash'],
+  },
   deepseek: {
     code: ['deepseek-v4-flash', 'deepseek-chat'],
     reasoning: ['deepseek-reasoner', 'deepseek-v4-pro'],   // R1 = elite reasoning
@@ -142,12 +202,43 @@ export async function smartChat(
   }
 
   // Built-in Z.ai engine (our quota)
-  const zai = await getZAI()
-  const completion = await zai.chat.completions.create({
-    messages: messages.map((m) => ({ role: m.role as any, content: m.content })),
-    thinking: { type: 'disabled' },
-  })
-  const content = completion.choices[0]?.message?.content
-  if (!content?.trim()) throw new Error('All AI providers returned empty responses.')
-  return content
+  try {
+    const zai = await getZAI()
+    const completion = await zai.chat.completions.create({
+      messages: messages.map((m) => ({ role: m.role as any, content: m.content })),
+      thinking: { type: 'disabled' },
+    })
+    const content = completion.choices[0]?.message?.content
+    if (content?.trim()) return content
+  } catch (err) {
+    // Z.ai failed (typically a global 429 rate-limit storm). Fall through
+    // to the anonymous free-LLM chain — those providers have their own
+    // independent rate-limit budgets so they bypass the Z.ai 429 entirely.
+    console.error('[smartChat] Z.ai engine failed, trying anonymous fallbacks:', err instanceof Error ? err.message : err)
+  }
+
+  // ANONYMOUS FREE-LLM FALLBACK CHAIN (NEW 2026-09)
+  // Last-resort layer: LLM7.io → OVHcloud → Kilo Code. No API key, no
+  // signup — every endpoint is verified live and OpenAI-compatible.
+  // This is what makes NEXUS keep working even when:
+  //   - the user has no connected provider
+  //   - the connected provider hit a 429
+  //   - the built-in Z.ai engine ALSO hit a 429
+  // The chain multiplies per-IP free capacity across three providers.
+  // Voice tasks get a tighter timeout so mic turns feel live.
+  const anonTimeout = isVoiceTask ? 15_000 : 30_000
+  try {
+    const { content: anonContent, providerId, model } = await anonymousFallbackChat(
+      messages as ExternalChatMessage[],
+      { maxTokens, timeoutMs: anonTimeout }
+    )
+    if (anonContent.trim()) {
+      console.log(`[smartChat] anonymous fallback served: ${providerId}/${model}`)
+      return anonContent
+    }
+  } catch (err) {
+    console.error('[smartChat] anonymous fallbacks exhausted:', err instanceof Error ? err.message : err)
+  }
+
+  throw new Error('All AI providers (Z.ai + anonymous fallbacks) returned empty responses.')
 }
