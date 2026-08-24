@@ -11,6 +11,10 @@ model ChatSession {
   id        String        @id @default(cuid())
   title     String        @default("New conversation")
   kind      String        @default("chat") // "chat" | "agent"
+  // Phase 0 Bug 3: ownership. null = guest session (any guest may resume).
+  // Non-null = owned by a specific authenticated user; only that user may resume.
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   messages  ChatMessage[]
@@ -29,6 +33,9 @@ model ChatMessage {
 
   @@index([sessionId, createdAt])
 }
+
+// Phase 0 Bug 3: also add a relation from User to ChatSession.
+// (Added in the User model below via sessions ChatSession[].)
 
 model GeneratedImage {
   id        String   @id @default(cuid())
@@ -91,6 +98,8 @@ model User {
   images        GeneratedImage[]
   videos        GeneratedVideo[]
   documents     GeneratedDocument[]
+  sessions      ChatSession[]   // Phase 0 Bug 3: back-relation for ownership
+  memories      UserMemory[]    // Phase 1 P1: per-user durable memory
 }
 
 model EmailAccount {
@@ -122,4 +131,23 @@ model AiProvider {
   statusMessage String  @default("")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Phase 1 — Priority 1: per-user memory store.
+// Distinct from per-session ChatMessage history. Each row is one durable
+// fact the user asked NEXUS to remember about them (or that they added
+// manually from the profile page). Injected into the system prompt for
+// future sessions owned by the same userId (Phase 0 Bug 3 scoping).
+model UserMemory {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content         String   // the durable fact (≤ 600 chars enforced at API layer)
+  // When the memory was captured from a chat session, the session id it
+  // came from. null when added manually from the profile page.
+  sourceSessionId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, createdAt])
 }

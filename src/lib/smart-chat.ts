@@ -84,10 +84,13 @@ export async function smartChat(
   messages: ExternalChatMessage[] | Array<{ role: string; content: string }>,
   opts: SmartChatOptions = {}
 ): Promise<string> {
-  const { maxTokens = 4000, temperature = 0.7, builtinOnly = false } = opts
+  // Bug 1 fix (Phase 0): destructure `task` with a default so the bare
+  // `task` references at line 99 resolve to a real variable instead of
+  // throwing ReferenceError on every custom-provider request.
+  const { maxTokens = 4000, temperature = 0.7, builtinOnly = false, task = 'chat' } = opts
   // Bug F: voice turns must feel live — cap each model attempt at 15s and try at
   // most 2 models (vs 4 for other tasks). Non-voice behaviour is unchanged.
-  const isVoiceTask = opts.task === 'voice'
+  const isVoiceTask = task === 'voice'
   const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
   const maxModelAttempts = isVoiceTask ? 2 : 4
 

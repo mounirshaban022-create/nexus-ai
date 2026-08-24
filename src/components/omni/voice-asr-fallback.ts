@@ -7,12 +7,22 @@
 
 import { arrayBufferToBase64 } from './audio-utils'
 
+interface AsrTurn {
+  id: string
+  user: string
+  reply: string
+}
+
 interface AsrModeOptions {
   lang: string
   ttsVoice: string
   historyRef: React.MutableRefObject<Array<{ role: string; content: string }>>
   setStateSafe: (s: 'idle' | 'listening' | 'thinking' | 'speaking') => void
-  setTurns: React.Dispatch<React.SetStateAction<Array<{ user: string; reply: string }>>>
+  // Bug 4 fix (Phase 0): setTurns must accept the full Turn shape (with `id`)
+  // to match voice-mode-overlay.tsx's Dispatch<SetStateAction<Turn[]>>.
+  // Previously this expected {user,reply}[] without an id, which made the
+  // type contract structurally incompatible with the overlay's Turn[].
+  setTurns: React.Dispatch<React.SetStateAction<AsrTurn[]>>
   setInterim: (t: string) => void
   setError: (e: string) => void
 }
@@ -201,7 +211,9 @@ export async function startAsrMode(opts: AsrModeOptions) {
 
     historyRef.current.push({ role: 'user', content: data.transcript })
     historyRef.current.push({ role: 'assistant', content: data.reply })
-    setTurns((prev) => [...prev, { user: data.transcript, reply: data.reply }])
+    // Bug 4 fix (Phase 0): supply an id so the new turn matches the AsrTurn
+    // contract (and voice-mode-overlay.tsx's Turn shape).
+    setTurns((prev) => [...prev, { id: crypto.randomUUID(), user: data.transcript, reply: data.reply }])
 
     // 7. Speak the reply
     if (data.audio) {

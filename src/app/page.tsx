@@ -52,6 +52,7 @@ import { LegalPage } from '@/components/omni/legal-page'
 import { ProfileEditModal } from '@/components/omni/profile-edit-modal'
 import { AuthLanding } from '@/components/omni/auth-landing'
 import { ProfilePage } from '@/components/omni/profile-page'
+import { ArtifactPanel, useArtifact, type Artifact } from '@/components/omni/artifact-panel'
 import { Headphones, Mic } from 'lucide-react'
 
 // ============ TYPES ============
@@ -173,6 +174,18 @@ function NexusApp() {
   const [streamingActive, setStreamingActive] = useState(false)
   const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
 
+  // Phase 1 P2: artifact panel state — tracks the currently-open document/code
+  // artifact and queues AI-applied patches (ARTIFACT_PATCH events from the
+  // chat stream) so the ArtifactPanel can apply them to the open artifact.
+  const {
+    artifact: openArtifactState,
+    openArtifact,
+    closeArtifact,
+    pendingPatch,
+    enqueuePatch,
+    clearPatch,
+  } = useArtifact()
+
   // Tool engine — routes the next message to the right /api/* route
   const toolEngine = useToolEngine(
     // onAssistant: push assistant message into the conversation
@@ -212,10 +225,24 @@ function NexusApp() {
         return
       }
       // Otherwise: plain chat stream
+      // Phase 1 P2: when an artifact is open, pass its current state to the
+      // server so the AI can emit ARTIFACT_PATCH directives for targeted
+      // edits instead of regenerating the whole document via create_document.
+      const openArtifactPayload = openArtifactState
+        ? {
+            artifactId: openArtifactState.artifactId ?? openArtifactState.id,
+            type: openArtifactState.type,
+            title: openArtifactState.title,
+            // Send the CURRENT version content (latest from AI patches +
+            // user edits). The ArtifactPanel holds the version stack but
+            // the chat request only needs the latest content for the prompt.
+            content: (openArtifactState.content ?? '').slice(0, 20000),
+          }
+        : null
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, language }),
+        body: JSON.stringify({ message: msg, language, openArtifact: openArtifactPayload }),
       })
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
@@ -231,16 +258,23 @@ function NexusApp() {
           const e = JSON.parse(trimmed)
           // Streaming chat protocol: assistant_start opens a bubble, deltas append, end finalizes.
           if (e.type === 'assistant_start') {
-            streamingId = `a-${Date.now()}`
+            // Capture streamingId in a local const so the setMessages updater
+            // closure below references the SAME value even if streamingId is
+            // later mutated by another event before React runs the updater.
+            const id = `a-${Date.now()}`
+            streamingId = id
             setStreamingActive(true)
-            setMessages(prev => [...prev, { id: streamingId!, role: 'assistant', content: '', attachments: [] }])
+            setMessages(prev => [...prev, { id, role: 'assistant', content: '', attachments: [] }])
           } else if (e.type === 'assistant_delta') {
             const delta = e.delta ?? ''
             if (!delta) return
+            // Capture the current streamingId locally so the updater sees the
+            // correct value even if streamingId has since been mutated.
+            const id = streamingId
             setMessages(prev => {
-              if (!streamingId) return prev
+              if (!id) return prev
               const next = [...prev]
-              const idx = next.findIndex(m => m.id === streamingId)
+              const idx = next.findIndex(m => m.id === id)
               if (idx >= 0) {
                 const m = next[idx]
                 next[idx] = { ...m, content: (m.content || '') + delta }
@@ -248,12 +282,18 @@ function NexusApp() {
               return next
             })
           } else if (e.type === 'assistant_end') {
-            if (streamingId) {
+            // Capture the current streamingId locally so the updater sees the
+            // correct value even if streamingId has since been mutated. This
+            // is the bug that previously caused the second assistant_end's
+            // attachments to be applied to the wrong bubble (or to no bubble
+            // because streamingId had been nulled).
+            const id = streamingId
+            if (id) {
               const atts = e.attachments ?? []
               setStreamingActive(false)
               setMessages(prev => {
                 const next = [...prev]
-                const idx = next.findIndex(m => m.id === streamingId)
+                const idx = next.findIndex(m => m.id === id)
                 if (idx >= 0) {
                   const m = next[idx]
                   // Drop an empty-content bubble if no deltas arrived AND no attachments
@@ -271,6 +311,16 @@ function NexusApp() {
           } else if (e.type === 'assistant') {
             // Legacy non-streamed path (creator-identity shortcut, etc.)
             setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: e.content, attachments: e.attachments }])
+          } else if (e.type === 'artifact_patch') {
+            // Phase 1 P2: AI applied a targeted find/replace edit to the
+            // open artifact. Queue it for the ArtifactPanel to apply +
+            // push as a new version (preserves undo/redo history).
+            enqueuePatch({
+              artifactId: e.artifactId,
+              find: e.find,
+              replace: e.replace,
+              note: e.note,
+            })
           }
         } catch {}
       }
@@ -299,7 +349,7 @@ function NexusApp() {
       setSending(false)
       setStreamingActive(false)
     }
-  }, [input, sending, toolEngine])
+  }, [input, sending, toolEngine, openArtifactState, enqueuePatch])
 
   const tr = t[language]
   const TABS: Array<{ id: TabId; label: string; icon: any }> = [
@@ -448,6 +498,15 @@ function NexusApp() {
       <ConnectPanel open={connectOpen} onClose={() => setConnectOpen(false)} />
 
       <ProfileEditModal open={profileEditOpen} onClose={() => setProfileEditOpen(false)} />
+
+      {/* Phase 1 P2: artifact side panel — opens when a user clicks "Open" on
+          a document/code attachment, supports in-place editing + version
+          history + AI-applied ARTIFACT_PATCH directives from the chat stream. */}
+      <ArtifactPanel
+        artifact={openArtifactState}
+        onClose={closeArtifact}
+        patch={pendingPatch}
+      />
 
       {legalPage !== null && (
         <LegalPage
@@ -649,7 +708,7 @@ function NexusApp() {
                             {streamingActive && m.id === messages[messages.length - 1]?.id && (
                               <span className="nexus-caret align-middle" aria-hidden />
                             )}
-                            {m.attachments?.map((a, i) => <AttachmentCard key={i} attachment={a} />)}
+                            {m.attachments?.map((a, i) => <AttachmentCard key={i} attachment={a} onOpenArtifact={openArtifact} />)}
                           </div>
                         )}
                       </div>

@@ -418,6 +418,18 @@ export interface ChatAttachment {
   body?: string
   messageId?: string
   needsConnect?: boolean
+  // Phase 1 P2: editable source content for documents & code artifacts.
+  // For documents this is the markdown/plain-text source the AI sent to
+  // /api/office/create (what the .docx/.xlsx/.pptx was generated from).
+  // For code this is the actual code that ran in the sandbox.
+  // The ArtifactPanel renders this text and supports in-place editing,
+  // version history, and AI-applied targeted patches.
+  sourceContent?: string
+  // Phase 1 P2: id used to thread an artifact across patches. When the
+  // chat client opens an artifact, this id is sent back on subsequent
+  // chat requests as `openArtifact.artifactId` so the AI can target
+  // ARTIFACT_PATCH directives at the right artifact.
+  artifactId?: string
 }
 
 export type ChatEvent =
@@ -427,3 +439,15 @@ export type ChatEvent =
   | { type: 'assistant'; content: string; attachments?: ChatAttachment[] }
   | { type: 'done'; sessionId: string }
   | { type: 'error'; message: string }
+  // Phase 1 P2: streaming protocol additions for in-place artifact editing.
+  // See api/chat/route.ts → streamZaiChat + POST handler for emission sites.
+  | { type: 'assistant_start'; id: string }
+  | { type: 'assistant_delta'; delta: string }
+  | { type: 'assistant_end'; attachments?: ChatAttachment[] }
+  | { type: 'tool_progress'; tool: string; index: number; elapsedMs: number; message: string }
+  // AI-applied patch to the open artifact. `artifactId` targets a specific
+  // artifact (matches ChatAttachment.artifactId). `find` is the substring
+  // to locate (first match wins); `replace` is the new text. The client
+  // applies the patch to the artifact's current source content, pushes
+  // the result as a new version, and renders a diff hint in chat.
+  | { type: 'artifact_patch'; artifactId: string; find: string; replace: string; note?: string }

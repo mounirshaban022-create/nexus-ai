@@ -9,6 +9,7 @@ import {
   FileText,
   Globe,
   Image as ImageIcon,
+  PanelRightOpen,
   Search,
   Terminal,
   XCircle,
@@ -20,9 +21,27 @@ import { AnswerCard, EmailSentCard } from './answer-card'
  * Inline attachment cards rendered inside chat messages —
  * the unifying layer that makes every ability part of the conversation
  * (ChatGPT-style inline results).
+ *
+ * Phase 1 P2: document and code attachment cards gain an "Open" button
+ * that opens the artifact's editable source in the side panel (Canvas).
+ * The `onOpenArtifact` callback is wired in page.tsx → useArtifact().
  */
 
-export function AttachmentCard({ attachment }: { attachment: ChatAttachment }) {
+export function AttachmentCard({
+  attachment,
+  onOpenArtifact,
+}: {
+  attachment: ChatAttachment
+  onOpenArtifact?: (a: {
+    id: string
+    type: 'document' | 'code' | 'text'
+    title: string
+    content: string
+    downloadUrl?: string
+    format?: string
+    artifactId?: string
+  }) => void
+}) {
   if (attachment.type === 'image' && attachment.url) {
     return (
       <motion.figure
@@ -47,13 +66,15 @@ export function AttachmentCard({ attachment }: { attachment: ChatAttachment }) {
 
   if (attachment.type === 'document' && attachment.url) {
     const formatIcon: Record<string, string> = { docx: '📄', xlsx: '📊', pptx: '📽️', md: '📝' }
+    // Phase 1 P2: only show "Open" when the attachment includes sourceContent
+    // (text version of the document) — older attachments without it just
+    // keep the download link.
+    const canOpen = !!attachment.sourceContent && !!onOpenArtifact
     return (
-      <motion.a
+      <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        href={attachment.url}
-        download
-        className="mt-3 flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 transition hover:bg-secondary/60"
+        className="mt-3 flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5"
       >
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg">
           {formatIcon[attachment.format ?? 'docx'] ?? '📄'}
@@ -64,16 +85,47 @@ export function AttachmentCard({ attachment }: { attachment: ChatAttachment }) {
           </span>
           <span className="block text-xs text-muted-foreground">
             {attachment.format?.toUpperCase()} document
-            {attachment.size ? ` · ${(attachment.size / 1024).toFixed(1)} KB` : ''} · click to download
+            {attachment.size ? ` · ${(attachment.size / 1024).toFixed(1)} KB` : ''}
+            {canOpen ? ' · click Open to edit' : ' · click to download'}
           </span>
         </span>
-        <Download className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-      </motion.a>
+        {canOpen && (
+          <button
+            type="button"
+            onClick={() =>
+              onOpenArtifact!({
+                id: attachment.artifactId ?? `att-${Date.now()}`,
+                type: 'document',
+                title: attachment.title ?? 'Document',
+                content: attachment.sourceContent ?? '',
+                downloadUrl: attachment.url,
+                format: attachment.format,
+                artifactId: attachment.artifactId,
+              })
+            }
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-secondary"
+            aria-label={`Open ${attachment.title ?? 'document'} in side panel`}
+          >
+            <PanelRightOpen className="h-3.5 w-3.5" aria-hidden />
+            Open
+          </button>
+        )}
+        <a
+          href={attachment.url}
+          download
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-secondary"
+          aria-label="Download document"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden />
+          Download
+        </a>
+      </motion.div>
     )
   }
 
   if (attachment.type === 'code') {
     const ok = attachment.exitCode === 0
+    const canOpen = !!attachment.sourceContent && !!onOpenArtifact
     return (
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -98,6 +150,28 @@ export function AttachmentCard({ attachment }: { attachment: ChatAttachment }) {
         <pre className="omni-scroll max-h-52 overflow-auto bg-[oklch(0.2_0.005_70)] p-3.5 text-[12.5px] leading-relaxed text-[oklch(0.88_0.005_80)]">
           {attachment.stdout || attachment.stderr || '(no output)'}
         </pre>
+        {canOpen && (
+          <div className="border-t border-border bg-secondary/40 px-3.5 py-2">
+            <button
+              type="button"
+              onClick={() =>
+                onOpenArtifact!({
+                  id: attachment.artifactId ?? `att-${Date.now()}`,
+                  type: 'code',
+                  title: `${attachment.language ?? 'code'} snippet`,
+                  content: attachment.sourceContent ?? '',
+                  format: attachment.language,
+                  artifactId: attachment.artifactId,
+                })
+              }
+              className="flex items-center gap-1.5 text-xs font-medium text-foreground transition hover:text-primary"
+              aria-label="Open code in side panel"
+            >
+              <PanelRightOpen className="h-3.5 w-3.5" aria-hidden />
+              Open in panel
+            </button>
+          </div>
+        )}
       </motion.div>
     )
   }

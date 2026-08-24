@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth, type AuthUser } from '@/hooks/use-auth'
+import { MemorySection } from './memory-section'
 
 export interface ProfileActivity {
   type: 'image' | 'document' | 'code'
@@ -457,7 +458,15 @@ export function ProfilePage(props: ProfilePageProps) {
         </section>
 
         {/* ===========================================================
-            Section 5 — Bottom legal footer
+            Section 5 — Memory (Phase 1 Priority 1)
+            Per-user durable memory store. Lets a signed-in user view,
+            add, edit, delete the facts NEXUS injects into the system
+            prompt for future sessions. Guests see a sign-in CTA.
+        =========================================================== */}
+        <MemorySection language={language} />
+
+        {/* ===========================================================
+            Section 6 — Bottom legal footer
         =========================================================== */}
         <div className="mt-8 flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
           <button

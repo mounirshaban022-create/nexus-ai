@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { getActiveAiProvider } from '@/lib/ai-providers'
+import { getSession } from '@/lib/auth'
 
 // Supabase admin client (server-side, service role) for cloud persistence
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -15,11 +16,19 @@ async function getSupabaseAdmin() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
 }
 
-/** Extracts the user ID from the request (client sends its Supabase token). */
+/**
+ * Phase 0 Bug 2 fix: derives the user id from a VERIFIED session cookie
+ * (signed JWT via @/lib/auth). Replaces the prior trust-the-header pattern
+ * where any client could set `x-supabase-user-id: <victim-uuid>` and write
+ * to Supabase under another user's id via the service-role client.
+ *
+ * Returns null when the request is anonymous/guest (no cookie or invalid
+ * signature) — guest chat continues to work, just without user attribution
+ * or cross-device cloud sync.
+ */
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get('x-supabase-user-id')
-  if (authHeader && /^[a-zA-Z0-9-]+$/.test(authHeader)) return authHeader
-  return null
+  const session = await getSession(req)
+  return session?.userId ?? null
 }
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
@@ -37,6 +46,17 @@ const requestSchema = z.object({
   sessionId: z.string().max(64).optional().nullable(),
   thinking: z.boolean().optional().default(false),
   language: z.enum(['en', 'ar']).optional().default('en'),
+  // Phase 1 P2: when the user has an artifact open in the side panel, the
+  // client sends its current state. The system prompt then tells the AI
+  // how to emit ARTIFACT_PATCH directives for targeted edits, instead of
+  // regenerating the whole artifact via create_document.
+  openArtifact: z.object({
+    artifactId: z.string().max(64),
+    type: z.enum(['document', 'code', 'text']),
+    title: z.string().max(200),
+    // current source content (post-user-edits if any) — capped to bound prompt size
+    content: z.string().max(20000),
+  }).optional().nullable(),
 })
 
 const MAX_TOOL_CALLS = 4
@@ -77,7 +97,12 @@ const CHAT_TOOL_DEFS: Array<{
   },
 ]
 
-function buildSystemPrompt(enabledConnectors: string[], language: 'en' | 'ar' = 'en'): string {
+function buildSystemPrompt(
+  enabledConnectors: string[],
+  language: 'en' | 'ar' = 'en',
+  memories: Array<{ content: string }> = [],
+  openArtifact?: { artifactId: string; type: string; title: string; content: string } | null
+): string {
   const connectorList = enabledConnectors
     .map((id) => CONNECTOR_MAP.get(id))
     .filter(Boolean)
@@ -91,8 +116,51 @@ function buildSystemPrompt(enabledConnectors: string[], language: 'en' | 'ar' = 
     ? '6. LANGUAGE: ALWAYS respond in Arabic (العربية). Be natural — like a thoughtful Arabic-speaking friend, not a corporate bot. Use MSA but keep it warm and human. Vary sentence length. Skip robotic openers like "بالتأكيد" or "سؤال رائع". Keep code, file names, and tool IDs in their original form.'
     : '6. LANGUAGE: respond in the user\'s language (default English).'
 
+  // Phase 1 P1: inject the user's durable memories into the system prompt so
+  // the model has cross-conversation context. Only injected when there ARE
+  // memories (guests and new users get nothing). Memories are user-visible
+  // and revocable from the profile page — we never silently apply memory.
+  const memoryBlock = memories.length > 0
+    ? [
+        '',
+        'ABOUT THE USER (your memory of them — use naturally, do not quote back):',
+        ...memories.slice(0, 25).map((m) => `- ${m.content}`),
+        '',
+      ].join('\n')
+    : ''
+
+  // Phase 1 P2: when an artifact is open in the user's side panel, expose its
+  // current state to the model and document the ARTIFACT_PATCH directive.
+  // The model can then apply targeted find/replace edits to the artifact
+  // instead of regenerating the whole document via create_document — this
+  // is the ChatGPT Canvas / Perplexity Artifact editing pattern.
+  const artifactBlock = openArtifact
+    ? [
+        '',
+        'OPEN ARTIFACT (the user is currently viewing this in their side panel):',
+        `id: ${openArtifact.artifactId}`,
+        `type: ${openArtifact.type}`,
+        `title: ${openArtifact.title}`,
+        '--- BEGIN ARTIFACT CONTENT ---',
+        openArtifact.content.slice(0, 20000),
+        '--- END ARTIFACT CONTENT ---',
+        '',
+        'ARTIFACT_PATCH DIRECTIVE (preferred over create_document when the user asks to edit/revise/tweak the open artifact):',
+        'When the user\'s message is a small edit (rephrase a section, shorten the intro, fix a typo, change a variable name, swap an example, etc.) — respond with EXACTLY one line:',
+        `ARTIFACT_PATCH: {"artifactId": "${openArtifact.artifactId}", "find": "<exact substring to locate — first match wins>", "replace": "<new text>", "note": "<one short sentence describing the change, shown to the user>"}`,
+        'Rules for ARTIFACT_PATCH:',
+        '- `find` MUST be an exact substring that currently exists in the artifact (copy it verbatim, including whitespace).',
+        '- `replace` is the new text replacing the found substring. May be empty (to delete).',
+        '- For multiple separate edits, emit multiple ARTIFACT_PATCH lines in one response (one per line).',
+        '- After the patch(es), you may add a one-line acknowledgement in prose ("Done — shortened the intro." / "Got it, renamed `user_list` to `users` everywhere."). Do NOT regurgitate the whole artifact.',
+        '- If the user asks for a wholesale rewrite or a NEW document, use create_document as usual instead of ARTIFACT_PATCH.',
+      ].join('\n')
+    : ''
+
   return [
     'You are NEXUS, the AI at the heart of the NEXUS AI super app — with every superpower available directly in this chat.',
+    memoryBlock,
+    artifactBlock,
     '',
     'AVAILABLE TOOLS:',
     'Abilities (create things):',
@@ -163,6 +231,9 @@ async function streamZaiChat(
   const decoder = new TextDecoder()
   let buf = ''
   let fullContent = ''
+  // Phase 1 P2: 'tool' mode also covers ARTIFACT_PATCH — we buffer the
+  // directive silently so the user doesn't see raw JSON streaming in, then
+  // parse it after the stream completes (same shape as TOOL_CALL).
   let mode: 'peeking' | 'streaming' | 'tool' = 'peeking'
   const PEEK_LEN = 24
 
@@ -193,10 +264,15 @@ async function streamZaiChat(
       fullContent += deltaText
 
       if (mode === 'peeking') {
-        // Check if this looks like a tool-call forming
-        if (fullContent.startsWith('TOOL_CALL') || fullContent.includes('TOOL_CALL')) {
+        // Check if this looks like a tool-call OR artifact-patch forming
+        if (
+          fullContent.startsWith('TOOL_CALL') ||
+          fullContent.includes('TOOL_CALL') ||
+          fullContent.startsWith('ARTIFACT_PATCH') ||
+          fullContent.includes('ARTIFACT_PATCH')
+        ) {
           mode = 'tool'
-          // Don't emit deltas — wait for the full content to parse as a tool call
+          // Don't emit deltas — wait for the full content to parse as a directive
         } else if (fullContent.length >= PEEK_LEN) {
           // Safe to assume this is a final answer — flush the peeked prefix
           mode = 'streaming'
@@ -267,11 +343,101 @@ function parseToolCall(text: string): ParsedToolCall | null {
   return null
 }
 
+/**
+ * Phase 1 P2: parse one or more ARTIFACT_PATCH directives from a model
+ * response. Returns an array of patches (find/replace/note) targeting the
+ * open artifact. Returns [] when no patches are present.
+ *
+ * The model emits lines like:
+ *   ARTIFACT_PATCH: {"artifactId": "abc", "find": "X", "replace": "Y", "note": "..."}
+ *
+ * We extract each directive's JSON via the same balanced-brace extractor
+ * as TOOL_CALL — supports multiline values (escaped newlines) and skips
+ * malformed lines (returns the well-formed ones only).
+ */
+function parseArtifactPatches(text: string): Array<{
+  artifactId: string
+  find: string
+  replace: string
+  note?: string
+}> {
+  const patches: Array<{ artifactId: string; find: string; replace: string; note?: string }> = []
+  let searchFrom = 0
+  while (true) {
+    const idx = text.indexOf('ARTIFACT_PATCH', searchFrom)
+    if (idx === -1) break
+    // Skip the "ARTIFACT_PATCH" label and any trailing whitespace/colon
+    let cursor = idx + 'ARTIFACT_PATCH'.length
+    while (cursor < text.length && /[\s:]/.test(text[cursor])) cursor++
+    const candidate = extractJson(text.slice(cursor))
+    if (!candidate) {
+      searchFrom = idx + 1
+      continue
+    }
+    try {
+      const parsed = JSON.parse(candidate) as {
+        artifactId?: unknown
+        find?: unknown
+        replace?: unknown
+        note?: unknown
+      }
+      if (
+        typeof parsed.artifactId === 'string' &&
+        typeof parsed.find === 'string' &&
+        typeof parsed.replace === 'string'
+      ) {
+        patches.push({
+          artifactId: parsed.artifactId,
+          find: parsed.find,
+          replace: parsed.replace,
+          note: typeof parsed.note === 'string' ? parsed.note : undefined,
+        })
+      }
+    } catch {
+      /* malformed — skip */
+    }
+    searchFrom = cursor + candidate.length
+  }
+  return patches
+}
+
 function stripToolCall(text: string): string {
   return text
     .replace(/```(?:json)?\s*TOOL_CALL[\s\S]*?```\s*/g, '')
     .replace(/TOOL_CALL\s*[:=][\s\S]*$/g, '')
+    .replace(/```(?:json)?\s*ARTIFACT_PATCH[\s\S]*?```\s*/g, '')
+    .replace(/ARTIFACT_PATCH\s*[:=][\s\S]*$/g, '')
     .trim()
+}
+
+/**
+ * Phase 1 P1: detect a "remember: ..." prefix and extract the durable fact.
+ * Returns null when the message is not a memory request. Supports English
+ * ("remember:", "remember that ...", "remember to ...") and Arabic
+ * ("تذكّر:" / "تذكر:" / "تذكّر أنني ...") prefixes. The match is
+ * case-insensitive and tolerant of leading whitespace. This is the OPT-IN
+ * extraction path — NEXUS never silently extracts memory from arbitrary chat.
+ *
+ * Disambiguation: for English "remember ..." WITHOUT a colon and WITHOUT
+ * "that"/"to", we do NOT match — too ambiguous (could be "remember when we
+ * went to the park?"). For Arabic, the colon or the "أن"-prefix serves the
+ * same role.
+ */
+function parseRememberDirective(message: string): string | null {
+  // English: explicit colon OR "that"/"to" disambiguator
+  const enColon = message.match(/^\s*remember\s*:\s*(.+)$/i)
+  if (enColon) return enColon[1].trim().slice(0, 600)
+  const enThat = message.match(/^\s*remember\s+(?:that|to)\s+(.+)$/i)
+  if (enThat) return enThat[1].trim().slice(0, 600)
+  // Arabic: explicit colon OR "أن"-prefix (أن / أنني / أنك / أننا / إلخ)
+  // تذكّر (with shadda) and تذكر (without) are both accepted via alternation
+  // — the shadda (U+0651) is a combining mark that doesn't behave well in
+  // a character class.
+  const arColon = message.match(/^\s*(?:تذكّر|تذكر)\s*:\s*(.+)$/u)
+  if (arColon) return arColon[1].trim().slice(0, 600)
+  const arAnn = message.match(/^\s*(?:تذكّر|تذكر)\s+أن\p{L}*\s+(.+)$/u)
+  if (arAnn) return arAnn[1].trim().slice(0, 600)
+  return null
 }
 
 /** Executes a chat-ability tool (image/doc/code), returning an attachment. */
@@ -347,6 +513,10 @@ async function executeChatTool(
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Document creation failed')
+    // Phase 1 P2: include the source content + a stable artifactId so the
+    // ArtifactPanel can render the editable text and the AI can target
+    // ARTIFACT_PATCH directives at this artifact across follow-up messages.
+    const artifactId = `doc-${data.file.id ?? Date.now()}`
     return {
       result: {
         downloadUrl: `${data.file.url}?download=1&title=${encodeURIComponent(title)}`,
@@ -359,6 +529,8 @@ async function executeChatTool(
         title,
         format: data.file.format,
         size: data.file.size,
+        artifactId,
+        sourceContent: content,
       },
     }
   }
@@ -378,6 +550,10 @@ async function executeChatTool(
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Code execution failed')
     const r = data.result
+    // Phase 1 P2: include the source code + a stable artifactId so the
+    // ArtifactPanel can show the code editor and the AI can target
+    // ARTIFACT_PATCH directives at this code artifact.
+    const artifactId = `code-${Date.now()}`
     return {
       result: {
         stdout: r.stdout?.slice(0, 3000),
@@ -391,6 +567,8 @@ async function executeChatTool(
         stdout: (r.stdout ?? '').slice(0, 2000),
         stderr: (r.stderr ?? '').slice(0, 500),
         exitCode: r.exitCode,
+        artifactId,
+        sourceContent: code,
       },
     }
   }
@@ -429,8 +607,13 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Message is required (max 8000 chars).' }, { status: 400 })
     }
-    const { message, sessionId, thinking: thinkingEnabled, language } = parsed.data
+    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact } = parsed.data
     const trimmed = message.trim()
+
+    // Phase 0 Bug 2: derive the verified user id ONCE (JWT verification is
+    // not free) and reuse for both session ownership (Bug 3) and Supabase
+    // cloud sync. null = guest.
+    const verifiedUserId = await getUserIdFromRequest(req)
 
     // Default enabled: abilities + key connectors
     const enabledConnectors = [
@@ -439,31 +622,74 @@ export async function POST(req: NextRequest) {
       'recipes', 'nasa', 'news', 'trivia', 'pokemon', 'games', 'forecast',
     ]
 
+    // Phase 0 Bug 3: ownership check.
+    //   - Authenticated user (verifiedUserId = "abc"): may only resume
+    //     sessions where userId = "abc".
+    //   - Guest (verifiedUserId = null): may only resume sessions where
+    //     userId is null (guest sessions). Any guest can resume any guest
+    //     session by id — that is the documented guest behaviour.
+    //   - If a client supplies an authenticated user's sessionId without a
+    //     valid cookie for that user, the lookup returns null and a fresh
+    //     session is created — preventing cross-user takeover.
     let session = sessionId
-      ? await db.chatSession.findFirst({ where: { id: sessionId, kind: 'chat' } })
+      ? await db.chatSession.findFirst({
+          where: { id: sessionId, kind: 'chat', userId: verifiedUserId },
+        })
       : null
     if (!session) {
       session = await db.chatSession.create({
         data: {
           kind: 'chat',
           title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
+          // Phase 0 Bug 3: stamp ownership on creation.
+          userId: verifiedUserId,
         },
       })
       // Mirror to Supabase (cloud) if user is authenticated
-      const userId = await getUserIdFromRequest(req)
-      if (userId) {
+      if (verifiedUserId) {
         const admin = await getSupabaseAdmin()
         if (admin) {
           await admin
             .from('chat_sessions')
-            .insert({ id: session.id, user_id: userId, title: session.title, kind: 'chat' })
+            .insert({ id: session.id, user_id: verifiedUserId, title: session.title, kind: 'chat' })
             .then(r => console.log('[supabase-sync] session saved'), e => console.error('[supabase-sync] FAILED:', e.message))
         }
       }
     }
 
     const zai = await getZAI()
-    const systemPrompt = buildSystemPrompt(enabledConnectors, language)
+    // Phase 1 P1: fetch the verified user's durable memories (top 25 by
+    // recency) and inject them into the system prompt. Guests and users
+    // with no memories get the unmodified prompt.
+    const userMemories = verifiedUserId
+      ? await db.userMemory.findMany({
+          where: { userId: verifiedUserId },
+          orderBy: { createdAt: 'desc' },
+          take: 25,
+          select: { content: true },
+        })
+      : []
+    const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact)
+
+    // Phase 1 P1: detect a "remember: ..." directive from the user. This is
+    // the opt-in extraction path — we never silently extract. When the user
+    // types "remember: I'm a morning person" the durable fact is saved to
+    // the UserMemory table for future sessions, scoped to this user only.
+    // The assistant still answers the message normally afterward.
+    const rememberFact = verifiedUserId ? parseRememberDirective(trimmed) : null
+    if (rememberFact && verifiedUserId) {
+      // Cap total memories per user (matches the /api/memory POST guard).
+      const memCount = await db.userMemory.count({ where: { userId: verifiedUserId } })
+      if (memCount < 500) {
+        await db.userMemory.create({
+          data: {
+            userId: verifiedUserId,
+            content: rememberFact,
+            sourceSessionId: session.id,
+          },
+        }).catch((e) => console.error('[memory] save failed:', e))
+      }
+    }
 
     // Build message history
     const history = await db.chatMessage.findMany({
@@ -498,10 +724,11 @@ export async function POST(req: NextRequest) {
           const userMessage = await db.chatMessage.create({
             data: { sessionId: session!.id, role: 'user', content: trimmed },
           })
-          // Mirror to Supabase
+          // Mirror to Supabase (Phase 0 Bug 2: verifiedUserId replaces the
+          // forged-header path; the cloud row is only written for an
+          // authenticated user, with their verified id)
           {
-            const userId = await getUserIdFromRequest(req)
-            if (userId) {
+            if (verifiedUserId) {
               const admin = await getSupabaseAdmin()
               if (admin) {
                 admin.from('chat_messages')
@@ -631,7 +858,31 @@ export async function POST(req: NextRequest) {
                 content: `TOOL_RESULT (${toolCall.tool}):\n${resultJson}\n\nContinue: use another TOOL_CALL if needed, or give your final answer.`,
               })
             } else {
-              // Final answer
+              // Phase 1 P2: parse any ARTIFACT_PATCH directives from the
+              // response BEFORE computing the visible final answer. Each
+              // patch is emitted as an `artifact_patch` event for the client
+              // to apply to the open artifact (ChatGPT-Canvas style targeted
+              // edit, instead of regenerating the whole artifact). Only
+              // patches targeting the currently-open artifact id are emitted
+              // — guards against the model addressing a stale or fabricated id.
+              if (openArtifact) {
+                const patches = parseArtifactPatches(content)
+                for (const patch of patches) {
+                  if (patch.artifactId === openArtifact.artifactId) {
+                    send({
+                      type: 'artifact_patch',
+                      artifactId: patch.artifactId,
+                      find: patch.find,
+                      replace: patch.replace,
+                      note: patch.note,
+                    })
+                  }
+                }
+              }
+
+              // Final answer: strip both TOOL_CALL and ARTIFACT_PATCH
+              // directives from the visible prose (leaving the model's
+              // one-line acknowledgement like "Done — shortened the intro.").
               const finalAnswer = stripToolCall(content) || 'I could not complete that. Try rephrasing.'
               await db.chatMessage.create({
                 data: { sessionId: session!.id, role: 'assistant', content: finalAnswer },
