@@ -104,9 +104,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: data.user, loading: false })
       return data.user
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Sign in failed'
+      let message = e instanceof Error ? e.message : 'Sign in failed'
+      // Human-friendly messages for network-level failures
+      if (/Failed to fetch|NetworkError|fetch failed/i.test(message)) {
+        message = 'Cannot reach the server — check your connection and try again.'
+      }
       set({ loading: false, error: message })
-      throw e
+      throw new Error(message)
     }
   },
 
@@ -120,9 +124,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: data.user, loading: false })
       return data.user
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Sign up failed'
+      let message = e instanceof Error ? e.message : 'Sign up failed'
+      if (/Failed to fetch|NetworkError|fetch failed/i.test(message)) {
+        message = 'Cannot reach the server — check your connection and try again.'
+      }
       set({ loading: false, error: message })
-      throw e
+      throw new Error(message)
     }
   },
 

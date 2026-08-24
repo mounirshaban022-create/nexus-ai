@@ -1065,12 +1065,33 @@ export async function POST(req: NextRequest) {
           // Include the new user message (history was fetched before insert)
           llmMessages.push({ role: 'user', content: trimmed })
 
-          // SESSION DOCUMENT MEMORY (follow-up messages): if this message
-          // has NO new attachment but the session already has a document
-          // (attached earlier in the conversation), restore it so the AI
-          // can still answer questions about it and edit/PDF-operate on it.
+          // SESSION DOCUMENT MEMORY: persist the attachment context as a
+          // DATABASE chat message when first attached, so it survives
+          // server restarts AND appears in history for follow-ups. For
+          // follow-ups with no new attachment, restore from the DB history
+          // (search for the attachment marker) or the in-memory cache.
           if (!attachment && session?.id) {
-            const stored = sessionDocs.get(session.id)
+            // Try in-memory first (fast path)
+            let stored = sessionDocs.get(session.id) ?? null
+            if (!stored) {
+              // Fall back to the DB: look for the attachment marker message
+              const marker = history.find(
+                (m) => m.role === 'user' && m.content.startsWith('[The user attached the document "')
+              )
+              if (marker) {
+                const filenameMatch = marker.content.match(/"([^"]+)"/)
+                const textMatch = marker.content.match(/DOCUMENT "[^"]+":\n([\s\S]*?)\n(You can answer|$)/)
+                stored = {
+                  title: filenameMatch?.[1] ?? 'document',
+                  text: (textMatch?.[1] ?? marker.content).slice(0, 40000),
+                  format: marker.content.includes('pdf_operation') ? 'pdf' : 'doc',
+                  filename: filenameMatch?.[1] ?? 'document',
+                  dataUrl: '', // not available from history — tools will ask to re-attach for binary ops
+                }
+                // Cache for future requests
+                sessionDocs.set(session.id, stored)
+              }
+            }
             if (stored) {
               activeDoc = stored
               attachmentContextMessage =
@@ -1081,6 +1102,18 @@ export async function POST(req: NextRequest) {
           } else if (attachment && session?.id && activeDoc) {
             // Remember the newly-attached document for the rest of the session
             sessionDocs.set(session.id, activeDoc)
+            // ALSO persist as a DB message so it survives restarts
+            try {
+              await db.chatMessage.create({
+                data: {
+                  sessionId: session.id,
+                  role: 'user',
+                  content: attachmentContextMessage.slice(0, 30000),
+                },
+              })
+            } catch {
+              /* best-effort persistence */
+            }
           }
 
           // Document attachment context: inject the parsed document content

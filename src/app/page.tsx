@@ -364,6 +364,7 @@ function NexusApp() {
       let dripQueue: string[] = []
       let dripTimer: number | null = null
       let dripTargetId: string | null = null
+      let dripDone = false // set when assistant_end arrives
       const appendToMessage = (id: string, fragment: string) => {
         setMessages(prev => {
           if (!id) return prev
@@ -384,10 +385,16 @@ function NexusApp() {
             if (dripTimer !== null) { window.clearInterval(dripTimer); dripTimer = null }
             return
           }
-          // Emit 1 fragment per tick (~24ms) — feels like typing
+          // 1 word per 45ms = ~22 words/sec — clearly visible typing effect
           const frag = dripQueue.shift()!
           if (dripTargetId) appendToMessage(dripTargetId, frag)
-        }, 24)
+          // Catch-up: only when the queue is VERY backed up (>60 words)
+          // to keep total render time bounded for very long responses
+          if (dripQueue.length > 60) {
+            const frag2 = dripQueue.shift()!
+            if (dripTargetId) appendToMessage(dripTargetId, frag2)
+          }
+        }, 45)
       }
       const queueDelta = (id: string, delta: string) => {
         dripTargetId = id
@@ -396,12 +403,15 @@ function NexusApp() {
         dripQueue.push(...words)
         startDrip()
       }
-      const flushDrip = () => {
+      /** Flushes remaining drip text into the message. Called when the
+       *  drip finishes naturally OR when we need the full text NOW
+       *  (e.g. applying attachments). */
+      const flushDrip = (keepAlive = false) => {
         if (dripTimer !== null) { window.clearInterval(dripTimer); dripTimer = null }
         const rest = dripQueue.join('')
         dripQueue = []
         if (rest && dripTargetId) appendToMessage(dripTargetId, rest)
-        dripTargetId = null
+        if (!keepAlive) dripTargetId = null
       }
 
       const handleLine = (line: string) => {
@@ -424,34 +434,64 @@ function NexusApp() {
             // Smooth word-by-word drip (feels alive vs. burst-append)
             if (streamingId) queueDelta(streamingId, delta)
           } else if (e.type === 'assistant_end') {
-            // Flush any pending drip fragments BEFORE finalizing so the
-            // complete text is present when attachments are applied.
-            flushDrip()
-            // Capture the current streamingId locally so the updater sees the
-            // correct value even if streamingId has since been mutated. This
-            // is the bug that previously caused the second assistant_end's
-            // attachments to be applied to the wrong bubble (or to no bubble
-            // because streamingId had been nulled).
+            // DON'T flush the drip here — let the word-by-word rendering
+            // finish naturally (it looks alive). Instead, mark done and
+            // let attachments apply once the drip queue drains.
+            dripDone = true
+            // Attachments apply after the drip completes (poll via timeout)
             const id = streamingId
             if (id) {
               const atts = e.attachments ?? []
               setStreamingActive(false)
-              setMessages(prev => {
-                const next = [...prev]
-                const idx = next.findIndex(m => m.id === id)
-                if (idx >= 0) {
-                  const m = next[idx]
-                  // Drop an empty-content bubble if no deltas arrived AND no attachments
-                  // (e.g. when the model only emitted a TOOL_CALL with no prelude)
-                  if (!m.content && atts.length === 0) {
-                    next.splice(idx, 1)
-                  } else {
-                    next[idx] = { ...m, attachments: atts }
-                  }
+              // Wait for the drip queue to drain before applying attachments
+              // (max 3s safety timeout, then force-flush)
+              const waitForDrip = () => {
+                if (dripQueue.length === 0 || !dripTimer) {
+                  // Drip finished (or never started) — flush + apply attachments
+                  flushDrip()
+                  setMessages(prev => {
+                    const next = [...prev]
+                    const idx = next.findIndex(m => m.id === id)
+                    if (idx >= 0) {
+                      const m = next[idx]
+                      if (!m.content && atts.length === 0) {
+                        next.splice(idx, 1)
+                      } else {
+                        next[idx] = { ...m, attachments: atts }
+                      }
+                    }
+                    return next
+                  })
+                  streamingId = null
+                } else {
+                  // Still dripping — check again in 100ms
+                  setTimeout(waitForDrip, 100)
                 }
-                return next
-              })
-              streamingId = null
+              }
+              // Start checking, but with a 3s safety timeout that force-flushes
+              setTimeout(waitForDrip, 50)
+              setTimeout(() => {
+                if (streamingId === id && dripQueue.length > 0) {
+                  flushDrip()
+                  setMessages(prev => {
+                    const next = [...prev]
+                    const idx = next.findIndex(m => m.id === id)
+                    if (idx >= 0) {
+                      const m = next[idx]
+                      if (!m.content && atts.length === 0) {
+                        next.splice(idx, 1)
+                      } else {
+                        next[idx] = { ...m, attachments: atts }
+                      }
+                    }
+                    return next
+                  })
+                  streamingId = null
+                }
+              }, 3000)
+            } else {
+              // No streaming id (shouldn't happen, but safety) — flush now
+              flushDrip()
             }
           } else if (e.type === 'assistant') {
             // Legacy non-streamed path (creator-identity shortcut, etc.)
@@ -494,9 +534,12 @@ function NexusApp() {
       buf += decoder.decode() // flush remaining UTF-8 bytes
       if (buf.trim()) handleLine(buf)
       buf = ''
-      // Final safety: drain any remaining drip fragments (e.g. when the
-      // stream ended without an assistant_end event).
-      flushDrip()
+      // NOTE: we intentionally do NOT flush the drip here. The reader loop
+      // finishing just means the NETWORK stream is done — the word-by-word
+      // rendering should continue at its own pace. The assistant_end
+      // handler's waitForDrip mechanism handles cleanup. Only flush if
+      // assistant_end was never received (abnormal end).
+      if (!dripDone) flushDrip()
     } catch (err: any) {
       setStreamingActive(false)
       setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: `⚠️ ${err.message || 'Something went wrong.'}` }])
