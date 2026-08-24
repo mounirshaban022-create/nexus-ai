@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
-import { writeFile, readFile, mkdir } from 'fs/promises'
+import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { smartChat } from '@/lib/smart-chat'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
+import { extractPdfText } from '@/lib/pdf-text'
 
 export const maxDuration = 120
 
@@ -101,84 +102,16 @@ export async function POST(req: NextRequest) {
     let tables: Array<{ caption: string; rows: string[][] }> = []
 
     if (format === 'pdf') {
-      // pdftotext (poppler) — battle-tested, zero JS deps
-      const { writeFile, unlink } = await import('fs/promises')
-      const { execFile } = await import('child_process')
-      const { promisify } = await import('util')
-      const execFileAsync = promisify(execFile)
-      const tmpPath = path.join((await import('os')).tmpdir(), `nexus-doc-${Date.now()}.pdf`)
-      await writeFile(tmpPath, buffer)
-      try {
-        // Validate it's actually a PDF before parsing
-        if (!buffer.slice(0, 5).toString().startsWith('%PDF-')) {
-          throw new Error('This file is not a valid PDF. It may be corrupted or in a different format.')
-        }
-
-        // PRIMARY: pdftotext (poppler) — fast, reliable for text PDFs.
-        try {
-          const { stdout } = await execFileAsync('pdftotext', ['-layout', tmpPath, '-'], { timeout: 30000 })
-          text = stdout
-        } catch (pdftotextErr) {
-          // pdftotext failed (possibly encrypted/complex). Don't give up yet —
-          // try the pdf-parse library as a second engine before declaring failure.
-          console.warn('[documents] pdftotext failed, trying pdf-parse:', pdftotextErr instanceof Error ? pdftotextErr.message : pdftotextErr)
-        }
-
-        // FALLBACK 1: pdf-parse (pure-JS, handles some PDFs poppler can't)
-        if (!text.trim()) {
-          try {
-            const pdfParse = (await import('pdf-parse')).default as (b: Buffer) => Promise<{ text: string; numpages: number; info?: any }>
-            const data = await pdfParse(buffer)
-            text = data.text ?? ''
-            if (data.numpages) metadata.pages = data.numpages
-          } catch (parseErr) {
-            console.warn('[documents] pdf-parse also failed:', parseErr instanceof Error ? parseErr.message : parseErr)
-          }
-        }
-
-        // FALLBACK 2: OCR for scanned/image-only PDFs
-        if (!text.trim()) {
-          try {
-            const imgDir = (await import('os')).tmpdir()
-            const baseName = `nexus-ocr-${Date.now()}`
-            await execFileAsync('pdftoppm', ['-png', '-r', '200', '-l', '5', tmpPath, `${imgDir}/${baseName}`], { timeout: 60000 })
-            const { readdir } = await import('fs/promises')
-            const files = (await readdir(imgDir)).filter(f => f.startsWith(baseName)).sort()
-            let ocrText = ''
-            for (const f of files.slice(0, 5)) {
-              try {
-                const { stdout: pageText } = await execFileAsync('tesseract', [`${imgDir}/${f}`, '-', '-l', 'eng'], { timeout: 30000 })
-                ocrText += pageText + '\n\n'
-              } catch { /* page OCR failed, skip */ }
-              unlink(`${imgDir}/${f}`).catch(() => {})
-            }
-            if (ocrText.trim()) {
-              text = ocrText
-            }
-          } catch (ocrErr) {
-            console.warn('[documents] OCR fallback failed:', ocrErr instanceof Error ? ocrErr.message : ocrErr)
-          }
-        }
-
-        if (!text.trim()) {
-          throw new Error('No text could be extracted from this PDF. It may be a scanned document, password-protected, or contain no readable text. Try a different file.')
-        }
-
-        // Count pages via pdfinfo (best-effort)
-        if (!metadata.pages) {
-          try {
-            const { stdout: info } = await execFileAsync('pdfinfo', [tmpPath])
-            const pagesMatch = info.match(/Pages:\s+(\d+)/)
-            if (pagesMatch) metadata.pages = parseInt(pagesMatch[1])
-          } catch { /* pdfinfo optional */ }
-        }
-      } catch (pdfError) {
-        // Re-throw the specific user-facing messages we crafted above;
-        // they carry real detail instead of a generic "could not read".
-        throw pdfError
-      } finally {
-        unlink(tmpPath).catch(() => {})
+      // Validate it's actually a PDF before parsing
+      if (!buffer.slice(0, 5).toString().startsWith('%PDF-')) {
+        throw new Error('This file is not a valid PDF. It may be corrupted or in a different format.')
       }
+
+      // 3-layer fallback (pdftotext → pdf-parse v2 → OCR) lives in
+      // src/lib/pdf-text.ts — both document routes share the same pipeline.
+      const { text: pdfText, pages } = await extractPdfText(buffer)
+      text = pdfText
+      if (pages) metadata.pages = pages
     } else if (format === 'docx') {
       const { extractRawText } = await import('mammoth')
       const result = await extractRawText({ buffer })

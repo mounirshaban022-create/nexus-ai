@@ -101,11 +101,8 @@ export async function POST(req: NextRequest) {
 
     /* ---------- Provider: free Microsoft neural voices ---------- */
     if (isEdgeVoice(voice)) {
-      // msedge-tts handles long text natively; process in chunks for safety
-      const buffers: Buffer[] = []
-      for (const chunk of chunks) {
-        buffers.push(await edgeTts(chunk, voice, speed))
-      }
+      // Bug G: synthesize every chunk in parallel (was sequential for-loop).
+      const buffers = await Promise.all(chunks.map((c) => edgeTts(c, voice, speed)))
       const merged = Buffer.concat(buffers)
       return new NextResponse(new Uint8Array(merged), {
         status: 200,
@@ -119,18 +116,20 @@ export async function POST(req: NextRequest) {
 
     /* ---------- Provider: NEXUS voices (bundled SDK) ---------- */
     const zai = await getZAI()
-    const audioBuffers: Buffer[] = []
-    for (const chunk of chunks) {
-      const response = await zai.audio.tts.create({
-        input: chunk,
-        voice,
-        speed,
-        response_format: 'wav',
-        stream: false,
+    // Bug G: synthesize every chunk in parallel (was sequential for-loop).
+    const audioBuffers = await Promise.all(
+      chunks.map(async (chunk) => {
+        const response = await zai.audio.tts.create({
+          input: chunk,
+          voice,
+          speed,
+          response_format: 'wav',
+          stream: false,
+        })
+        const arrayBuffer = await response.arrayBuffer()
+        return Buffer.from(new Uint8Array(arrayBuffer))
       })
-      const arrayBuffer = await response.arrayBuffer()
-      audioBuffers.push(Buffer.from(new Uint8Array(arrayBuffer)))
-    }
+    )
 
     // Merge: strip the 44-byte WAV header from every chunk,
     // then rebuild a single valid WAV header for the concatenated PCM data.

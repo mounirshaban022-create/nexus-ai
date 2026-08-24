@@ -12,6 +12,7 @@ import {
   User,
   Sparkles,
   Paperclip,
+  Pencil,
   Send,
   ChevronDown,
   Zap,
@@ -44,6 +45,8 @@ import { LibraryMode } from '@/components/omni/library-mode'
 import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
 import { VoiceModeOverlay } from '@/components/omni/voice-mode-overlay'
 import { ConnectPanel } from '@/components/omni/connect-panel'
+import { LegalPage } from '@/components/omni/legal-page'
+import { ProfileEditModal } from '@/components/omni/profile-edit-modal'
 import { Headphones, Mic } from 'lucide-react'
 
 // ============ TYPES ============
@@ -81,8 +84,11 @@ function NexusApp() {
   const { user, signOut, fetchMe } = useAuth()
   const [authOpen, setAuthOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
+  const [voiceMounted, setVoiceMounted] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+  const [legalPage, setLegalPage] = useState<'privacy' | 'terms' | null>(null)
+  const [profileEditOpen, setProfileEditOpen] = useState(false)
 
   // Navigation
   const [activeTab, setActiveTab] = useState<TabId>('chat')
@@ -206,12 +212,12 @@ function NexusApp() {
     image:      'from-rose-500 to-orange-500',
     video:      'from-orange-500 to-amber-500',
     office:     'from-pink-500 to-rose-500',
-    upload:     'from-teal-500 to-emerald-500',
-    vision:     'from-cyan-500 to-teal-500',
-    documents:  'from-emerald-500 to-green-500',
+    upload:     'from-amber-500 to-orange-500',
+    vision:     'from-orange-500 to-rose-500',
+    documents:  'from-rose-500 to-pink-500',
     search:     'from-amber-500 to-yellow-500',
     agent:      'from-fuchsia-500 to-pink-500',
-    code:       'from-emerald-500 to-teal-500',
+    code:       'from-amber-500 to-yellow-500',
     connectors: 'from-rose-500 to-red-500',
     email:      'from-orange-500 to-amber-500',
   }
@@ -232,11 +238,28 @@ function NexusApp() {
     setAuthOpen(true)
   }
 
+  // Lazy-mount the voice overlay so its hooks don't re-evaluate on every keystroke
+  // until the user actually opens voice mode.
+  useEffect(() => {
+    if (voiceOpen) setVoiceMounted(true)
+  }, [voiceOpen])
+
   // Listen for "open connect panel" requests from inline email cards
   useEffect(() => {
     const handler = () => setConnectOpen(true)
     window.addEventListener('nexus:open-connect', handler)
     return () => window.removeEventListener('nexus:open-connect', handler)
+  }, [])
+
+  // Listen for "open legal page" requests (Privacy / Terms) — mirrors the
+  // nexus:open-connect pattern; e.detail.type is 'privacy' | 'terms'.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const t = (e as CustomEvent<'privacy' | 'terms'>).detail
+      if (t === 'privacy' || t === 'terms') setLegalPage(t)
+    }
+    window.addEventListener('nexus:open-legal', handler as EventListener)
+    return () => window.removeEventListener('nexus:open-legal', handler as EventListener)
   }, [])
 
   // Listen for "send this message" requests from answer follow-up chips
@@ -267,7 +290,7 @@ function NexusApp() {
   const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
 
   return (
-    <div className="flex h-dvh flex-col bg-background">
+    <div className="nexus-shell bg-background">
       {/* Hidden file input for tool uploads — uses the tool engine's ref */}
       <input
         ref={toolEngine.fileInputRef}
@@ -278,9 +301,22 @@ function NexusApp() {
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
 
-      <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+      {/* Voice overlay is lazy-mounted — its hooks only evaluate once opened */}
+      {voiceMounted && (
+        <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+      )}
 
       <ConnectPanel open={connectOpen} onClose={() => setConnectOpen(false)} />
+
+      <ProfileEditModal open={profileEditOpen} onClose={() => setProfileEditOpen(false)} />
+
+      {legalPage !== null && (
+        <LegalPage
+          type={legalPage}
+          onClose={() => setLegalPage(null)}
+          language={language}
+        />
+      )}
 
       {/* ====== DESKTOP SIDEBAR ====== */}
       <div className="flex min-h-0 flex-1">
@@ -328,6 +364,10 @@ function NexusApp() {
 
         {/* ====== MAIN CONTENT ====== */}
         <main className="flex min-w-0 flex-1 flex-col">
+          {/* Wrap chat header + intel dropdown in a relative container so the
+              absolute intel dropdown anchors against the chat header instead
+              of the viewport. */}
+          <div className="relative">
           {/* Mobile header */}
           <header className="flex items-center justify-between px-4 py-2.5 lg:hidden">
             <Image
@@ -392,6 +432,7 @@ function NexusApp() {
               </motion.div>
             )}
           </AnimatePresence>
+          </div>
 
           {/* ====== CONTENT AREA ====== */}
           {activeTab === 'chat' && (
@@ -455,11 +496,11 @@ function NexusApp() {
                             <span className="text-xs text-muted-foreground">{toolRunningLabel}</span>
                           </>
                         ) : (
-                          <>
-                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                          </>
+                          <div className="flex flex-col gap-2 rounded-2xl bg-secondary/60 px-4 py-3">
+                            <span className="omni-shimmer h-3 w-24 rounded-full" />
+                            <span className="omni-shimmer h-3 w-32 rounded-full" />
+                            <span className="omni-shimmer h-3 w-20 rounded-full" />
+                          </div>
                         )}
                       </div>
                     )}
@@ -472,7 +513,7 @@ function NexusApp() {
                 <form className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send() }}>
                   {/* Pending tool banner */}
                   {pendingToolDef && (
-                    <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/8 px-3 py-1.5">
+                    <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5">
                       {(() => {
                         const Icon = TOOL_MENU.flatMap(c => c.items).find(i => i.tool === toolEngine.pendingTool)?.icon || Sparkles
                         return <Icon className="h-3.5 w-3.5 text-primary" />
@@ -496,9 +537,9 @@ function NexusApp() {
                   {toolEngine.toolError && (
                     <p className="self-start text-xs text-destructive">{toolEngine.toolError}</p>
                   )}
-                  <div className="relative flex flex-1 items-end rounded-[26px] border border-border bg-card shadow-sm">
+                  <div className="relative flex flex-1 items-end rounded-3xl border border-border bg-card shadow-sm">
                     <button type="button" onClick={() => setToolMenuOpen(!toolMenuOpen)}
-                      aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-[26px] text-muted-foreground transition hover:text-foreground"
+                      aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-3xl text-muted-foreground transition hover:text-foreground"
                     >
                       <Plus className="h-5 w-5" />
                     </button>
@@ -515,7 +556,7 @@ function NexusApp() {
                         <Mic className="h-[18px] w-[18px]" />
                       </button>
                       <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile) || sending || !!toolRunningLabel} aria-label="Send"
-                        className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-110 disabled:opacity-30"
+                        className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-30"
                       >
                         <Send className="h-4 w-4" />
                       </button>
@@ -631,9 +672,19 @@ function NexusApp() {
             <div className="omni-scroll flex-1 overflow-y-auto">
               <div className="mx-auto max-w-md px-4 py-8">
                 <div className="flex flex-col items-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 text-xl font-bold text-white">
-                    {displayInitial}
-                  </div>
+                  {user?.avatarUrl ? (
+                    <Image
+                      src={user.avatarUrl}
+                      alt={displayName}
+                      width={64}
+                      height={64}
+                      className="h-16 w-16 rounded-full border-2 border-border object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 text-xl font-bold text-white">
+                      {displayInitial}
+                    </div>
+                  )}
                   <h2 className="mt-3 text-lg font-bold">{displayName}</h2>
                   {user && <span className="text-xs text-muted-foreground">{user.email}</span>}
                   {user && user.createdAt && (
@@ -653,7 +704,12 @@ function NexusApp() {
                     </Button>
                   </div>
                 ) : (
-                  <Button variant="outline" className="mt-6 w-full rounded-xl" onClick={() => signOut()}>Sign out</Button>
+                  <div className="mt-6 flex flex-col gap-2">
+                    <Button className="rounded-xl bg-primary text-primary-foreground" onClick={() => setProfileEditOpen(true)}>
+                      <Pencil className="mr-1.5 h-4 w-4" /> Edit profile
+                    </Button>
+                    <Button variant="outline" className="rounded-xl" onClick={() => signOut()}>Sign out</Button>
+                  </div>
                 )}
                 {/* Personalization */}
                 <section className="mt-6">
@@ -673,6 +729,14 @@ function NexusApp() {
                       <span>Re-run onboarding</span>
                       <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
+                    <button onClick={() => setLegalPage('privacy')} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                      <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /> Privacy Policy</span>
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                    <button onClick={() => setLegalPage('terms')} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+                      <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /> Terms of Service</span>
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
                   </div>
                 </section>
                 {/* Interests */}
@@ -686,10 +750,13 @@ function NexusApp() {
                     </div>
                   </section>
                 )}
-                {/* Creator */}
-                <div className="mt-8 text-center">
-                  <p className="text-xs text-muted-foreground">Built by Mounir Shaaban</p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground/60">Nexus AI © 2026</p>
+                {/* Tiny legal footer — the “Built by” credit lives in the desktop footer (Part E) */}
+                <div className="mt-8 flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
+                  <button onClick={() => setLegalPage('privacy')} className="transition hover:text-foreground">Privacy</button>
+                  <span aria-hidden>·</span>
+                  <button onClick={() => setLegalPage('terms')} className="transition hover:text-foreground">Terms</button>
+                  <span aria-hidden>·</span>
+                  <span>© 2026 NEXUS AI</span>
                 </div>
               </div>
             </div>
@@ -698,7 +765,7 @@ function NexusApp() {
       </div>
 
       {/* ====== MOBILE BOTTOM NAV ====== */}
-      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Primary">
+      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 backdrop-blur lg:hidden" aria-label="Primary">
         {TABS.map(t => {
           const Icon = t.icon
           const active = activeTab === t.id
@@ -707,7 +774,7 @@ function NexusApp() {
               className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2.5"
             >
               {active && (
-                <motion.span layoutId="nav-active" className="absolute -top-px h-0.5 w-10 rounded-full bg-primary" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
+                <motion.span layoutId="nav-active" className="absolute inset-x-2 inset-y-1 -z-10 rounded-full bg-primary/10" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
               )}
               <motion.div animate={{ scale: active ? 1.08 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
                 <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
@@ -717,6 +784,18 @@ function NexusApp() {
           )
         })}
       </nav>
+
+      {/* ====== DESKTOP FOOTER ====== */}
+      <footer className="mt-auto hidden h-10 items-center justify-between border-t bg-background/95 px-6 py-3 text-xs text-muted-foreground lg:flex">
+        <span>NEXUS AI · by Mounir Shaaban</span>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setLegalPage('privacy')} className="transition hover:text-foreground">Privacy</button>
+          <span aria-hidden>·</span>
+          <button onClick={() => setLegalPage('terms')} className="transition hover:text-foreground">Terms</button>
+          <span aria-hidden>·</span>
+          <span>© 2026</span>
+        </div>
+      </footer>
     </div>
   )
 }

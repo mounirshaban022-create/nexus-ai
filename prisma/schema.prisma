@@ -69,18 +69,28 @@ model GeneratedDocument {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String   @default("")
-  passwordHash String
-  interests    String   @default("[]") // JSON array
-  commStyle    String   @default("balanced")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String   @default("")
+  passwordHash  String
+  interests     String   @default("[]") // JSON array
+  commStyle     String   @default("balanced")
+  avatarUrl     String?  // path/URL to uploaded profile picture
+  bio           String?  // free-text "about me" (max ~500 chars)
+  location      String?  // city, country
+  timezone      String?  // IANA name e.g. "Asia/Dubai"
+  language      String   @default("en") // UI language pref synced to DB
+  jobTitle      String?
+  website       String?
+  notifications Boolean  @default(true)    // product/marketing emails opt-in
+  emailVerified Boolean  @default(false)
+  lastActiveAt  DateTime? // for presence / sliding session
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  images       GeneratedImage[]
-  videos       GeneratedVideo[]
-  documents    GeneratedDocument[]
+  images        GeneratedImage[]
+  videos        GeneratedVideo[]
+  documents     GeneratedDocument[]
 }
 
 model EmailAccount {

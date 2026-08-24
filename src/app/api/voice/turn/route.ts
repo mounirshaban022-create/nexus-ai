@@ -28,15 +28,18 @@ const requestSchema = z.object({
 })
 
 /** Voice persona: natural, warm, concise — designed for spoken conversation. */
-const VOICE_SYSTEM_PROMPT = [
-  'You are NEXUS, created by Mounir Shaaban (the creator of NEXUS AI). You are a warm, intelligent voice companion in a real-time spoken conversation.',
-  'RULES (your reply is spoken aloud):',
-  '1. SHORT: 1-3 sentences, max ~50 words, unless detail is explicitly requested.',
-  '2. Natural spoken style: contractions, no markdown, no lists, no emoji.',
-  '3. Direct and warm — never waffle.',
-  '4. LANGUAGE: reply in the SAME language the user just spoke.',
-  '5. CURRENT TIME: it is ' + new Date().toISOString() + '. Use this for any time/date questions.',
-].join('\n')
+// Bug J: built per-request so the CURRENT TIME is always fresh (was stale at module load).
+function buildVoiceSystemPrompt(): string {
+  return [
+    'You are NEXUS, created by Mounir Shaaban (the creator of NEXUS AI). You are a warm, intelligent voice companion in a real-time spoken conversation.',
+    'RULES (your reply is spoken aloud):',
+    '1. SHORT: 1-3 sentences, max ~50 words, unless detail is explicitly requested.',
+    '2. Natural spoken style: contractions, no markdown, no lists, no emoji.',
+    '3. Direct and warm — never waffle.',
+    '4. LANGUAGE: reply in the SAME language the user just spoke.',
+    '5. CURRENT TIME: it is ' + new Date().toISOString() + '. Use this for any time/date questions.',
+  ].join('\n')
+}
 
 /** Strips markdown syntax so TTS speaks naturally. */
 function stripMarkdownForSpeech(text: string): string {
@@ -162,7 +165,7 @@ export async function POST(req: NextRequest) {
         : ''
     const reply = (await smartChat(
       [
-        { role: 'assistant', content: VOICE_SYSTEM_PROMPT + languageHint },
+        { role: 'assistant', content: buildVoiceSystemPrompt() + languageHint },
         ...historyMessages,
         { role: 'user', content: transcript },
       ],
@@ -198,18 +201,20 @@ export async function POST(req: NextRequest) {
         }
       } else {
         const chunks = splitTextIntoChunks(speechText)
-        const buffers: Buffer[] = []
-        for (const chunk of chunks) {
-          const ttsRes = await zai.audio.tts.create({
-            input: chunk,
-            voice,
-            speed: 1.0,
-            response_format: 'wav',
-            stream: false,
+        // Bug G: synthesise every chunk in parallel (was sequential for-loop).
+        const buffers = await Promise.all(
+          chunks.map(async (chunk) => {
+            const ttsRes = await zai.audio.tts.create({
+              input: chunk,
+              voice,
+              speed: 1.0,
+              response_format: 'wav',
+              stream: false,
+            })
+            const arrayBuffer = await ttsRes.arrayBuffer()
+            return Buffer.from(new Uint8Array(arrayBuffer))
           })
-          const arrayBuffer = await ttsRes.arrayBuffer()
-          buffers.push(Buffer.from(new Uint8Array(arrayBuffer)))
-        }
+        )
         if (buffers.length > 0) {
           const pcmParts = buffers.map((b) => b.subarray(44))
           const pcmLength = pcmParts.reduce((sum, p) => sum + p.length, 0)

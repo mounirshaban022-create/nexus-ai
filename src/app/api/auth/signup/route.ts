@@ -2,16 +2,31 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { hashPassword, signToken, setSessionCookie } from '@/lib/auth'
+import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 
+// Tightened password policy: min 8 chars + ≥1 letter + ≥1 digit.
 const schema = z.object({
   email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Za-z]/, 'Password must include at least one letter')
+    .regex(/\d/, 'Password must include at least one digit'),
   name: z.string().trim().min(1).max(80).optional(),
 })
 
 export async function POST(req: NextRequest) {
+  // Rate limit: 5 signups per minute per client.
+  const rl = rateLimit(`auth-signup:${clientKey(req)}`, 5, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Too many attempts. Wait a minute.' },
+      { status: 429 }
+    )
+  }
+
   let body: unknown
   try {
     body = await req.json()

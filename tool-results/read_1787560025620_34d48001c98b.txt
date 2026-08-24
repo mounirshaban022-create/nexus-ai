@@ -1,0 +1,723 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useCallback, useEffect, useState } from 'react'
+     4→     4→import Image from 'next/image'
+     5→     5→import { motion, AnimatePresence } from 'framer-motion'
+     6→     6→import {
+     7→     7→  Compass,
+     8→     8→  FolderKanban,
+     9→     9→  Library,
+    10→    10→  MessageSquare,
+    11→    11→  Plus,
+    12→    12→  User,
+    13→    13→  Sparkles,
+    14→    14→  Paperclip,
+    15→    15→  Send,
+    16→    16→  ChevronDown,
+    17→    17→  Zap,
+    18→    18→  Brain,
+    19→    19→  Eye,
+    20→    20→  Image as ImageIcon,
+    21→    21→  Video,
+    22→    22→  Code,
+    23→    23→  FileText,
+    24→    24→  Globe,
+    25→    25→  Mail,
+    26→    26→  BookOpen,
+    27→    27→  ScanEye,
+    28→    28→  FileSearch,
+    29→    29→  X,
+    30→    30→  LogIn,
+    31→    31→  UserPlus,
+    32→    32→  Loader2,
+    33→    33→} from 'lucide-react'
+    34→    34→import { Button } from '@/components/ui/button'
+    35→    35→import { Textarea } from '@/components/ui/textarea'
+    36→    36→import { usePreferences, applyPreferences } from '@/lib/preferences'
+    37→    37→import { useAuth } from '@/hooks/use-auth'
+    38→    38→import { AuthModal } from '@/components/omni/auth-modal'
+    39→    39→import { Markdown } from '@/components/omni/markdown'
+    40→    40→import { AttachmentCard } from '@/components/omni/chat-attachments'
+    41→    41→import { Onboarding } from '@/components/omni/onboarding'
+    42→    42→import { ProjectsMode } from '@/components/omni/projects-mode'
+    43→    43→import { LibraryMode } from '@/components/omni/library-mode'
+    44→    44→import { useToolEngine, TOOLS, type ToolId } from '@/components/omni/tool-engine'
+    45→    45→import { VoiceModeOverlay } from '@/components/omni/voice-mode-overlay'
+    46→    46→import { ConnectPanel } from '@/components/omni/connect-panel'
+    47→    47→import { Headphones, Mic } from 'lucide-react'
+    48→    48→
+    49→    49→// ============ TYPES ============
+    50→    50→type TabId = 'chat' | 'projects' | 'explore' | 'library' | 'profile'
+    51→    51→type Intelligence = 'auto' | 'fast' | 'reasoning' | 'vision'
+    52→    52→
+    53→    53→interface Message {
+    54→    54→  id: string
+    55→    55→  role: 'user' | 'assistant'
+    56→    56→  content: string
+    57→    57→  attachments?: any[]
+    58→    58→}
+    59→    59→
+    60→    60→interface ToolMenuItem {
+    61→    61→  label: string
+    62→    62→  icon: any
+    63→    63→  tool: ToolId
+    64→    64→}
+    65→    65→
+    66→    66→// ============ MAIN COMPONENT ============
+    67→    67→export default function Page() {
+    68→    68→  const { theme, language, onboarded } = usePreferences()
+    69→    69→  useEffect(() => { applyPreferences(theme, language) }, [theme, language])
+    70→    70→
+    71→    71→  if (!onboarded) return <Onboarding />
+    72→    72→  return <NexusApp />
+    73→    73→}
+    74→    74→
+    75→    75→// ============ APP (post-onboarding) ============
+    76→    76→function NexusApp() {
+    77→    77→  const { theme, language, toggleTheme, toggleLanguage, name, interests, commStyle, resetOnboarding } = usePreferences()
+    78→    78→  useEffect(() => { applyPreferences(theme, language) }, [theme, language])
+    79→    79→
+    80→    80→  // Real auth
+    81→    81→  const { user, signOut, fetchMe } = useAuth()
+    82→    82→  const [authOpen, setAuthOpen] = useState(false)
+    83→    83→  const [voiceOpen, setVoiceOpen] = useState(false)
+    84→    84→  const [connectOpen, setConnectOpen] = useState(false)
+    85→    85→  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+    86→    86→
+    87→    87→  // Navigation
+    88→    88→  const [activeTab, setActiveTab] = useState<TabId>('chat')
+    89→    89→
+    90→    90→  // Intelligence selector
+    91→    91→  const [intelligence, setIntelligence] = useState<Intelligence>('auto')
+    92→    92→  const [intelOpen, setIntelOpen] = useState(false)
+    93→    93→
+    94→    94→  // Tool menu (the + bottom-sheet)
+    95→    95→  const [toolMenuOpen, setToolMenuOpen] = useState(false)
+    96→    96→
+    97→    97→  // Chat state
+    98→    98→  const [messages, setMessages] = useState<Message[]>([])
+    99→    99→  const [input, setInput] = useState('')
+   100→   100→  const [sending, setSending] = useState(false)
+   101→   101→  const [toolRunningLabel, setToolRunningLabel] = useState<string | null>(null)
+   102→   102→
+   103→   103→  // Tool engine — routes the next message to the right /api/* route
+   104→   104→  const toolEngine = useToolEngine(
+   105→   105→    // onAssistant: push assistant message into the conversation
+   106→   106→    useCallback((msg: { content: string; attachments?: any[] }) => {
+   107→   107→      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: msg.content, attachments: msg.attachments }])
+   108→   108→    }, []),
+   109→   109→    // onToolRunning: show a status line above the composer
+   110→   110→    useCallback((running: boolean, label?: string) => {
+   111→   111→      setToolRunningLabel(running ? (label || 'Working…') : null)
+   112→   112→    }, []),
+   113→   113→  )
+   114→   114→
+   115→   115→  // Send: routes through tool engine if a tool is pending, else plain chat
+   116→   116→  const send = useCallback(async (text?: string) => {
+   117→   117→    const msg = (text ?? input).trim()
+   118→   118→    if (!msg || sending) return
+   119→   119→    setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: msg }])
+   120→   120→    setInput('')
+   121→   121→    setSending(true)
+   122→   122→    try {
+   123→   123→      // If a tool is pending, route to the tool engine
+   124→   124→      if (toolEngine.pendingTool) {
+   125→   125→        await toolEngine.execute(msg)
+   126→   126→        return
+   127→   127→      }
+   128→   128→      // Otherwise: plain chat stream
+   129→   129→      const res = await fetch('/api/chat', {
+   130→   130→        method: 'POST',
+   131→   131→        headers: { 'Content-Type': 'application/json' },
+   132→   132→        body: JSON.stringify({ message: msg }),
+   133→   133→      })
+   134→   134→      const reader = res.body!.getReader()
+   135→   135→      const decoder = new TextDecoder()
+   136→   136→      let buf = ''
+   137→   137→      for (;;) {
+   138→   138→        const { done, value } = await reader.read()
+   139→   139→        if (done) break
+   140→   140→        buf += decoder.decode(value, { stream: true })
+   141→   141→        const lines = buf.split('\n')
+   142→   142→        buf = lines.pop() ?? ''
+   143→   143→        for (const line of lines) {
+   144→   144→          if (!line.trim()) continue
+   145→   145→          try {
+   146→   146→            const e = JSON.parse(line)
+   147→   147→            if (e.type === 'assistant') {
+   148→   148→              setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: e.content, attachments: e.attachments }])
+   149→   149→            }
+   150→   150→          } catch {}
+   151→   151→        }
+   152→   152→      }
+   153→   153→    } catch (err: any) {
+   154→   154→      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: `⚠️ ${err.message || 'Something went wrong.'}` }])
+   155→   155→    } finally {
+   156→   156→      setSending(false)
+   157→   157→    }
+   158→   158→  }, [input, sending, toolEngine])
+   159→   159→
+   160→   160→  const TABS: Array<{ id: TabId; label: string; icon: any }> = [
+   161→   161→    { id: 'chat', label: 'Chat', icon: MessageSquare },
+   162→   162→    { id: 'projects', label: 'Projects', icon: FolderKanban },
+   163→   163→    { id: 'explore', label: 'Explore', icon: Compass },
+   164→   164→    { id: 'library', label: 'Library', icon: Library },
+   165→   165→    { id: 'profile', label: 'Profile', icon: User },
+   166→   166→  ]
+   167→   167→
+   168→   168→  const INTEL_OPTIONS: Array<{ id: Intelligence; label: string; desc: string; icon: any }> = [
+   169→   169→    { id: 'auto', label: 'Auto', desc: 'Best model for the task', icon: Sparkles },
+   170→   170→    { id: 'fast', label: 'Fast', desc: 'Quick everyday conversations', icon: Zap },
+   171→   171→    { id: 'reasoning', label: 'Reasoning', desc: 'Complex analysis & hard problems', icon: Brain },
+   172→   172→    { id: 'vision', label: 'Vision', desc: 'Images & visual understanding', icon: Eye },
+   173→   173→  ]
+   174→   174→
+   175→   175→  const TOOL_MENU: Array<{ category: string; items: ToolMenuItem[] }> = [
+   176→   176→    { category: 'Create', items: [
+   177→   177→      { label: 'Image', icon: ImageIcon, tool: 'image' },
+   178→   178→      { label: 'Video', icon: Video, tool: 'video' },
+   179→   179→      { label: 'Writing', icon: FileText, tool: 'office' },
+   180→   180→    ]},
+   181→   181→    { category: 'Understand', items: [
+   182→   182→      { label: 'Upload file', icon: Paperclip, tool: 'upload' },
+   183→   183→      { label: 'Camera', icon: ScanEye, tool: 'vision' },
+   184→   184→      { label: 'Vision', icon: Eye, tool: 'vision' },
+   185→   185→      { label: 'Document analysis', icon: FileSearch, tool: 'documents' },
+   186→   186→    ]},
+   187→   187→    { category: 'Think', items: [
+   188→   188→      { label: 'Deep research', icon: Globe, tool: 'search' },
+   189→   189→      { label: 'Reasoning', icon: Brain, tool: 'agent' },
+   190→   190→      { label: 'Data analysis', icon: BookOpen, tool: 'code' },
+   191→   191→    ]},
+   192→   192→    { category: 'Work', items: [
+   193→   193→      { label: 'Code', icon: Code, tool: 'code' },
+   194→   194→      { label: 'Documents', icon: FileText, tool: 'documents' },
+   195→   195→      { label: 'Office', icon: FileText, tool: 'office' },
+   196→   196→    ]},
+   197→   197→    { category: 'Connect', items: [
+   198→   198→      { label: 'Web search', icon: Globe, tool: 'search' },
+   199→   199→      { label: 'Connected apps', icon: Plus, tool: 'connectors' },
+   200→   200→      { label: 'Email', icon: Mail, tool: 'email' },
+   201→   201→    ]},
+   202→   202→  ]
+   203→   203→
+   204→   204→  // Premium gradient per tool — warm, cohesive, no blue/indigo.
+   205→   205→  const TOOL_GRADIENT: Record<string, string> = {
+   206→   206→    image:      'from-rose-500 to-orange-500',
+   207→   207→    video:      'from-orange-500 to-amber-500',
+   208→   208→    office:     'from-pink-500 to-rose-500',
+   209→   209→    upload:     'from-teal-500 to-emerald-500',
+   210→   210→    vision:     'from-cyan-500 to-teal-500',
+   211→   211→    documents:  'from-emerald-500 to-green-500',
+   212→   212→    search:     'from-amber-500 to-yellow-500',
+   213→   213→    agent:      'from-fuchsia-500 to-pink-500',
+   214→   214→    code:       'from-emerald-500 to-teal-500',
+   215→   215→    connectors: 'from-rose-500 to-red-500',
+   216→   216→    email:      'from-orange-500 to-amber-500',
+   217→   217→  }
+   218→   218→
+   219→   219→  const SUGGESTIONS = [
+   220→   220→    'Research something',
+   221→   221→    'Analyze a file',
+   222→   222→    'Create something',
+   223→   223→    'Help me code',
+   224→   224→  ]
+   225→   225→
+   226→   226→  // Display name priority: auth user → preferences name → 'Guest'
+   227→   227→  const displayName = user?.name || name.trim() || (user?.email ? user.email.split('@')[0] : 'Guest')
+   228→   228→  const displayInitial = (user?.name?.[0] || user?.email?.[0] || name.trim()[0] || 'G').toUpperCase()
+   229→   229→
+   230→   230→  const openAuth = (mode: 'signin' | 'signup') => {
+   231→   231→    setAuthMode(mode)
+   232→   232→    setAuthOpen(true)
+   233→   233→  }
+   234→   234→
+   235→   235→  // Listen for "open connect panel" requests from inline email cards
+   236→   236→  useEffect(() => {
+   237→   237→    const handler = () => setConnectOpen(true)
+   238→   238→    window.addEventListener('nexus:open-connect', handler)
+   239→   239→    return () => window.removeEventListener('nexus:open-connect', handler)
+   240→   240→  }, [])
+   241→   241→
+   242→   242→  // Listen for "send this message" requests from answer follow-up chips
+   243→   243→  useEffect(() => {
+   244→   244→    const handler = (e: Event) => {
+   245→   245→      const q = (e as CustomEvent<string>).detail
+   246→   246→      if (typeof q === 'string' && q.trim()) send(q)
+   247→   247→    }
+   248→   248→    window.addEventListener('nexus:send-message', handler as EventListener)
+   249→   249→    return () => window.removeEventListener('nexus:send-message', handler as EventListener)
+   250→   250→  }, [send])
+   251→   251→
+   252→   252→  const handleToolPick = (tool: ToolId, label: string) => {
+   253→   253→    setToolMenuOpen(false)
+   254→   254→    // Connectors opens the Connect panel directly (no prompt needed)
+   255→   255→    if (tool === 'connectors') {
+   256→   256→      setConnectOpen(true)
+   257→   257→      return
+   258→   258→    }
+   259→   259→    toolEngine.setPendingTool(tool)
+   260→   260→    // Focus the textarea so the user can type their prompt immediately
+   261→   261→    setTimeout(() => {
+   262→   262→      const ta = document.querySelector('textarea[name="nexus-input"]') as HTMLTextAreaElement | null
+   263→   263→      ta?.focus()
+   264→   264→    }, 50)
+   265→   265→  }
+   266→   266→
+   267→   267→  const pendingToolDef = toolEngine.pendingTool ? TOOLS[toolEngine.pendingTool] : null
+   268→   268→
+   269→   269→  return (
+   270→   270→    <div className="flex h-dvh flex-col bg-background">
+   271→   271→      {/* Hidden file input for tool uploads — uses the tool engine's ref */}
+   272→   272→      <input
+   273→   273→        ref={toolEngine.fileInputRef}
+   274→   274→        type="file"
+   275→   275→        className="hidden"
+   276→   276→        onChange={toolEngine.onFilePicked}
+   277→   277→      />
+   278→   278→
+   279→   279→      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
+   280→   280→
+   281→   281→      <VoiceModeOverlay open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+   282→   282→
+   283→   283→      <ConnectPanel open={connectOpen} onClose={() => setConnectOpen(false)} />
+   284→   284→
+   285→   285→      {/* ====== DESKTOP SIDEBAR ====== */}
+   286→   286→      <div className="flex min-h-0 flex-1">
+   287→   287→        <aside className="hidden w-[260px] shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
+   288→   288→          <div className="px-4 pt-5 pb-2">
+   289→   289→            <Image
+   290→   290→              src="/nexus-header-logo.png"
+   291→   291→              alt="Nexus"
+   292→   292→              width={120}
+   293→   293→              height={40}
+   294→   294→              priority
+   295→   295→              className="h-8 w-auto"
+   296→   296→            />
+   297→   297→          </div>
+   298→   298→          <div className="px-3 pt-2">
+   299→   299→            <button onClick={() => { setActiveTab('chat'); setMessages([]); toolEngine.clear() }} className="flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 text-sm font-medium transition hover:bg-secondary">
+   300→   300→              <Plus className="h-4 w-4" /> New Chat
+   301→   301→            </button>
+   302→   302→          </div>
+   303→   303→          <nav className="flex-1 space-y-1 p-3" aria-label="Navigation">
+   304→   304→            {TABS.map(t => {
+   305→   305→              const Icon = t.icon
+   306→   306→              const active = activeTab === t.id
+   307→   307→              return (
+   308→   308→                <motion.button
+   309→   309→                  key={t.id}
+   310→   310→                  whileTap={{ scale: 0.98 }}
+   311→   311→                  onClick={() => setActiveTab(t.id)}
+   312→   312→                  className={`relative flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left transition ${active ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-secondary/60'}`}
+   313→   313→                >
+   314→   314→                  {active && <motion.span layoutId="side-active" className="absolute left-0 h-5 w-1 rounded-full bg-primary" style={{ top: '50%', transform: 'translateY(-50%)' }} transition={{ type: 'spring', stiffness: 500, damping: 35 }} />}
+   315→   315→                  <Icon className={`h-[18px] w-[18px] ${active ? 'text-primary' : ''}`} aria-hidden />
+   316→   316→                  <span className="text-sm">{t.label}</span>
+   317→   317→                </motion.button>
+   318→   318→              )
+   319→   319→            })}
+   320→   320→          </nav>
+   321→   321→          <div className="border-t border-border p-3">
+   322→   322→            <button onClick={() => setActiveTab('profile')} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary">
+   323→   323→              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">{displayInitial}</span>
+   324→   324→              <span className="truncate text-xs font-medium">{displayName}</span>
+   325→   325→            </button>
+   326→   326→          </div>
+   327→   327→        </aside>
+   328→   328→
+   329→   329→        {/* ====== MAIN CONTENT ====== */}
+   330→   330→        <main className="flex min-w-0 flex-1 flex-col">
+   331→   331→          {/* Mobile header */}
+   332→   332→          <header className="flex items-center justify-between px-4 py-2.5 lg:hidden">
+   333→   333→            <Image
+   334→   334→              src="/nexus-header-logo.png"
+   335→   335→              alt="Nexus"
+   336→   336→              width={112}
+   337→   337→              height={37}
+   338→   338→              priority
+   339→   339→              className="h-7 w-auto"
+   340→   340→            />
+   341→   341→            <div className="flex items-center gap-2">
+   342→   342→              <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
+   343→   343→                className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary/50 text-primary transition hover:bg-secondary"
+   344→   344→              >
+   345→   345→                <Headphones className="h-4 w-4" />
+   346→   346→              </button>
+   347→   347→              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary">
+   348→   348→                {intelligence === 'auto' ? <Sparkles className="h-3.5 w-3.5" /> : intelligence === 'reasoning' ? <Brain className="h-3.5 w-3.5" /> : intelligence === 'vision' ? <Eye className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+   349→   349→                <span className="capitalize">{intelligence}</span>
+   350→   350→                <ChevronDown className="h-3 w-3" />
+   351→   351→              </button>
+   352→   352→            </div>
+   353→   353→          </header>
+   354→   354→
+   355→   355→          {activeTab === 'chat' && (
+   356→   356→            <div className="hidden items-center justify-between border-b border-border/50 px-5 py-2 lg:flex">
+   357→   357→              <button onClick={() => setIntelOpen(!intelOpen)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium transition hover:bg-secondary">
+   358→   358→                {intelligence === 'auto' ? <Sparkles className="h-4 w-4" /> : intelligence === 'reasoning' ? <Brain className="h-4 w-4" /> : intelligence === 'vision' ? <Eye className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+   359→   359→                <span className="capitalize">Nexus {intelligence}</span>
+   360→   360→                <ChevronDown className="h-3.5 w-3.5" />
+   361→   361→              </button>
+   362→   362→              <button onClick={() => setVoiceOpen(true)} aria-label="Voice mode"
+   363→   363→                className="flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-secondary"
+   364→   364→              >
+   365→   365→                <Headphones className="h-3.5 w-3.5" />
+   366→   366→                <span>Voice</span>
+   367→   367→              </button>
+   368→   368→            </div>
+   369→   369→          )}
+   370→   370→
+   371→   371→          <AnimatePresence>
+   372→   372→            {intelOpen && (
+   373→   373→              <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+   374→   374→                className="absolute right-4 top-12 z-50 w-64 rounded-2xl border border-border bg-popover p-2 shadow-xl lg:right-8 lg:top-16"
+   375→   375→              >
+   376→   376→                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Choose intelligence</p>
+   377→   377→                {INTEL_OPTIONS.map(o => {
+   378→   378→                  const Icon = o.icon
+   379→   379→                  return (
+   380→   380→                    <button key={o.id} onClick={() => { setIntelligence(o.id); setIntelOpen(false) }}
+   381→   381→                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${intelligence === o.id ? 'bg-secondary' : 'hover:bg-secondary/60'}`}
+   382→   382→                    >
+   383→   383→                      <Icon className="h-4 w-4" aria-hidden />
+   384→   384→                      <div>
+   385→   385→                        <p className="text-sm font-medium">{o.label}</p>
+   386→   386→                        <p className="text-[11px] text-muted-foreground">{o.desc}</p>
+   387→   387→                      </div>
+   388→   388→                      {intelligence === o.id && <Sparkles className="ml-auto h-3.5 w-3.5 text-primary" />}
+   389→   389→                    </button>
+   390→   390→                  )
+   391→   391→                })}
+   392→   392→              </motion.div>
+   393→   393→            )}
+   394→   394→          </AnimatePresence>
+   395→   395→
+   396→   396→          {/* ====== CONTENT AREA ====== */}
+   397→   397→          {activeTab === 'chat' && (
+   398→   398→            <div className="flex flex-1 flex-col min-h-0">
+   399→   399→              {/* Conversation area */}
+   400→   400→              <div className="omni-scroll flex-1 overflow-y-auto">
+   401→   401→                <div className="mx-auto w-full max-w-3xl px-4 py-6">
+   402→   402→                  {/* Empty state */}
+   403→   403→                  {messages.length === 0 && (
+   404→   404→                    <div className="flex flex-col items-center justify-center py-16">
+   405→   405→                      <motion.div
+   406→   406→                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+   407→   407→                        animate={{ opacity: 1, scale: 1, y: 0 }}
+   408→   408→                        transition={{ type: 'spring', stiffness: 120, damping: 16 }}
+   409→   409→                        className="relative mb-6"
+   410→   410→                      >
+   411→   411→                        <motion.div animate={{ y: [0, -5, 0] }} transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}>
+   412→   412→                          <Image src="/nexus-onboarding-hero.png" alt="Nexus" width={140} height={93} className="h-20 w-auto rounded-2xl shadow-xl shadow-primary/15 ring-1 ring-border/50" />
+   413→   413→                        </motion.div>
+   414→   414→                        <motion.span aria-hidden className="absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-primary/20 to-transparent blur-2xl" animate={{ opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 3, repeat: Infinity }} />
+   415→   415→                      </motion.div>
+   416→   416→                      <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-2xl font-semibold">
+   417→   417→                        {displayName !== 'Guest' ? `Hi ${displayName.split(' ')[0]}, what can I help with?` : 'What can I help you with?'}
+   418→   418→                      </motion.h1>
+   419→   419→                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="mt-2 text-sm text-muted-foreground">Ask anything, create something, or give Nexus a task.</motion.p>
+   420→   420→                      <div className="mt-8 flex flex-wrap justify-center gap-2">
+   421→   421→                        {SUGGESTIONS.map((s, i) => (
+   422→   422→                          <motion.button
+   423→   423→                            key={s}
+   424→   424→                            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+   425→   425→                            animate={{ opacity: 1, y: 0, scale: 1 }}
+   426→   426→                            transition={{ delay: 0.2 + i * 0.06 }}
+   427→   427→                            whileHover={{ scale: 1.04, y: -1 }}
+   428→   428→                            whileTap={{ scale: 0.97 }}
+   429→   429→                            onClick={() => send(s)}
+   430→   430→                            className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+   431→   431→                          >{s}</motion.button>
+   432→   432→                        ))}
+   433→   433→                      </div>
+   434→   434→                    </div>
+   435→   435→                  )}
+   436→   436→                  {/* Messages */}
+   437→   437→                  <div className="flex flex-col gap-6">
+   438→   438→                    {messages.map(m => (
+   439→   439→                      <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+   440→   440→                        {m.role === 'user' ? (
+   441→   441→                          <div className="max-w-[85%] rounded-3xl rounded-tr-lg bg-secondary px-4 py-2.5 text-[15px]">{m.content}</div>
+   442→   442→                        ) : (
+   443→   443→                          <div className="max-w-[90%]">
+   444→   444→                            <Markdown content={m.content} />
+   445→   445→                            {m.attachments?.map((a, i) => <AttachmentCard key={i} attachment={a} />)}
+   446→   446→                          </div>
+   447→   447→                        )}
+   448→   448→                      </div>
+   449→   449→                    ))}
+   450→   450→                    {(sending || toolRunningLabel) && (
+   451→   451→                      <div className="flex items-center gap-2 px-1">
+   452→   452→                        {toolRunningLabel ? (
+   453→   453→                          <>
+   454→   454→                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+   455→   455→                            <span className="text-xs text-muted-foreground">{toolRunningLabel}</span>
+   456→   456→                          </>
+   457→   457→                        ) : (
+   458→   458→                          <>
+   459→   459→                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+   460→   460→                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+   461→   461→                            <span className="omni-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+   462→   462→                          </>
+   463→   463→                        )}
+   464→   464→                      </div>
+   465→   465→                    )}
+   466→   466→                  </div>
+   467→   467→                </div>
+   468→   468→              </div>
+   469→   469→
+   470→   470→              {/* ====== COMPOSER ====== */}
+   471→   471→              <div className="border-t border-border bg-background">
+   472→   472→                <form className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send() }}>
+   473→   473→                  {/* Pending tool banner */}
+   474→   474→                  {pendingToolDef && (
+   475→   475→                    <div className="flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/8 px-3 py-1.5">
+   476→   476→                      {(() => {
+   477→   477→                        const Icon = TOOL_MENU.flatMap(c => c.items).find(i => i.tool === toolEngine.pendingTool)?.icon || Sparkles
+   478→   478→                        return <Icon className="h-3.5 w-3.5 text-primary" />
+   479→   479→                      })()}
+   480→   480→                      <span className="text-xs font-medium text-primary">{pendingToolDef.label}</span>
+   481→   481→                      {toolEngine.pendingFile && (
+   482→   482→                        <span className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
+   483→   483→                          <Paperclip className="h-2.5 w-2.5" />
+   484→   484→                          {toolEngine.pendingFile.name.slice(0, 20)}
+   485→   485→                          <button type="button" onClick={() => toolEngine.clearPendingFile()} className="ml-0.5">
+   486→   486→                            <X className="h-2.5 w-2.5" />
+   487→   487→                          </button>
+   488→   488→                        </span>
+   489→   489→                      )}
+   490→   490→                      <button type="button" onClick={() => toolEngine.clear()} className="ml-1 text-primary/70 hover:text-primary">
+   491→   491→                        <X className="h-3 w-3" />
+   492→   492→                      </button>
+   493→   493→                    </div>
+   494→   494→                  )}
+   495→   495→                  {/* Tool error */}
+   496→   496→                  {toolEngine.toolError && (
+   497→   497→                    <p className="self-start text-xs text-destructive">{toolEngine.toolError}</p>
+   498→   498→                  )}
+   499→   499→                  <div className="relative flex flex-1 items-end rounded-[26px] border border-border bg-card shadow-sm">
+   500→   500→                    <button type="button" onClick={() => setToolMenuOpen(!toolMenuOpen)}
+   501→   501→                      aria-label="Tools" className="flex h-12 w-10 items-center justify-center rounded-l-[26px] text-muted-foreground transition hover:text-foreground"
+   502→   502→                    >
+   503→   503→                      <Plus className="h-5 w-5" />
+   504→   504→                    </button>
+   505→   505→                    <Textarea name="nexus-input" value={input} onChange={e => setInput(e.target.value)}
+   506→   506→                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+   507→   507→                      placeholder={pendingToolDef?.placeholder || 'Message Nexus...'} rows={1}
+   508→   508→                      className="max-h-40 min-h-[48px] flex-1 resize-none border-0 bg-transparent px-1 py-3 text-[15px] focus-visible:ring-0"
+   509→   509→                    />
+   510→   510→                    <div className="flex items-center pr-1.5 pb-1">
+   511→   511→                      <button type="button" onClick={() => setVoiceOpen(true)}
+   512→   512→                        aria-label="Open voice mode"
+   513→   513→                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-primary"
+   514→   514→                      >
+   515→   515→                        <Mic className="h-[18px] w-[18px]" />
+   516→   516→                      </button>
+   517→   517→                      <button type="submit" disabled={(!input.trim() && !toolEngine.pendingFile) || sending || !!toolRunningLabel} aria-label="Send"
+   518→   518→                        className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:brightness-110 disabled:opacity-30"
+   519→   519→                      >
+   520→   520→                        <Send className="h-4 w-4" />
+   521→   521→                      </button>
+   522→   522→                    </div>
+   523→   523→                  </div>
+   524→   524→                </form>
+   525→   525→              </div>
+   526→   526→
+   527→   527→              {/* Tool menu bottom sheet */}
+   528→   528→              <AnimatePresence>
+   529→   529→                {toolMenuOpen && (
+   530→   530→                  <>
+   531→   531→                    <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setToolMenuOpen(false)} />
+   532→   532→                    <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+   533→   533→                      transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+   534→   534→                      className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background pb-safe"
+   535→   535→                    >
+   536→   536→                      <div className="mx-auto max-w-2xl px-4 py-5">
+   537→   537→                        <div className="mb-4 flex items-center justify-between">
+   538→   538→                          <h3 className="text-sm font-semibold">Tools</h3>
+   539→   539→                          <button onClick={() => setToolMenuOpen(false)} className="text-xs text-muted-foreground">Close</button>
+   540→   540→                        </div>
+   541→   541→                        {TOOL_MENU.map(cat => (
+   542→   542→                          <div key={cat.category} className="mb-4">
+   543→   543→                            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">{cat.category}</p>
+   544→   544→                            <div className="flex flex-wrap gap-2">
+   545→   545→                              {cat.items.map((item, idx) => {
+   546→   546→                                const Icon = item.icon
+   547→   547→                                const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
+   548→   548→                                return (
+   549→   549→                                  <motion.button
+   550→   550→                                    key={`${cat.category}-${item.tool}-${item.label}`}
+   551→   551→                                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+   552→   552→                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+   553→   553→                                    transition={{ delay: idx * 0.03, duration: 0.25 }}
+   554→   554→                                    whileHover={{ scale: 1.04 }}
+   555→   555→                                    whileTap={{ scale: 0.97 }}
+   556→   556→                                    onClick={() => handleToolPick(item.tool, item.label)}
+   557→   557→                                    className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium transition hover:border-primary/40 hover:shadow-md hover:shadow-primary/5"
+   558→   558→                                  >
+   559→   559→                                    <span className={`flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${grad} text-white`}>
+   560→   560→                                      <Icon className="h-3 w-3" aria-hidden />
+   561→   561→                                    </span>
+   562→   562→                                    {item.label}
+   563→   563→                                  </motion.button>
+   564→   564→                                )
+   565→   565→                              })}
+   566→   566→                            </div>
+   567→   567→                          </div>
+   568→   568→                        ))}
+   569→   569→                      </div>
+   570→   570→                    </motion.div>
+   571→   571→                  </>
+   572→   572→                )}
+   573→   573→              </AnimatePresence>
+   574→   574→            </div>
+   575→   575→          )}
+   576→   576→
+   577→   577→          {/* Explore page */}
+   578→   578→          {activeTab === 'explore' && (
+   579→   579→            <div className="omni-scroll flex-1 overflow-y-auto">
+   580→   580→              <div className="mx-auto max-w-2xl px-4 py-8">
+   581→   581→                <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-semibold">Explore Nexus</motion.h1>
+   582→   582→                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }} className="mt-1 text-sm text-muted-foreground">Discover everything Nexus can do.</motion.p>
+   583→   583→                {TOOL_MENU.map((cat, ci) => (
+   584→   584→                  <motion.section
+   585→   585→                    key={cat.category}
+   586→   586→                    initial={{ opacity: 0, y: 12 }}
+   587→   587→                    animate={{ opacity: 1, y: 0 }}
+   588→   588→                    transition={{ delay: 0.1 + ci * 0.06 }}
+   589→   589→                    className="mt-6"
+   590→   590→                  >
+   591→   591→                    <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">{cat.category}</h2>
+   592→   592→                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+   593→   593→                      {cat.items.map((item, idx) => {
+   594→   594→                        const Icon = item.icon
+   595→   595→                        const grad = TOOL_GRADIENT[item.tool] || 'from-orange-500 to-rose-500'
+   596→   596→                        return (
+   597→   597→                          <motion.button
+   598→   598→                            key={`${cat.category}-${item.tool}-${item.label}`}
+   599→   599→                            whileHover={{ y: -3, scale: 1.02 }}
+   600→   600→                            whileTap={{ scale: 0.98 }}
+   601→   601→                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+   602→   602→                            onClick={() => { setActiveTab('chat'); handleToolPick(item.tool, item.label) }}
+   603→   603→                            className="group relative flex flex-col items-start gap-2.5 overflow-hidden rounded-2xl border border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
+   604→   604→                          >
+   605→   605→                            <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${grad} text-white shadow-md`}>
+   606→   606→                              <Icon className="h-5 w-5" aria-hidden />
+   607→   607→                            </span>
+   608→   608→                            <span className="text-sm font-semibold">{item.label}</span>
+   609→   609→                          </motion.button>
+   610→   610→                        )
+   611→   611→                      })}
+   612→   612→                    </div>
+   613→   613→                  </motion.section>
+   614→   614→                ))}
+   615→   615→              </div>
+   616→   616→            </div>
+   617→   617→          )}
+   618→   618→
+   619→   619→          {/* Projects */}
+   620→   620→          {activeTab === 'projects' && (
+   621→   621→            <ProjectsMode />
+   622→   622→          )}
+   623→   623→
+   624→   624→          {/* Library */}
+   625→   625→          {activeTab === 'library' && (
+   626→   626→            <LibraryMode />
+   627→   627→          )}
+   628→   628→
+   629→   629→          {/* Profile */}
+   630→   630→          {activeTab === 'profile' && (
+   631→   631→            <div className="omni-scroll flex-1 overflow-y-auto">
+   632→   632→              <div className="mx-auto max-w-md px-4 py-8">
+   633→   633→                <div className="flex flex-col items-center">
+   634→   634→                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 text-xl font-bold text-white">
+   635→   635→                    {displayInitial}
+   636→   636→                  </div>
+   637→   637→                  <h2 className="mt-3 text-lg font-bold">{displayName}</h2>
+   638→   638→                  {user && <span className="text-xs text-muted-foreground">{user.email}</span>}
+   639→   639→                  {user && user.createdAt && (
+   640→   640→                    <span className="mt-1 text-[11px] text-muted-foreground">
+   641→   641→                      Member since {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+   642→   642→                    </span>
+   643→   643→                  )}
+   644→   644→                  <span className="mt-1 text-[11px] text-muted-foreground capitalize">{commStyle} style</span>
+   645→   645→                </div>
+   646→   646→                {!user ? (
+   647→   647→                  <div className="mt-6 grid grid-cols-2 gap-2">
+   648→   648→                    <Button className="rounded-xl bg-primary text-primary-foreground" onClick={() => openAuth('signin')}>
+   649→   649→                      <LogIn className="mr-1.5 h-4 w-4" /> Sign in
+   650→   650→                    </Button>
+   651→   651→                    <Button variant="outline" className="rounded-xl" onClick={() => openAuth('signup')}>
+   652→   652→                      <UserPlus className="mr-1.5 h-4 w-4" /> Sign up
+   653→   653→                    </Button>
+   654→   654→                  </div>
+   655→   655→                ) : (
+   656→   656→                  <Button variant="outline" className="mt-6 w-full rounded-xl" onClick={() => signOut()}>Sign out</Button>
+   657→   657→                )}
+   658→   658→                {/* Personalization */}
+   659→   659→                <section className="mt-6">
+   660→   660→                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Personalization</h3>
+   661→   661→                  <div className="space-y-1">
+   662→   662→                    <button onClick={() => setConnectOpen(true)} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   663→   663→                      <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground" /> Email & apps</span>
+   664→   664→                      <Plus className="h-3.5 w-3.5 text-muted-foreground" />
+   665→   665→                    </button>
+   666→   666→                    <button onClick={toggleTheme} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   667→   667→                      <span>Theme</span><span className="text-muted-foreground capitalize">{theme}</span>
+   668→   668→                    </button>
+   669→   669→                    <button onClick={toggleLanguage} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   670→   670→                      <span>Language</span><span className="text-muted-foreground">{language === 'en' ? 'English' : 'العربية'}</span>
+   671→   671→                    </button>
+   672→   672→                    <button onClick={() => resetOnboarding()} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition hover:bg-secondary">
+   673→   673→                      <span>Re-run onboarding</span>
+   674→   674→                      <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+   675→   675→                    </button>
+   676→   676→                  </div>
+   677→   677→                </section>
+   678→   678→                {/* Interests */}
+   679→   679→                {interests.length > 0 && (
+   680→   680→                  <section className="mt-6">
+   681→   681→                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">Your interests</h3>
+   682→   682→                    <div className="flex flex-wrap gap-1.5">
+   683→   683→                      {interests.map(i => (
+   684→   684→                        <span key={i} className="rounded-full border border-border bg-card px-3 py-1 text-xs capitalize text-muted-foreground">{i}</span>
+   685→   685→                      ))}
+   686→   686→                    </div>
+   687→   687→                  </section>
+   688→   688→                )}
+   689→   689→                {/* Creator */}
+   690→   690→                <div className="mt-8 text-center">
+   691→   691→                  <p className="text-xs text-muted-foreground">Built by Mounir Shaaban</p>
+   692→   692→                  <p className="mt-0.5 text-[11px] text-muted-foreground/60">Nexus AI © 2026</p>
+   693→   693→                </div>
+   694→   694→              </div>
+   695→   695→            </div>
+   696→   696→          )}
+   697→   697→        </main>
+   698→   698→      </div>
+   699→   699→
+   700→   700→      {/* ====== MOBILE BOTTOM NAV ====== */}
+   701→   701→      <nav className="flex items-stretch justify-around border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Primary">
+   702→   702→        {TABS.map(t => {
+   703→   703→          const Icon = t.icon
+   704→   704→          const active = activeTab === t.id
+   705→   705→          return (
+   706→   706→            <button key={t.id} onClick={() => setActiveTab(t.id)} aria-current={active ? 'page' : undefined}
+   707→   707→              className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 pb-2 pt-2.5"
+   708→   708→            >
+   709→   709→              {active && (
+   710→   710→                <motion.span layoutId="nav-active" className="absolute -top-px h-0.5 w-10 rounded-full bg-primary" transition={{ type: 'spring', stiffness: 500, damping: 35 }} />
+   711→   711→              )}
+   712→   712→              <motion.div animate={{ scale: active ? 1.08 : 1, y: active ? -1 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
+   713→   713→                <Icon className={`h-[22px] w-[22px] ${active ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden />
+   714→   714→              </motion.div>
+   715→   715→              <span className={`text-[10px] ${active ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{t.label}</span>
+   716→   716→            </button>
+   717→   717→          )
+   718→   718→        })}
+   719→   719→      </nav>
+   720→   720→    </div>
+   721→   721→  )
+   722→   722→}
+   723→   723→

@@ -27,6 +27,10 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -43,6 +47,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* Radius scale — cards→2xl, inputs/buttons→xl, pills→full, modals→3xl */
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.5rem;
 }
 
 /* ============ NEXUS Premium Neutral ============
@@ -67,6 +74,10 @@
   --accent: oklch(0.94 0 0);                     /* gray-100 */
   --accent-foreground: oklch(0.2 0 0);
   --destructive: oklch(0.58 0.19 27);
+  --success: oklch(0.62 0.13 155);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.72 0.16 65);
+  --warning-foreground: oklch(0.2 0 0);
   --border: oklch(0.94 0 0);                     /* gray-100 — Open WebUI border */
   --input: oklch(0.92 0 0);                      /* gray-200 */
   --ring: oklch(0.635 0.13 45);
@@ -102,6 +113,10 @@
   --accent: oklch(0.32 0 0);                     /* gray-800 */
   --accent-foreground: oklch(0.92 0 0);
   --destructive: oklch(0.63 0.19 27);
+  --success: oklch(0.7 0.13 155);
+  --success-foreground: oklch(0.16 0 0);
+  --warning: oklch(0.78 0.15 65);
+  --warning-foreground: oklch(0.16 0 0);
   --border: oklch(0.27 0 0 / 50%);               /* gray-850/50 — their dark border */
   --input: oklch(0.32 0 0);                      /* gray-800 */
   --ring: oklch(0.635 0.13 45);
@@ -143,6 +158,10 @@
   background: radial-gradient(120% 60% at 50% 0%, oklch(0.635 0.13 45 / 5%) 0%, transparent 60%);
 }
 
+/* ---- Sticky-footer shell: min-h-screen flex col + footer mt-auto ---- */
+.nexus-shell { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+.nexus-footer { margin-top: auto; }
+
 /* ---- Text accent ---- */
 .omni-text-gradient {
   background: linear-gradient(120deg, oklch(0.6 0.14 40), oklch(0.55 0.12 25));
@@ -150,6 +169,16 @@
   background-clip: text;
   color: transparent;
 }
+
+/* ---- Brand gradient + pill buttons ---- */
+.bg-brand-gradient { background-image: linear-gradient(135deg, var(--primary), oklch(0.65 0.18 25)); }
+.text-brand-gradient {
+  background-image: linear-gradient(135deg, var(--primary), oklch(0.65 0.18 25));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.btn-pill-primary { @apply rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 active:scale-[0.98]; }
+.btn-pill-outline { @apply rounded-full border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition hover:bg-secondary/60 active:scale-[0.98]; }
+.btn-pill-ghost { @apply rounded-full px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-secondary/60 hover:text-foreground; }
 
 /* ---- Animations (kept minimal + purposeful) ---- */
 @keyframes omni-pulse-dot {
@@ -283,6 +312,21 @@
 .omni-prose th { background: oklch(0.945 0.008 85); font-weight: 600; }
 .omni-prose hr { border: none; border-top: 1px solid oklch(0.87 0.01 80); margin: 1em 0; }
 .omni-prose strong { font-weight: 650; color: oklch(0.2 0.01 60); }
+
+/* ---- Dark-mode code blocks (theme-aware overrides) ---- */
+.dark .omni-prose pre {
+  background: oklch(0.16 0.005 70);
+  border-color: oklch(0.27 0.006 70);
+}
+.dark .omni-prose :not(pre) > code {
+  background: oklch(0.27 0.005 70);
+  border-color: oklch(0.32 0.006 70);
+  color: oklch(0.88 0.04 45);
+}
+.dark .omni-prose :not(pre) > code::before,
+.dark .omni-prose :not(pre) > code::after {
+  content: none;
+}
 
 /* Streaming caret — ChatGPT-style blinking block */
 @keyframes nexus-caret-blink {

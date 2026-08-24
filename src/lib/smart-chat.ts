@@ -26,6 +26,9 @@ export interface SmartChatOptions {
   builtinOnly?: boolean
   /** The task type — routes to specialist models */
   task?: AiTask
+  /** Per-request timeout in ms (passed through to externalChatCompletion).
+   *  Defaults to 15s for voice, 120s otherwise. */
+  timeoutMs?: number
 }
 
 /** Specialist models per task, per provider.
@@ -82,6 +85,11 @@ export async function smartChat(
   opts: SmartChatOptions = {}
 ): Promise<string> {
   const { maxTokens = 4000, temperature = 0.7, builtinOnly = false } = opts
+  // Bug F: voice turns must feel live — cap each model attempt at 15s and try at
+  // most 2 models (vs 4 for other tasks). Non-voice behaviour is unchanged.
+  const isVoiceTask = opts.task === 'voice'
+  const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
+  const maxModelAttempts = isVoiceTask ? 2 : 4
 
   if (!builtinOnly) {
     const provider = await getActiveAiProvider()
@@ -97,9 +105,13 @@ export async function smartChat(
           : [undefined, undefined]
 
       let lastError: unknown = null
-      for (const model of models.slice(0, 4)) {
+      for (const model of models.slice(0, maxModelAttempts)) {
         try {
-          const content = await externalChatCompletion(provider, messages, { maxTokens, model })
+          const content = await externalChatCompletion(provider, messages, {
+            maxTokens,
+            model,
+            timeoutMs: effectiveTimeoutMs,
+          })
           if (content.trim()) return content
         } catch (err) {
           lastError = err

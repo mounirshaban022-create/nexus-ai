@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Mic, Phone, Settings2, Square, X, ChevronDown, Check, Volume2, Radio } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { startAsrMode, stopAsrMode } from './voice-asr-fallback'
-import { kokoroSpeak } from './kokoro-voice'
 import { EDGE_VOICES, NEXUS_VOICES, isEdgeVoice, type VoiceOption } from '@/lib/voices'
 import { safeJsonFetch } from '@/lib/safe-fetch'
 
@@ -78,17 +77,33 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
   const sourceRef = useRef<AudioBufferSourceNode | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
+  // Bug C: keep the overlay cheap when closed — callbacks no-op via this ref.
+  const openRef = useRef(open)
+  // Bug K: per-turn AbortController so in-flight think()/speak() can be cancelled on close.
+  const controllerRef = useRef<AbortController | null>(null)
+  // Bug E: SpeechRecognition auto-restart loop protection.
+  const restartCountRef = useRef(0)
+  const lastStartRef = useRef(0)
+  const manualStopRef = useRef(false)
+
   const setStateSafe = useCallback((s: VoiceState) => {
     stateRef.current = s
     setState(s)
   }, [])
 
+  // Bug C: keep openRef in sync so guards inside callbacks read the latest value.
+  useEffect(() => { openRef.current = open }, [open])
+
   const stopSpeaking = useCallback(() => {
+    // Bug K: cancel any in-flight think()/speak() fetch.
+    controllerRef.current?.abort()
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (sourceRef.current) { try { sourceRef.current.stop() } catch {} sourceRef.current = null }
   }, [])
 
   const stopRecognition = useCallback(() => {
+    // Bug E: mark as manually stopped so onend won't auto-restart.
+    manualStopRef.current = true
     if (recognitionRef.current) {
       try {
         const pulse = (recognitionRef.current as any).__pulse
@@ -134,25 +149,18 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
     })
   }, [unlockAudio])
 
-  /* ---------- SPEAK (premium multi-layer TTS) ---------- */
+  /* ---------- SPEAK (multi-layer TTS — Kokoro removed for latency) ---------- */
   const speak = useCallback(async (text: string): Promise<void> => {
-    // Layer 1: Kokoro in-browser neural voice (premium, iframe-proof)
-    try {
-      const kokoroResult = await kokoroSpeak(text)
-      if (kokoroResult.ok && kokoroResult.blob) {
-        setStateSafe('speaking')
-        await playWebAudio(await kokoroResult.blob.arrayBuffer())
-        return
-      }
-    } catch { /* continue to Edge TTS */ }
-
-    // Layer 2: Edge neural TTS via our API
+    // Bug C: no-op when overlay closed.
+    if (!openRef.current) return
+    // Layer 1: Edge neural TTS via our API (server-side Microsoft neural voices)
     try {
       setStateSafe('speaking')
       const r = await safeJsonFetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: ttsVoice, speed: 1.0 }),
+        signal: controllerRef.current?.signal, // Bug K: cancel on close
       }, { timeoutMs: 30_000, label: 'Voice synthesis' })
       if (!r.ok) throw new Error(r.error || 'TTS failed')
       // r.data is { audio: base64, format } OR raw audio blob?
@@ -177,7 +185,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
       }
       await playWebAudio(arrayBuffer)
     } catch {
-      // Layer 3: browser speechSynthesis (works in restricted contexts)
+      // Layer 2: browser speechSynthesis (works in restricted contexts)
       try {
         await new Promise<void>((resolve) => {
           const utter = new SpeechSynthesisUtterance(text)
@@ -192,7 +200,15 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
   }, [ttsVoice, lang, playWebAudio, setStateSafe])
 
   /* ---------- THINK (one LLM turn via /api/voice/turn) ---------- */
-  const think = useCallback(async (userText: string): Promise<string> => {
+  // Bug A: returns the full server payload so the client can play server-generated
+  // TTS audio directly and skip the redundant client-side speak() pass.
+  const think = useCallback(async (userText: string): Promise<{
+    reply: string
+    audio: string | null
+    audioFormat: string
+  }> => {
+    // Bug C: no-op when overlay closed.
+    if (!openRef.current) return { reply: '', audio: null, audioFormat: 'wav' }
     const r = await safeJsonFetch<any>('/api/voice/turn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -203,32 +219,57 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
         voice: ttsVoice,
         audio: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=',
       }),
+      signal: controllerRef.current?.signal, // Bug K: cancel on close
     }, { timeoutMs: 60_000, label: 'AI reply' })
     if (!r.ok || !r.data?.reply) throw new Error(r.error || 'AI had trouble responding. Try again.')
-    return r.data.reply
+    return {
+      reply: r.data.reply,
+      audio: r.data.audio ?? null,
+      audioFormat: r.data.audioFormat ?? 'wav',
+    }
   }, [lang, ttsVoice])
 
   /* ---------- HANDLE FINAL TRANSCRIPT ---------- */
   const handleUtterance = useCallback(async (text: string) => {
+    // Bug C: no-op when overlay closed (also stops the think/speak chain).
+    if (!openRef.current) return
     const clean = text.trim()
     if (!clean) return
     stopRecognition()
     setStateSafe('thinking')
     setInterim('')
     setError('')
+    // Bug K: fresh AbortController for this turn so close/stop can cancel in-flight work.
+    controllerRef.current = new AbortController()
     try {
       historyRef.current.push({ role: 'user', content: clean })
-      const reply = await think(clean)
+      // Bug A: think() returns the full { reply, audio, audioFormat } payload.
+      const { reply, audio } = await think(clean)
+      if (!reply) return // closed mid-flight
       historyRef.current.push({ role: 'assistant', content: reply })
       setTurns(prev => [...prev, { id: crypto.randomUUID(), user: clean, reply }])
-      await speak(reply)
+      if (audio) {
+        // Bug A: server already generated TTS audio — play it directly and SKIP speak().
+        setStateSafe('speaking')
+        const byteStr = atob(audio)
+        const bytes = new Uint8Array(byteStr.length)
+        for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i)
+        await playWebAudio(bytes.buffer)
+      } else {
+        // No server audio — fall back to client-side TTS pipeline.
+        await speak(reply)
+      }
     } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return // Bug K: silent cancel
       setError(e instanceof Error ? e.message : 'Something went wrong')
       toast({ title: 'Voice error', description: 'Could not get a response.', variant: 'destructive' })
     } finally {
       startListening()
     }
-  }, [think, speak, toast, setStateSafe, stopRecognition])
+    // NOTE: startListening is intentionally omitted from deps — it is declared
+    // below this callback (cycle: startListening → handleUtterance → startListening).
+    // Matching the original pattern keeps the closure stable without reordering.
+  }, [think, speak, playWebAudio, toast, setStateSafe, stopRecognition])
 
   /* ---------- ASR FALLBACK (record + upload) ---------- */
   const startAsrFallback = useCallback(() => {
@@ -242,6 +283,8 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
 
   /* ---------- LISTEN (Web Speech API) ---------- */
   const startListening = useCallback(() => {
+    // Bug C: no-op when overlay closed.
+    if (!openRef.current) return
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) {
       // No Web Speech — go straight to ASR fallback
@@ -263,7 +306,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
       }
       if (interimText) {
         setInterim(interimText)
-        setMicLevel(0.3 + Math.random() * 0.4)
+        setMicLevel(0.3) // Bug D: fixed pulse level, no Math.random() jitter
       }
       if (finalTranscript.trim()) handleUtterance(finalTranscript)
     }
@@ -282,22 +325,57 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
       }
     }
     rec.onend = () => {
-      if (stateRef.current === 'listening' && recognitionRef.current) {
-        try { recognitionRef.current.start() } catch {}
+      // Bug E: never auto-restart after a manual stop.
+      if (manualStopRef.current) return
+      if (stateRef.current !== 'listening' || !recognitionRef.current) return
+      // Count only consecutive IMMEDIATE restarts (gap < 1s between start and onend).
+      const elapsed = performance.now() - lastStartRef.current
+      if (elapsed < 1000) {
+        restartCountRef.current += 1
+        // After 10 immediate restarts, give up entirely.
+        if (restartCountRef.current >= 10) {
+          stopRecognition()
+          setStateSafe('idle')
+          toast({
+            title: 'Voice recognition unavailable',
+            description: 'Try the ASR fallback',
+            variant: 'destructive',
+          })
+          return
+        }
+        // After 5 immediate restarts, switch to the proven record/upload fallback.
+        if (restartCountRef.current >= 5) {
+          stopRecognition()
+          setStateSafe('idle')
+          setTimeout(() => startAsrFallback(), 50)
+          return
+        }
+      } else {
+        restartCountRef.current = 0
       }
+      try {
+        recognitionRef.current.start()
+        lastStartRef.current = performance.now()
+      } catch {}
     }
     recognitionRef.current = rec
+    restartCountRef.current = 0
+    manualStopRef.current = false
     try {
       rec.start()
+      lastStartRef.current = performance.now()
       setStateSafe('listening')
       setError('')
-      const pulse = setInterval(() => setMicLevel(v => Math.max(0.05, v * 0.85)), 150)
+      // Bug D: throttle pulse to 500ms (was 150ms) to cut re-renders ~3.3×.
+      const pulse = setInterval(() => setMicLevel(v => Math.max(0.05, v * 0.85)), 500)
       ;(rec as any).__pulse = pulse
     } catch {}
-  }, [lang, handleUtterance, stopSpeaking, setStateSafe, startAsrFallback, stopRecognition])
+  }, [lang, handleUtterance, stopSpeaking, setStateSafe, startAsrFallback, stopRecognition, toast])
 
   /* ---------- CONTROLS ---------- */
   const toggle = useCallback(() => {
+    // Bug C: no-op when overlay closed.
+    if (!openRef.current) return
     const s = stateRef.current
     if (s === 'idle') { unlockAudio(); startListening() }
     else if (s === 'listening') { stopRecognition(); stopAsrMode(); setStateSafe('idle'); setInterim('') }
@@ -320,11 +398,20 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
   useEffect(() => {
     if (!open) {
       stopRecognition(); stopAsrMode(); stopSpeaking()
+      // Bug K: cancel any in-flight think()/speak() fetch.
+      controllerRef.current?.abort()
       setStateSafe('idle')
     }
   }, [open])
 
-  useEffect(() => () => { stopRecognition(); stopSpeaking() }, [stopRecognition, stopSpeaking])
+  // Bug I + Bug K: on unmount, close the AudioContext and abort any in-flight turn.
+  useEffect(() => () => {
+    stopRecognition(); stopSpeaking()
+    audioCtxRef.current?.close?.().catch(() => {})
+    audioCtxRef.current = null
+    controllerRef.current?.abort()
+    controllerRef.current = null
+  }, [stopRecognition, stopSpeaking])
 
   const stateMeta: Record<VoiceState, { label: string; sub: string }> = {
     idle: { label: 'Tap to talk', sub: 'Natural conversation — I hear you as you speak' },
@@ -353,10 +440,9 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
           aria-modal="true"
           aria-label="Nexus Voice Mode"
         >
-          {/* Ambient gradient backdrop */}
+          {/* Ambient gradient backdrop — Bug D: single static gradient (no blur, much cheaper) */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-            <div className="absolute left-1/2 top-1/3 h-[60vh] w-[60vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-primary/25 via-rose-500/10 to-transparent blur-3xl" />
-            <div className="absolute bottom-0 left-0 h-[40vh] w-[40vh] rounded-full bg-gradient-to-tr from-primary/10 to-transparent blur-3xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-primary/15 to-rose-500/10" />
           </div>
 
           {/* Top bar */}
@@ -443,8 +529,8 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
               <AnimatePresence>
                 {state === 'listening' && (
                   <>
-                    <motion.span key="r1" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: [1, 1.8], opacity: [0.5, 0] }} exit={{ opacity: 0 }} transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }} className="absolute h-40 w-40 rounded-full bg-primary/30" />
-                    <motion.span key="r2" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: [1, 2.1], opacity: [0.4, 0] }} exit={{ opacity: 0 }} transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut', delay: 0.6 }} className="absolute h-40 w-40 rounded-full bg-primary/20" />
+                    <motion.span key="r1" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: [1, 1.8], opacity: [0.5, 0] }} exit={{ opacity: 0 }} transition={{ duration: 3.5, repeat: Infinity, ease: 'easeOut' }} className="absolute h-40 w-40 rounded-full bg-primary/30" />
+                    <motion.span key="r2" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: [1, 2.1], opacity: [0.4, 0] }} exit={{ opacity: 0 }} transition={{ duration: 3.5, repeat: Infinity, ease: 'easeOut', delay: 0.6 }} className="absolute h-40 w-40 rounded-full bg-primary/20" />
                   </>
                 )}
                 {state === 'speaking' && (
@@ -476,7 +562,7 @@ export function VoiceModeOverlay({ open, onClose }: { open: boolean; onClose: ()
                     {[0,1,2,3,4].map(i => (
                       <motion.span key={i} className="block w-1.5 rounded-full bg-white"
                         animate={{ height: [8, 28, 8] }}
-                        transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
+                        transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
                       />
                     ))}
                   </span>

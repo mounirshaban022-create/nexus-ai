@@ -12,11 +12,24 @@ interface PreferencesState {
   name: string
   interests: Interest[]
   commStyle: CommStyle
+  // Onboarding (Task 6 — richer profile, mirrored locally)
+  bio: string
+  location: string
+  timezone: string
+  avatarUrl: string
   // Appearance
   theme: 'light' | 'dark'
   language: 'en' | 'ar'
   // Actions: onboarding
-  completeOnboarding: (data: { name: string; interests: Interest[]; commStyle: CommStyle }) => void
+  completeOnboarding: (data: {
+    name: string
+    interests: Interest[]
+    commStyle: CommStyle
+    bio?: string
+    location?: string
+    timezone?: string
+    avatarUrl?: string
+  }) => void
   resetOnboarding: () => void
   // Actions: appearance
   toggleTheme: () => void
@@ -32,12 +45,34 @@ export const usePreferences = create<PreferencesState>()(
       name: '',
       interests: [],
       commStyle: 'balanced',
+      bio: '',
+      location: '',
+      timezone: '',
+      avatarUrl: '',
       theme: 'light',
       language: 'en',
-      completeOnboarding: ({ name, interests, commStyle }) =>
-        set({ name, interests, commStyle, onboarded: true }),
+      completeOnboarding: ({ name, interests, commStyle, bio, location, timezone, avatarUrl }) =>
+        set({
+          name,
+          interests,
+          commStyle,
+          bio: bio ?? '',
+          location: location ?? '',
+          timezone: timezone ?? '',
+          avatarUrl: avatarUrl ?? '',
+          onboarded: true,
+        }),
       resetOnboarding: () =>
-        set({ onboarded: false, name: '', interests: [], commStyle: 'balanced' }),
+        set({
+          onboarded: false,
+          name: '',
+          interests: [],
+          commStyle: 'balanced',
+          bio: '',
+          location: '',
+          timezone: '',
+          avatarUrl: '',
+        }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
       setTheme: (theme) => set({ theme }),
       toggleLanguage: () => set((s) => ({ language: s.language === 'en' ? 'ar' : 'en' })),

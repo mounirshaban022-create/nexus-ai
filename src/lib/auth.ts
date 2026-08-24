@@ -13,6 +13,15 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30 // 30 days
 const ALG = 'HS256'
 
 function getSecret(): string {
+  // In production, AUTH_SECRET MUST be set. A known dev fallback would let
+  // anyone forge JWTs signed with a publicly-known secret. Fail fast.
+  if (process.env.NODE_ENV === 'production') {
+    const secret = process.env.AUTH_SECRET
+    if (!secret || secret.trim() === '') {
+      throw new Error('AUTH_SECRET environment variable is required in production')
+    }
+    return secret
+  }
   return process.env.AUTH_SECRET || 'nexus-dev-secret-change-me'
 }
 

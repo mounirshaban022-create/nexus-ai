@@ -10,7 +10,33 @@ export interface AuthUser {
   interests: string[]
   commStyle: string
   createdAt?: string
+  updatedAt?: string
+  // Task 3/4 extended profile fields
+  avatarUrl?: string | null
+  bio?: string | null
+  location?: string | null
+  timezone?: string | null
+  language: string
+  jobTitle?: string | null
+  website?: string | null
+  notifications: boolean
+  emailVerified: boolean
+  lastActiveAt?: string | null
 }
+
+/** Shape accepted by updateProfile — all fields optional. */
+export type ProfilePatch = Partial<{
+  name: string
+  bio: string
+  location: string
+  timezone: string
+  language: 'en' | 'ar'
+  jobTitle: string
+  website: string
+  notifications: boolean
+  interests: string[]
+  commStyle: 'concise' | 'balanced' | 'detailed' | 'friendly'
+}>
 
 interface AuthState {
   user: AuthUser | null
@@ -21,6 +47,8 @@ interface AuthState {
   signUp: (input: { email: string; password: string; name?: string }) => Promise<AuthUser>
   signOut: () => Promise<void>
   clearError: () => void
+  updateProfile: (patch: ProfilePatch) => Promise<AuthUser>
+  uploadAvatar: (file: File) => Promise<string>
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -50,7 +78,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: false,
   error: null,
@@ -111,6 +139,42 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  updateProfile: async (patch) => {
+    const res = await fetch('/api/user/profile', {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(errBody.error ?? 'Update failed')
+    }
+    const data = (await res.json()) as { user: AuthUser }
+    set({ user: data.user })
+    return data.user
+  },
+
+  uploadAvatar: async (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch('/api/user/avatar', {
+      method: 'POST',
+      credentials: 'include',
+      body: fd,
+    })
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(errBody.error ?? 'Upload failed')
+    }
+    const data = (await res.json()) as { avatarUrl: string }
+    const current = get().user
+    if (current) {
+      set({ user: { ...current, avatarUrl: data.avatarUrl } })
+    }
+    return data.avatarUrl
+  },
 }))
 
 // Module-level flag so we only kick off /me once per tab.

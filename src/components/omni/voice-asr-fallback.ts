@@ -5,6 +5,8 @@
  * Used when Web Speech API is unavailable (headless browsers, some mobile browsers).
  */
 
+import { arrayBufferToBase64 } from './audio-utils'
+
 interface AsrModeOptions {
   lang: string
   ttsVoice: string
@@ -173,7 +175,7 @@ export async function startAsrMode(opts: AsrModeOptions) {
       const s = Math.max(-1, Math.min(1, samples[i]))
       view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
     }
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(wavBuffer)))
+    const base64 = arrayBufferToBase64(wavBuffer)
 
     // 6. Send to voice turn API
     setStateSafe('thinking')

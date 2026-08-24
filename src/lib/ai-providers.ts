@@ -173,11 +173,12 @@ export async function getActiveAiProvider(): Promise<ResolvedAiProvider | null> 
 export async function externalChatCompletion(
   provider: ResolvedAiProvider,
   messages: ExternalChatMessage[],
-  opts: { model?: string; maxTokens?: number } = {}
+  opts: { model?: string; maxTokens?: number; timeoutMs?: number } = {}
 ): Promise<string> {
   const model = opts.model ?? provider.defaultModel
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 120_000)
+  // Bug F: timeout is now configurable (15s for voice, 120s default otherwise).
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 120_000)
   try {
     const res = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: 'POST',

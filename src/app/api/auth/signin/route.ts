@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { verifyPassword, signToken, setSessionCookie } from '@/lib/auth'
+import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 
@@ -11,6 +12,15 @@ const schema = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  // Rate limit: 10 attempts per minute per client.
+  const rl = rateLimit(`auth-signin:${clientKey(req)}`, 10, 60_000)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Too many attempts. Wait a minute.' },
+      { status: 429 }
+    )
+  }
+
   let body: unknown
   try {
     body = await req.json()
@@ -20,6 +30,7 @@ export async function POST(req: NextRequest) {
 
   const parsed = schema.safeParse(body)
   if (!parsed.success) {
+    // Identical generic message — same as the wrong-password case below.
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 400 })
   }
 

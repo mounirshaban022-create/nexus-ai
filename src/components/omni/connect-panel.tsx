@@ -6,7 +6,10 @@ import {
   Calendar,
   CheckCircle2,
   Cloud,
+  ExternalLink,
   Globe,
+  Info,
+  KeyRound,
   Loader2,
   Mail,
   MessageSquare,
@@ -62,6 +65,60 @@ const COMING_SOON_APPS = [
   { id: 'slack', label: 'Slack', icon: MessageSquare, desc: 'Team messaging' },
   { id: 'web', label: 'Web', icon: Globe, desc: 'Live web search & reader' },
 ]
+
+/* Step-by-step setup guides shown when a provider preset is selected.
+   Gmail gets the full numbered walkthrough; other providers show a short
+   App-Password callout so users know not to paste their regular password. */
+interface SetupGuide {
+  intro: string
+  steps?: { title: string; body: string }[]
+  link?: { href: string; label: string }
+}
+const SETUP_GUIDES: Record<string, SetupGuide> = {
+  gmail: {
+    intro:
+      "Gmail doesn't accept your normal password for apps. You need an App Password (16 characters).",
+    steps: [
+      {
+        title: 'Turn on 2-Step Verification',
+        body: 'In your Google Account → Security → turn on 2-Step Verification (required).',
+      },
+      {
+        title: 'Open the App Passwords page',
+        body: 'Go to myaccount.google.com/apppasswords (the button below opens it in a new tab).',
+      },
+      {
+        title: 'Create the password',
+        body: "Type a name like 'NEXUS AI' and click Create. Copy the 16-character password.",
+      },
+      {
+        title: 'Paste it below',
+        body: 'Paste that password into the Password field. Your Gmail address goes in both Email and Username.',
+      },
+    ],
+    link: { href: 'https://myaccount.google.com/apppasswords', label: 'Open Google App Passwords' },
+  },
+  outlook: {
+    intro:
+      "Outlook / Microsoft 365 needs an App Password (not your regular password). Create one in your Microsoft account → Security → App passwords.",
+    link: { href: 'https://account.microsoft.com/security', label: 'Open Microsoft Security' },
+  },
+  yahoo: {
+    intro:
+      "Yahoo Mail needs an App Password. Generate one at account.security.yahoo.com → Generate app password.",
+    link: { href: 'https://account.security.yahoo.com', label: 'Open Yahoo Account Security' },
+  },
+  icloud: {
+    intro:
+      "iCloud Mail needs an App-Specific Password. Create one at appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
+    link: { href: 'https://appleid.apple.com', label: 'Open Apple ID' },
+  },
+  zoho: {
+    intro:
+      "Zoho Mail needs an App Password. Create one in Zoho Mail settings → Security → App Passwords.",
+    link: { href: 'https://mail.zoho.com', label: 'Open Zoho Mail' },
+  },
+}
 
 export function ConnectPanel({ open, onClose, onAccountsChange }: ConnectPanelProps) {
   const [accounts, setAccounts] = useState<EmailAccount[]>([])
@@ -424,12 +481,15 @@ export function ConnectPanel({ open, onClose, onAccountsChange }: ConnectPanelPr
                         ))}
                       </div>
 
-                      {selectedPreset?.hint && (
+                      {selectedPreset?.hint && !SETUP_GUIDES[presetId] && (
                         <p className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700">
                           <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                           <span>{selectedPreset.hint}</span>
                         </p>
                       )}
+
+                      {/* Step-by-step setup guide (Gmail gets the full treatment) */}
+                      <SetupGuide presetId={presetId} />
 
                       <div className="space-y-3">
                         <Field>
@@ -485,19 +545,34 @@ export function ConnectPanel({ open, onClose, onAccountsChange }: ConnectPanelPr
                               placeholder="you@gmail.com"
                               className="h-10"
                             />
+                            {presetId === 'gmail' && (
+                              <p className="mt-1 text-[10px] text-muted-foreground">
+                                Usually the same as your email for Gmail
+                              </p>
+                            )}
                           </Field>
                           <Field>
                             <Label htmlFor="acct-pass" className="mb-1.5 block text-[11px] text-muted-foreground">
-                              Password / App password
+                              {presetId === 'gmail'
+                                ? 'App Password (not your Gmail password)'
+                                : 'Password / App password'}
                             </Label>
                             <Input
                               id="acct-pass"
                               type="password"
                               value={password}
                               onChange={(e) => setPassword(e.target.value)}
-                              placeholder="••••••••"
+                              placeholder={
+                                presetId === 'gmail' ? '16-char app password' : '••••••••'
+                              }
                               className="h-10"
                             />
+                            {presetId === 'gmail' && (
+                              <p className="mt-1 text-[10px] text-muted-foreground">
+                                16 characters, looks like:{' '}
+                                <span className="font-mono text-amber-700">abcd efgh ijkl mnop</span>
+                              </p>
+                            )}
                           </Field>
                         </div>
 
@@ -549,14 +624,23 @@ export function ConnectPanel({ open, onClose, onAccountsChange }: ConnectPanelPr
 
                         {/* Error / success messages */}
                         {formError && (
-                          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
-                            {formError}
-                          </p>
+                          <div className="rounded-lg bg-destructive/10 px-3 py-2.5">
+                            <p className="text-[11px] text-destructive">{formError}</p>
+                            <p className="mt-1 text-[10px] text-destructive/70">
+                              Fix the credentials above and try again.
+                            </p>
+                          </div>
                         )}
                         {formSuccess && (
-                          <p className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-700">
-                            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> {formSuccess}
-                          </p>
+                          <div className="flex items-start gap-2 rounded-lg bg-emerald-500/10 px-3 py-2.5">
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                            <div className="min-w-0">
+                              <p className="text-[12px] font-semibold text-emerald-700">
+                                Connected — your inbox is ready
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-emerald-700/80">{formSuccess}</p>
+                            </div>
+                          </div>
                         )}
 
                         <Button
@@ -570,7 +654,8 @@ export function ConnectPanel({ open, onClose, onAccountsChange }: ConnectPanelPr
                             </>
                           ) : (
                             <>
-                              <ShieldCheck className="h-4 w-4" /> Connect account
+                              <ShieldCheck className="h-4 w-4" />{' '}
+                              {presetId === 'gmail' ? 'Connect Gmail' : 'Connect account'}
                             </>
                           )}
                         </Button>
@@ -594,4 +679,84 @@ export function ConnectPanel({ open, onClose, onAccountsChange }: ConnectPanelPr
 
 function Field({ children }: { children: React.ReactNode }) {
   return <div>{children}</div>
+}
+
+/* Provider setup-guide panel. Gmail gets a full numbered walkthrough with
+   username/password reminders; other providers get a short App-Password callout. */
+function SetupGuide({ presetId }: { presetId: string }) {
+  const guide = SETUP_GUIDES[presetId]
+  if (!guide) return null
+  const isGmail = presetId === 'gmail'
+  return (
+    <div
+      className={`mb-3 rounded-xl border p-4 ${
+        isGmail ? 'border-amber-500/30 bg-amber-500/5' : 'border-border bg-secondary/30'
+      }`}
+    >
+      <div className="flex items-start gap-2.5">
+        <span
+          className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+            isGmail ? 'bg-amber-500/15 text-amber-600' : 'bg-secondary text-muted-foreground'
+          }`}
+        >
+          {isGmail ? (
+            <KeyRound className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Info className="h-3.5 w-3.5" aria-hidden />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-semibold text-foreground">
+            {isGmail ? 'How to connect Gmail' : 'App Password required'}
+          </p>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{guide.intro}</p>
+
+          {guide.steps && (
+            <ol className="mt-2.5 space-y-2">
+              {guide.steps.map((step, i) => (
+                <li key={i} className="flex gap-2.5 text-[11px]">
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-[10px] font-semibold text-amber-700">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground">{step.title}</p>
+                    <p className="text-muted-foreground">{step.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {isGmail && (
+            <div className="mt-2.5 grid grid-cols-1 gap-2 rounded-lg bg-amber-500/5 p-2.5 text-[10px] sm:grid-cols-2">
+              <div>
+                <p className="font-semibold text-foreground">Username</p>
+                <p className="text-muted-foreground">
+                  Your full Gmail address (e.g. mounirshaban022@gmail.com)
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Password</p>
+                <p className="text-muted-foreground">
+                  The 16-char App Password (with or without spaces)
+                </p>
+              </div>
+            </div>
+          )}
+
+          {guide.link && (
+            <a
+              href={guide.link.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1.5 text-[11px] font-medium text-amber-700 transition hover:bg-amber-500/25"
+            >
+              <ExternalLink className="h-3 w-3" aria-hidden />
+              {guide.link.label}
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }

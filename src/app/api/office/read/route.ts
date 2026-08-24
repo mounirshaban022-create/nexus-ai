@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { writeFileSync, unlinkSync } from 'fs'
-import { tmpdir } from 'os'
-import path from 'path'
-import { randomUUID } from 'crypto'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { extractPdfText } from '@/lib/pdf-text'
 
 /**
  * Office Studio reader: extract text/data from uploaded
@@ -16,10 +13,6 @@ const requestSchema = z.object({
   format: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md']),
   filename: z.string().max(200).optional(),
 })
-
-function safeTempPath(ext: string): string {
-  return path.join(tmpdir(), `nexus-${randomUUID()}.${ext}`)
-}
 
 function base64ToBuffer(b64: string): Buffer {
   return Buffer.from(b64.includes(',') && b64.startsWith('data:') ? b64.split(',')[1] : b64, 'base64')
@@ -48,20 +41,13 @@ export async function POST(req: NextRequest) {
     } = { format }
 
     if (format === 'pdf') {
-      const tmp = safeTempPath('pdf')
-      writeFileSync(tmp, buffer)
-      try {
-        const pdfParse = (await import('pdf-parse')).default as (
-          b: Buffer
-        ) => Promise<{ text: string; numpages: number; info?: Record<string, unknown> }>
-        const data = await pdfParse(buffer)
-        extracted = {
-          format,
-          text: data.text?.slice(0, 60000),
-          meta: { pages: data.numpages, info: data.info },
-        }
-      } finally {
-        try { unlinkSync(tmp) } catch { /* ignore */ }
+      // 3-layer fallback (pdftotext → pdf-parse v2 → OCR) lives in
+      // src/lib/pdf-text.ts — same pipeline as /api/documents.
+      const { text: pdfText, pages } = await extractPdfText(buffer)
+      extracted = {
+        format,
+        text: pdfText?.slice(0, 60000),
+        meta: pages ? { pages } : undefined,
       }
     } else if (format === 'docx') {
       const { extractRawText } = await import('mammoth')
