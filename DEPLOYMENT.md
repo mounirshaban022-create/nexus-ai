@@ -45,11 +45,14 @@ Your repo is already initialized at `github.com/mounirshaban022-create/nexus-ai.
 The sandbox uses SQLite; Vercel needs a real Postgres. Supabase gives you one free.
 
 1. **Supabase Dashboard → your project** (`wopzantzdnobajjlzwpl`)
-2. **Settings → Database → Connection string → "URI" → Transaction pooler**
-   - Format: `postgresql://postgres.wopzantzdnobajjlzwpl:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres`
-   - Copy this — it's your Vercel `DATABASE_URL`
+2. **Use the DIRECT connection** (recommended for this project):
+   - `postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwpl.supabase.co:5432/postgres`
+   - Why direct (not the pooler): the Supavisor transaction pooler returned `tenant/user postgres.wopzantzdnobajjlzwpl not found` for this project — the pooler doesn't recognize the tenant. The direct connection bypasses the pooler and uses native Postgres auth (user `postgres`, no tenant lookup). For low-to-medium traffic this is fine on Vercel.
+   - (If you later enable the pooler in Dashboard → Database → Connection pooling, you can switch to `postgresql://postgres.wopzantzdnobajjlzwpl:<PASSWORD>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true`.)
 3. **SQL Editor → New Query** → paste the entire contents of [`supabase-schema.sql`](./supabase-schema.sql) → **Run**
-   - Creates all tables: `profiles`, `chat_sessions`, `chat_messages`, `generated_images`, `generated_videos`, `generated_documents`, `user_ai_providers`, etc.
+   - Creates all 13 tables the app needs (auto-generated from `prisma/schema.prisma`): `User`, `ChatSession`, `ChatMessage`, `GeneratedImage`, `GeneratedVideo`, `GeneratedDocument`, `EmailAccount`, `AiProvider`, `UserMemory`, `Project`, `ProjectFile`, `WhatsAppAccount`, `WhatsAppMessage`.
+   - Uses PascalCase names (matches Prisma exactly — no `@@map`), TEXT `cuid()` IDs, no references to `auth.users` (this app has its own `User` table + custom JWT auth, not Supabase's built-in auth).
+   - Safe to re-run: the DROP statements clean up both the old wrong tables (snake_case + UUID + auth.users) and any prior version of these tables.
 4. **Settings → API** → confirm:
    - Project URL: `https://wopzantzdnobajjlzwpl.supabase.co`
    - `anon` public key + `service_role` key (both already in your `.env.local`)
@@ -177,6 +180,8 @@ bun run db:push  # apply schema changes to local SQLite
 
 | Symptom | Fix |
 |---------|-----|
+| `prisma.chatSession.create()` → `FATAL: tenant/user postgres.<ref> not found` | The Supavisor pooler doesn't recognize the project. Switch `DATABASE_URL` to the **direct connection**: `postgresql://postgres:<PASSWORD>@db.<ref>.supabase.co:5432/postgres` (note: user is just `postgres`, no `.<ref>`, no `?pgbouncer=true`). See DEPLOYMENT.md §2. |
+| Auth (sign up / sign in) fails on Vercel | The `User` table is missing from Supabase. Run the latest [`supabase-schema.sql`](./supabase-schema.sql) in the SQL Editor — it creates all 13 tables including `User`. The old SQL file was missing 6 tables; the new one is auto-generated from the Prisma schema. |
 | Build fails on Prisma | Ensure `DATABASE_URL` is set in Vercel AND starts with `postgres`. The `build` script auto-switches the provider. |
 | Chat returns "All AI engines are busy" | `OPENROUTER_API_KEY` not set or invalid. Check Vercel env vars. |
 | Email connect "failed" with correct creds | You're on an old deploy. The `getZAI` export fix is in commit `9f61998`. Redeploy. |
