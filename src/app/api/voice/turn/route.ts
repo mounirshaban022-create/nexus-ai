@@ -112,7 +112,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request: audio is required.' }, { status: 400 })
     }
 
-    const zai = await getZAI()
     const { audio, message, voice, lang } = parsed.data
 
     // Language override (mirrors /api/tts): if the caller is in Arabic UI
@@ -124,6 +123,15 @@ export async function POST(req: NextRequest) {
         : voice
 
     // ---------- 1. Transcribe (skip if transcript provided via Web Speech API) ----------
+    // Bug 8-A (voice mode Vercel): getZAI() used to be called eagerly here,
+    // before we knew whether ASR was actually needed. On Vercel the SDK
+    // failed to load (no .z-ai-config) so EVERY voice turn 500'd — even
+    // text input + Edge TTS that didn't need the SDK at all. Now we load
+    // the SDK lazily: only when the audio-ASR path is taken OR when the
+    // chosen TTS voice is a Z.ai voice (the Edge TTS path doesn't need
+    // the SDK). Combined with the loader fix in src/lib/zai.ts, this
+    // makes voice mode work end-to-end on Vercel with the premium voice.
+    let zai: Awaited<ReturnType<typeof getZAI>> | null = null
     let transcript = ''
     if (message && message.trim()) {
       transcript = message.trim()
@@ -133,6 +141,15 @@ export async function POST(req: NextRequest) {
         : audio
       if (!base64Audio) {
         return NextResponse.json({ error: 'Audio is empty.' }, { status: 400 })
+      }
+      try {
+        zai = await getZAI()
+      } catch (e) {
+        console.error('[api/voice/turn] Z.ai SDK unavailable for ASR:', e)
+        return NextResponse.json(
+          { error: 'Voice recognition is unavailable right now. Try typing your message instead.' },
+          { status: 503 }
+        )
       }
       const asr = await zai.audio.asr.create({ file_base64: base64Audio })
       transcript = asr.text?.trim() ?? ''
@@ -216,11 +233,25 @@ export async function POST(req: NextRequest) {
           audioFormat = 'mp3'
         }
       } else {
+        // Premium Z.ai voice (tongtong / jam / xiaochen / ...). Load the
+        // SDK lazily here — only needed for the non-Edge TTS path. If
+        // ASR already loaded it above, reuse the same instance.
+        if (!zai) {
+          try {
+            zai = await getZAI()
+          } catch (e) {
+            console.error('[api/voice/turn] Z.ai SDK unavailable for TTS:', e)
+            // Reply text still usable — client will fall back to its
+            // own TTS chain (server /api/tts → browser speechSynthesis).
+            zai = null
+          }
+        }
+        if (!zai) throw new Error('Z.ai TTS unavailable — falling back to client chain')
         const chunks = splitTextIntoChunks(speechText)
         // Bug G: synthesise every chunk in parallel (was sequential for-loop).
         const buffers = await Promise.all(
           chunks.map(async (chunk) => {
-            const ttsRes = await zai.audio.tts.create({
+            const ttsRes = await zai!.audio.tts.create({
               input: chunk,
               voice: effectiveVoice,
               speed: 1.0,

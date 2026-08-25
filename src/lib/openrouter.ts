@@ -39,7 +39,7 @@ function readConfig(): OpenRouterConfig | null {
     process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1'
   const defaultModel =
     process.env.OPENROUTER_DEFAULT_MODEL?.trim() ||
-    'stealth/ox-alpha' // "Ox Alpha" — free coding/reasoning model, 1M context
+    'anthropic/claude-sonnet-4' // Premium Claude Sonnet 4 — fast, extremely smart, multimodal.
   return {
     apiKey,
     baseUrl,

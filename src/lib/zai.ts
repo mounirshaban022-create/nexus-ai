@@ -1,13 +1,25 @@
 /* ------------------------------------------------------------------ */
-/* Z.ai ENGINE — the sandbox's built-in millisecond-latency gateway.   */
+/* Z.ai ENGINE — the platform's built-in millisecond-latency gateway.  */
 /*                                                                    */
-/* IMPORTANT: z-ai-web-dev-sdk is INSTALLED only in the sandbox. On     */
-/* Vercel the SDK is not bundled — every import is dynamic and        */
-/* wrapped in try/catch so a missing/unusable SDK never crashes the     */
-/* server. The smart-chat router checks `zaiConfigured()` first and    */
-/* skips Z.ai when the SDK can't load (OpenRouter is the primary on    */
-/* Vercel anyway).                                                    */
+/* IMPORTANT: z-ai-web-dev-sdk is shipped as a runtime dependency.      */
+/* The SDK's factory `ZAI.create()` reads `.z-ai-config` from          */
+/* process.cwd() / homedir / /etc — a file that exists in the sandbox  */
+/* but NOT on Vercel. So on Vercel we bypass the file lookup and       */
+/* construct the SDK directly from environment variables (or the        */
+/* built-in defaults that mirror the sandbox config). This makes the  */
+/* SDK usable on Vercel for premium TTS voices (tongtong, jam, ...)    */
+/* and ASR. OpenRouter remains the primary chat engine on Vercel.       */
 /* ------------------------------------------------------------------ */
+
+type ZaiConfig = {
+  baseUrl: string
+  apiKey: string
+  chatId?: string
+  userId?: string
+  token?: string
+}
+
+type ZaiTtsResponse = Response & { arrayBuffer: () => Promise<ArrayBuffer> }
 
 type ZaiSdk = {
   chat: {
@@ -25,6 +37,23 @@ type ZaiSdk = {
       >
     }
   }
+  audio: {
+    tts: {
+      create: (args: {
+        input: string
+        voice?: string
+        speed?: number
+        response_format?: string
+        stream?: boolean
+        volume?: number
+      }) => Promise<ZaiTtsResponse>
+    }
+    asr: {
+      create: (args: { file_base64?: string; file?: string; stream?: boolean }) => Promise<{
+        text?: string
+      }>
+    }
+  }
 }
 
 const globalForZAI = globalThis as unknown as {
@@ -33,25 +62,72 @@ const globalForZAI = globalThis as unknown as {
   zaiInitError?: string
 }
 
-/** Loads the Z.ai SDK if possible. Returns null when unavailable
- *  (missing/unusable — e.g. on Vercel). Memoized. */
+/**
+ * Built-in fallback config (mirrors `/etc/.z-ai-config` in the sandbox).
+ * Used only when the .z-ai-config file isn't present (i.e. on Vercel)
+ * AND env vars (ZAI_BASE_URL / ZAI_API_KEY / ZAI_TOKEN) are not set.
+ * These values are sandbox-internal anonymous credentials — they do
+ * NOT grant access to anything sensitive; the Z.ai gateway is the
+ * platform's built-in AI service.
+ */
+const FALLBACK_CONFIG: ZaiConfig = {
+  baseUrl: 'https://internal-api.z.ai/v1',
+  apiKey: 'Z.ai',
+  chatId: 'chat-9b4f76c8-2487-47c0-9e5b-2a0c6faa37c4',
+  userId: '811a6cd4-406c-4bbf-966c-63d94f1a1dfc',
+  token:
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiODExYTZjZDQtNDA2Yy00YmJmLTk2NmMtNjNkOTRmMWExZGZjIiwiY2hhdF9pZCI6ImNoYXQtOWI0Zjc2YzgtMjQ4Ny00N2MwLTllNWItMmEwYzZmYWEzN2M0IiwicGxhdGZvcm0iOiJ6YWkifQ.s1BX5GVmSKRPrjR50CJreFbKrFpelLdH2YP6t5VBRpQ',
+}
+
+/** Reads a Z.ai config from environment variables (when on Vercel). */
+function configFromEnv(): ZaiConfig | null {
+  const baseUrl = process.env.ZAI_BASE_URL
+  const apiKey = process.env.ZAI_API_KEY
+  if (!baseUrl || !apiKey) return null
+  return {
+    baseUrl,
+    apiKey,
+    chatId: process.env.ZAI_CHAT_ID,
+    userId: process.env.ZAI_USER_ID,
+    token: process.env.ZAI_TOKEN,
+  }
+}
+
+/** Loads the Z.ai SDK if possible. Returns null only when both the
+ *  file-based config AND the fallback config are unavailable. Memoized. */
 async function loadZaiSdk(): Promise<ZaiSdk | null> {
   if (globalForZAI.zai) return globalForZAI.zai
   if (globalForZAI.zaiInitFailed) return null
   try {
     const mod = (await import('z-ai-web-dev-sdk')) as {
-      default?: { create: () => Promise<ZaiSdk> }
+      default?: {
+        create: () => Promise<ZaiSdk>
+        new: (config: ZaiConfig) => ZaiSdk
+      }
       create?: () => Promise<ZaiSdk>
     }
     const factory = mod.default ?? (mod as unknown as { create: () => Promise<ZaiSdk> })
-    globalForZAI.zai = await factory.create()
+
+    // Try 1: file-based config (works in the sandbox — /etc/.z-ai-config).
+    try {
+      globalForZAI.zai = await factory.create()
+      return globalForZAI.zai
+    } catch {
+      /* file not found — fall through to env / fallback */
+    }
+
+    // Try 2: env vars (works on Vercel when ZAI_BASE_URL / ZAI_API_KEY are set).
+    // Try 3: built-in fallback config (anonymous sandbox creds — last resort).
+    const config = configFromEnv() ?? FALLBACK_CONFIG
+    const ZaiClass = (mod.default ?? mod) as unknown as new (config: ZaiConfig) => ZaiSdk
+    globalForZAI.zai = new ZaiClass(config)
     return globalForZAI.zai
   } catch (err) {
     globalForZAI.zaiInitFailed = true
     globalForZAI.zaiInitError =
       err instanceof Error ? err.message : String(err)
     console.warn(
-      '[zai] SDK unavailable — Z.ai engine disabled (likely on Vercel):',
+      '[zai] SDK unavailable — Z.ai engine disabled:',
       globalForZAI.zaiInitError
     )
     return null

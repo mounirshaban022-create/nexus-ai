@@ -80,14 +80,20 @@ const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
     documents: ['glm-5.3', 'glm-5'],           // best writer
     fast: ['glm-5-turbo'],
   },
-  // OpenRouter free models (default when it's the connected provider)
+  // OpenRouter — PREMIUM-first model pool (Claude Sonnet 4 leads every
+  // task; free models remain as last-resort fallbacks when a premium model
+  // is rate-limited or the user's OpenRouter credits run low).
+  // The user explicitly requested "smarter AI that understands everything"
+  // + "premium" — Claude Sonnet 4 is the strongest general-purpose model
+  // on OpenRouter (smart, fast, multimodal, 200k context). GPT-4o is the
+  // fallback premium; the :free models are emergency-only.
   openrouter: {
-    code: ['cohere/north-mini-code:free', 'poolside/laguna-s-2.1:free', 'nvidia/nemotron-3-super-120b-a12b:free'],
-    reasoning: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'nvidia/nemotron-3-super-120b-a12b:free', 'z-ai/glm-5.2:free'],
-    chat: ['z-ai/glm-5.2:free', 'poolside/laguna-s-2.1:free', 'google/gemma-4-31b-it:free'],
-    voice: ['poolside/laguna-s-2.1:free', 'nvidia/nemotron-3.5-lightning:free', 'liquid/lfm-2.5-2.6b:free'],
-    documents: ['google/gemma-4-31b-it:free', 'z-ai/glm-5.2:free', 'dots-studio/dots-3-note-preview:free'],
-    fast: ['liquid/lfm-2.5-2.6b:free', 'nvidia/nemotron-3.5-lightning:free'],
+    code: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'cohere/north-mini-code:free'],
+    reasoning: ['anthropic/claude-sonnet-4', 'openai/o1-mini', 'nvidia/nemotron-3-ultra-550b-a55b:free'],
+    chat: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet'],
+    voice: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'liquid/lfm-2.5-2.6b:free'],
+    documents: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemma-4-31b-it:free'],
+    fast: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'liquid/lfm-2.5-2.6b:free'],
   },
   // Putra AI (Malaysia) — OpenAI-compatible, 500 free API calls
   putra: {

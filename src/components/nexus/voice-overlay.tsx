@@ -56,7 +56,11 @@ interface TurnResponse {
 }
 
 const LANGUAGES = [
-  { code: 'en-US', label: 'English', voice: 'en-US-AriaNeural' },
+  // English uses the PREMIUM Z.ai voice (warm, friendly neural voice
+  // via the z-ai-web-dev-sdk). Other languages fall back to free
+  // Microsoft Edge neural voices because the Z.ai TTS catalog is
+  // English/Chinese-only.
+  { code: 'en-US', label: 'English', voice: 'tongtong' },
   { code: 'ar-AE', label: 'العربية', voice: 'ar-AE-FatimaNeural' },
   { code: 'ar-SA', label: 'العربية (SA)', voice: 'ar-SA-ZariyahNeural' },
   { code: 'fr-FR', label: 'Français', voice: 'fr-FR-DeniseNeural' },
@@ -107,7 +111,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const [muted, setMuted] = useState(false)
   const [micDenied, setMicDenied] = useState(false)
   const [lang, setLang] = useState('en-US')
-  const [voiceId, setVoiceId] = useState('en-US-AriaNeural')
+  const [voiceId, setVoiceId] = useState('tongtong')
   const [interim, setInterim] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
   const [error, setError] = useState('')
@@ -132,8 +136,8 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const openRef = useRef(false)
   const busyRef = useRef(false)
   const langRef = useRef('en-US')
-  const voiceIdRef = useRef('en-US-AriaNeural')
-  const serverVoiceRef = useRef('en-US-AriaNeural')
+  const voiceIdRef = useRef('tongtong')
+  const serverVoiceRef = useRef('tongtong')
   const uiLangRef = useRef<'en' | 'ar'>('en')
   const kokoroReadyRef = useRef(false)
   const kokoroTriedRef = useRef(false)
@@ -783,7 +787,9 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
 
     // Voice + language preferences (persisted; Arabic UI → Arabic voice).
     const ui = uiLangRef.current
-    const defServer = ui === 'ar' ? 'ar-SA-HamedNeural' : 'en-US-AriaNeural'
+    // Premium Z.ai voice by default for English UI; Arabic UI keeps the
+    // Arabic Microsoft Edge voice because Z.ai has no Arabic voice.
+    const defServer = ui === 'ar' ? 'ar-SA-HamedNeural' : 'tongtong'
     const storedServer = window.localStorage.getItem(SERVER_VOICE_KEY)
     const server = storedServer && resolveVoice(storedServer) ? storedServer : defServer
     serverVoiceRef.current = server

@@ -1715,46 +1715,58 @@ export async function POST(req: NextRequest) {
           send({ type: 'user', id: userMessage.id, content: trimmed })
 
           /* ---------- LIVE ROUTING (inside the stream — see note above) ---------- */
-          // The user event is already on screen; now show a live status while
-          // the orchestrator picks the specialist, then announce the takeover.
-          let effectiveAgentSlug: string | null
+          /* ---------- NEXUS-FIRST ROUTING (no auto-switching) ---------- */
+          // The conversation ALWAYS starts with NEXUS. We do NOT auto-route
+          // to a specialist — the previous "Picking the right specialist…"
+          // path added a 2-3s LLM classification call before the user saw a
+          // single token, which made the chat feel slow. Specialists are
+          // only engaged when the user EXPLICITLY pins one via the
+          // personality rail (session.agentPinned && session.agentSlug).
+          // This makes NEXUS the primary conversationalist: instant start,
+          // smarter model (Claude Sonnet 4), one continuous persona.
+          let effectiveAgentSlug: string | null = null
           let routingDecision: RoutingDecision | null = null
           if (session.agentPinned && session.agentSlug) {
+            // PINNED by the user — use the chosen specialist.
             effectiveAgentSlug = session.agentSlug
-          } else {
-            // AUTO-ROUTE: pick the best specialist for THIS message.
-            // Status event keeps the UI visibly alive during the routing call.
-            send({ type: 'status', message: 'Picking the right specialist…' })
-            routingDecision = await routeMessage(effectiveMessage, routingHistory)
-            effectiveAgentSlug = routingDecision.agentSlug
-            // Reflect the active specialist on the session (never pins)
-            if (session.agentSlug !== effectiveAgentSlug) {
-              await db.chatSession.update({
-                where: { id: session!.id },
-                data: { agentSlug: effectiveAgentSlug },
-              }).catch(() => {})
-            }
           }
+          // DEFAULT (not pinned): effectiveAgentSlug stays null → NEXUS.
+          // No routing LLM call, no "Picking the right specialist…" status,
+          // no 2-3s delay. The stream jumps straight to the assistant_start.
 
           const personaPrompt = effectiveAgentSlug ? buildPersonaSystemPrompt(effectiveAgentSlug) : null
           const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext, personaPrompt)
 
-          // NEXUS One: announce the agent takeover (or hand-back to NEXUS)
-          // so the UI can render the live routing chip. Only emitted for
-          // AUTO-routed sessions — pinned sessions already show their agent.
-          if (routingDecision) {
-            const decisionMeta = routingDecision.agentSlug ? getAgentMeta(routingDecision.agentSlug) : null
+          // Emit the active-agent chip so the UI knows who's replying.
+          // Pinned sessions show their specialist; default sessions show
+          // the NEXUS identity (◆, orange). Always emitted so the UI can
+          // render the chip deterministically (no flash of "unassigned").
+          if (effectiveAgentSlug) {
+            const pinnedMeta = getAgentMeta(effectiveAgentSlug)
             send({
               type: 'agent_assign',
-              agentSlug: routingDecision.agentSlug,
-              name: routingDecision.agentName,
-              division: routingDecision.division,
-              emoji: routingDecision.emoji,
-              color: routingDecision.color,
-              reason: routingDecision.reason,
-              elapsedMs: routingDecision.elapsedMs,
+              agentSlug: effectiveAgentSlug,
+              name: pinnedMeta?.name || effectiveAgentSlug,
+              division: pinnedMeta?.division || null,
+              emoji: pinnedMeta?.emoji || '◆',
+              color: pinnedMeta?.color || '#f97316',
+              reason: 'pinned',
+              elapsedMs: 0,
+              pinned: true,
+              divisionLabel: pinnedMeta ? getDivision(pinnedMeta.division)?.label ?? null : null,
+            })
+          } else {
+            send({
+              type: 'agent_assign',
+              agentSlug: null,
+              name: 'NEXUS',
+              division: null,
+              emoji: '◆',
+              color: '#f97316',
+              reason: 'general',
+              elapsedMs: 0,
               pinned: false,
-              divisionLabel: decisionMeta ? getDivision(decisionMeta.division)?.label ?? null : null,
+              divisionLabel: null,
             })
           }
 

@@ -73,10 +73,17 @@ export const ALL_VOICES: VoiceOption[] = [...NEXUS_VOICES, ...EDGE_VOICES]
 
 /**
  * The default voice used by every endpoint that synthesizes speech
- * (/api/tts, /api/voice/turn). Microsoft neural voices are FREE and
- * higher quality than the bundled ZAI defaults (e.g. `tongtong`).
+ * (/api/tts, /api/voice/turn). PREMIUM Z.ai neural voice — warm and
+ * friendly, designed for natural spoken conversation (premium TTS via
+ * the z-ai-web-dev-sdk). For Arabic UI the per-language override in
+ * /api/tts and /api/voice/turn still swaps to a Microsoft Arabic
+ * neural voice because the Z.ai TTS catalog has no Arabic voice.
+ *
+ * Other premium Z.ai voices available: chuichui (lively), xiaochen
+ * (calm/professional), jam (British gentleman), kazi (clear/standard),
+ * douji (natural/fluent), luodo (richly expressive).
  */
-export const DEFAULT_VOICE = 'en-US-AriaNeural'
+export const DEFAULT_VOICE = 'tongtong'
 
 /** Maps a UI language ('en' | 'ar') to a high-quality default Microsoft neural voice. */
 export function pickVoiceForLanguage(lang: 'en' | 'ar'): string {
