@@ -90,10 +90,24 @@ export const usePreferences = create<PreferencesState>()(
   )
 )
 
-/** Applies theme + language to the document element. Call on change. */
-export function applyPreferences(theme: string, language: string) {
+/** Applies the persisted UI preferences to the document element.
+ *
+ * THEME (Task 6): The theme is now driven by `next-themes` — the
+ * ThemeProvider in `src/app/layout.tsx` is the single source of truth
+ * for the `.dark` class on <html> (it persists to its own `theme`
+ * localStorage key and runs its own pre-hydration script). This
+ * function therefore NO LONGER touches the dark class — passing a
+ * `theme` argument is allowed for backward-compatibility with the
+ * original call sites (e.g. `src/app/page.tsx`) but the value is
+ * ignored. Theme switching is done via `useTheme()` from next-themes
+ * (see `theme-toggle.tsx` + the Appearance section in
+ * `settings-mode.tsx`).
+ *
+ * LANGUAGE: still applied here — `dir` + `lang` attributes on <html>.
+ */
+export function applyPreferences(_theme: string, language: string) {
   if (typeof document === 'undefined') return
-  document.documentElement.classList.toggle('dark', theme === 'dark')
+  // Theme is owned by next-themes — do not toggle the dark class here.
   document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr'
   document.documentElement.lang = language
 }

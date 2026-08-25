@@ -53,80 +53,86 @@
 }
 
 /* ============ NEXUS Premium Neutral ============
-   Sophisticated near-neutral dark surfaces, one violet accent.
+   Sophisticated near-neutral dark surfaces, one terracotta accent.
    Inspired by Claude / ChatGPT / Linear restraint.          */
-/* ============ NEXUS Ivory — Claude-inspired warm premium light theme ============ */
+/* ============ NEXUS Ivory — Claude-inspired warm premium light theme ============
+   The light theme is driven by next-themes: when the <html> element
+   does NOT have the `.dark` class, the `:root` block below applies.
+   The `.dark` block below it overrides these for dark mode.           */
 :root {
   --radius: 0.5rem;
-  /* Open WebUI exact palette (oklch grays) */
-  --background: oklch(1 0 0);                    /* white */
-  --foreground: oklch(0.2 0 0);                  /* gray-900 */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0 0);
+  /* Open WebUI exact palette (oklch grays) — slightly warmed for ivory */
+  --background: oklch(0.99 0.003 80);               /* warm ivory white */
+  --foreground: oklch(0.2 0.005 60);                /* warm near-black */
+  --card: oklch(1 0 0);                              /* pure white card */
+  --card-foreground: oklch(0.2 0.005 60);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0 0);
-  --primary: oklch(0.635 0.13 45);               /* NEXUS terracotta (only change) */
+  --popover-foreground: oklch(0.2 0.005 60);
+  --primary: oklch(0.635 0.13 45);                   /* NEXUS terracotta (only change) */
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.98 0 0);                  /* gray-50 */
-  --secondary-foreground: oklch(0.2 0 0);
-  --muted: oklch(0.98 0 0);                      /* gray-50 */
-  --muted-foreground: oklch(0.69 0 0);           /* gray-500 */
-  --accent: oklch(0.94 0 0);                     /* gray-100 */
-  --accent-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.98 0 0);                      /* gray-50 */
+  --secondary-foreground: oklch(0.2 0.005 60);
+  --muted: oklch(0.97 0.003 80);                     /* warm gray-50 */
+  --muted-foreground: oklch(0.5 0.005 70);           /* warm gray-600 */
+  --accent: oklch(0.95 0.004 80);                    /* warm gray-100 */
+  --accent-foreground: oklch(0.2 0.005 60);
   --destructive: oklch(0.58 0.19 27);
   --success: oklch(0.62 0.13 155);
   --success-foreground: oklch(0.98 0 0);
   --warning: oklch(0.72 0.16 65);
-  --warning-foreground: oklch(0.2 0 0);
-  --border: oklch(0.94 0 0);                     /* gray-100 — Open WebUI border */
-  --input: oklch(0.92 0 0);                      /* gray-200 */
+  --warning-foreground: oklch(0.2 0.005 60);
+  --border: oklch(0.92 0.003 80);                    /* warm gray-200 — Open WebUI border */
+  --input: oklch(0.93 0.003 80);                     /* warm gray-200 */
   --ring: oklch(0.635 0.13 45);
   --chart-1: oklch(0.635 0.13 45);
   --chart-2: oklch(0.51 0 0);
   --chart-3: oklch(0.69 0 0);
   --chart-4: oklch(0.42 0 0);
   --chart-5: oklch(0.32 0 0);
-  --sidebar: oklch(0.98 0 0);                    /* gray-50 */
-  --sidebar-foreground: oklch(0.42 0 0);         /* gray-700 */
+  --sidebar: oklch(0.975 0.003 80);                  /* warm gray-50 */
+  --sidebar-foreground: oklch(0.32 0.005 70);        /* warm gray-700 */
   --sidebar-primary: oklch(0.635 0.13 45);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.94 0 0);             /* gray-100 */
-  --sidebar-accent-foreground: oklch(0.2 0 0);
-  --sidebar-border: oklch(0.94 0 0);             /* gray-50 border like theirs */
+  --sidebar-accent: oklch(0.94 0.004 80);            /* warm gray-100 */
+  --sidebar-accent-foreground: oklch(0.2 0.005 60);
+  --sidebar-border: oklch(0.92 0.003 80);            /* warm gray-200 */
   --sidebar-ring: oklch(0.635 0.13 45);
 }
 
 .dark {
-  /* Open WebUI dark: gray-900 app / gray-850 bubbles / gray-950 deep */
-  --background: oklch(0.2 0 0);                  /* gray-900 */
-  --foreground: oklch(0.92 0 0);                 /* gray-200 */
-  --card: oklch(0.27 0 0);                       /* gray-850 */
+  /* Open WebUI dark: gray-900 app / gray-850 bubbles / gray-950 deep.
+     `--background` / `--sidebar` synced to the hex values used by the
+     NEXUS shell (#09090b / #0c0c0e) so semantic tokens read as the
+     exact same near-black surfaces the hand-tuned shell ships. */
+  --background: #09090b;                             /* near-black shell canvas */
+  --foreground: oklch(0.92 0 0);                     /* gray-200 */
+  --card: #161618;                                   /* slightly above background */
   --card-foreground: oklch(0.92 0 0);
-  --popover: oklch(0.27 0 0);                    /* gray-850 */
+  --popover: #161618;                                /* same as card */
   --popover-foreground: oklch(0.92 0 0);
   --primary: oklch(0.635 0.13 45);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.27 0 0);                  /* gray-850 */
+  --secondary: #161618;                              /* matches card */
   --secondary-foreground: oklch(0.92 0 0);
-  --muted: oklch(0.27 0 0);                      /* gray-850 */
-  --muted-foreground: oklch(0.69 0 0);           /* gray-500 */
-  --accent: oklch(0.32 0 0);                     /* gray-800 */
+  --muted: #161618;
+  --muted-foreground: oklch(0.69 0 0);                /* gray-500 */
+  --accent: oklch(0.32 0 0);                         /* gray-800 */
   --accent-foreground: oklch(0.92 0 0);
   --destructive: oklch(0.63 0.19 27);
   --success: oklch(0.7 0.13 155);
   --success-foreground: oklch(0.16 0 0);
   --warning: oklch(0.78 0.15 65);
   --warning-foreground: oklch(0.16 0 0);
-  --border: oklch(0.30 0 0 / 55%);               /* gray-800/55 — crisper card edges in dark */
-  --input: oklch(0.32 0 0);                      /* gray-800 */
+  --border: rgba(255, 255, 255, 0.08);               /* matches shell `border-white/8` */
+  --input: oklch(0.32 0 0);                           /* gray-800 */
   --ring: oklch(0.635 0.13 45);
-  --sidebar: oklch(0.16 0 0);                    /* gray-950 — their dark sidebar */
-  --sidebar-foreground: oklch(0.69 0 0);         /* gray-400 */
+  --sidebar: #0c0c0e;                                /* matches shell sidebar */
+  --sidebar-foreground: oklch(0.69 0 0);              /* gray-400 */
   --sidebar-primary: oklch(0.635 0.13 45);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.27 0 0);             /* gray-850 */
+  --sidebar-accent: #161618;
   --sidebar-accent-foreground: oklch(0.92 0 0);
-  --sidebar-border: oklch(0.32 0 0 / 45%);       /* gray-800/45 — visible against gray-950 */
+  --sidebar-border: rgba(255, 255, 255, 0.06);        /* slightly softer than app border */
   --sidebar-ring: oklch(0.635 0.13 45);
 }
 
@@ -142,6 +148,157 @@
     background: oklch(0.635 0.13 45 / 22%);
   }
 }
+
+/* ==================================================================
+   LIGHT-MODE UTILITY SWAPS (Task 6 — light mode toggle)
+   ------------------------------------------------------------------
+   The NEXUS shell + chat + settings were originally authored as a
+   fixed dark UI using literal Tailwind dark-palette utilities
+   (text-zinc-100..600, bg-white/5..10, bg-black/20..40, bg-[#09090b],
+   bg-[#0c0c0e], border-white/8 etc.). next-themes toggles the `.dark`
+   class on <html>; the rules below flip those hardcoded utilities to
+   premium light equivalents ONLY when the html is NOT in dark mode —
+   so the existing hand-tuned dark look is 100% preserved in dark
+   mode, and the whole shell + chat + overlays switch to the warm
+   ivory light theme the instant the user toggles.
+
+   These rules sit OUTSIDE `@layer` so they win over Tailwind's
+   utility-layer class definitions (same specificity, later source
+   order). `:not(.dark)` adds a class-specificity bump that beats the
+   plain utility selector.
+   ================================================================== */
+html:not(.dark) {
+  /* Flip the Tailwind zinc text scale so "near-white" utilities become
+     dark text and "near-black" utilities become light — keeping the
+     visual hierarchy but inverting for the light surface. */
+  --color-zinc-50: oklch(0.99 0.003 80);
+  --color-zinc-100: oklch(0.2 0.005 60);   /* primary text on light */
+  --color-zinc-200: oklch(0.25 0.005 60);
+  --color-zinc-300: oklch(0.32 0.005 65);  /* mid-emphasis */
+  --color-zinc-400: oklch(0.42 0.005 70);  /* muted-foreground */
+  --color-zinc-500: oklch(0.5 0.005 70);
+  --color-zinc-600: oklch(0.6 0.005 70);
+  --color-zinc-700: oklch(0.7 0.005 75);
+  --color-zinc-800: oklch(0.85 0.004 80);  /* near-white surface tint */
+  --color-zinc-900: oklch(0.92 0.003 80);
+  --color-zinc-950: oklch(0.96 0.003 80);
+}
+
+/* Hardcoded dark backgrounds (the literal hex utilities the shell
+   uses for its canvas, sidebar, top bar, bottom nav, and sheet) →
+   light semantic surfaces. */
+html:not(.dark) .bg-\[\#09090b\] { background-color: var(--background) !important; }
+html:not(.dark) .bg-\[\#0c0c0e\] { background-color: var(--sidebar) !important; }
+html:not(.dark) .bg-\[\#0c0c0e\]\/90 { background-color: color-mix(in oklab, var(--sidebar) 90%, transparent) !important; }
+html:not(.dark) .bg-\[\#0c0c0e\]\/95 { background-color: color-mix(in oklab, var(--sidebar) 95%, transparent) !important; }
+html:not(.dark) .bg-\[\#0c0c0f\] { background-color: var(--sidebar) !important; }
+html:not(.dark) .bg-\[\#0d0d0f\] { background-color: var(--sidebar) !important; }
+html:not(.dark) .bg-\[\#111113\] { background-color: var(--card) !important; }
+html:not(.dark) .bg-\[\#161618\] { background-color: var(--card) !important; }
+html:not(.dark) .bg-\[\#1a1a1d\] { background-color: var(--card) !important; }
+
+/* `bg-white/X` was "white at X% over dark surface" — in light mode it
+   must become "ink at X% over light surface" so the subtle hover /
+   chip / hairline tints remain visible. */
+html:not(.dark) .bg-white\/5 { background-color: color-mix(in oklab, var(--foreground) 5%, transparent) !important; }
+html:not(.dark) .bg-white\/8 { background-color: color-mix(in oklab, var(--foreground) 8%, transparent) !important; }
+html:not(.dark) .bg-white\/10 { background-color: color-mix(in oklab, var(--foreground) 10%, transparent) !important; }
+html:not(.dark) .bg-white\/15 { background-color: color-mix(in oklab, var(--foreground) 15%, transparent) !important; }
+html:not(.dark) .bg-white\/20 { background-color: color-mix(in oklab, var(--foreground) 20%, transparent) !important; }
+html:not(.dark) .bg-white\/\[0\.03\] { background-color: color-mix(in oklab, var(--foreground) 3%, transparent) !important; }
+html:not(.dark) .bg-white\/\[0\.04\] { background-color: color-mix(in oklab, var(--foreground) 4%, transparent) !important; }
+html:not(.dark) .bg-white\/\[0\.06\] { background-color: color-mix(in oklab, var(--foreground) 6%, transparent) !important; }
+
+/* `bg-black/X` was used for input fields (dark-tinted on dark bg).
+   Light mode: lift to a hairline gray (matches the input token). */
+html:not(.dark) .bg-black\/20 { background-color: var(--input) !important; }
+html:not(.dark) .bg-black\/30 { background-color: var(--input) !important; }
+html:not(.dark) .bg-black\/40 { background-color: var(--input) !important; }
+
+/* White-opacity borders (used as hairlines + chip outlines) → light
+   semantic border. */
+html:not(.dark) .border-white\/5 { border-color: var(--border) !important; }
+html:not(.dark) .border-white\/8 { border-color: var(--border) !important; }
+html:not(.dark) .border-white\/10 { border-color: var(--border) !important; }
+html:not(.dark) .border-white\/15 { border-color: var(--border) !important; }
+html:not(.dark) .border-white\/20 { border-color: var(--border) !important; }
+html:not(.dark) .border-white\/25 { border-color: var(--border) !important; }
+
+/* Used by the mobile top bar / bottom nav for translucency. */
+html:not(.dark) .backdrop-blur-md { backdrop-filter: blur(12px); }
+
+/* Override the inline `border-color: oklch(0.30 0 0 / 55%)` style
+   that some legacy components set via inline style — but only when
+   in light mode. (Takes effect via `currentColor` override.) */
+html:not(.dark) .nx-composer {
+  border-color: var(--border) !important;
+  background: var(--input) !important;
+}
+html:not(.dark) .nx-composer:focus-within {
+  border-color: color-mix(in oklab, var(--primary) 45%, transparent) !important;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--primary) 8%, transparent),
+              0 12px 40px -16px color-mix(in oklab, var(--primary) 30%, transparent) !important;
+}
+
+/* The framed-panel "dark" surface uses literal hex + ring-white/5 —
+   swap to the light sidebar/card look. */
+html:not(.dark) .framed-panel-dark {
+  background-color: var(--card) !important;
+  color: var(--foreground) !important;
+  --tw-ring-color: var(--border) !important;
+}
+
+/* nx-glow-card hairline glass card → light hairline + soft shadow */
+html:not(.dark) .nx-glow-card {
+  background: linear-gradient(180deg, oklch(1 0 0), oklch(0.99 0.003 80)) !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 1px 0 0 oklch(1 0 0 / 60%), 0 12px 36px -22px oklch(0.2 0.005 60 / 14%) !important;
+}
+html:not(.dark) .nx-glow-card:hover {
+  border-color: color-mix(in oklab, var(--primary) 35%, transparent) !important;
+  box-shadow: 0 12px 40px -14px color-mix(in oklab, var(--primary) 22%, transparent) !important;
+}
+
+/* nx-shimmer (used for the agent handoff pill + thinking dots) reads
+   as a moving white sheen on dark — flip to dark sheen on light. */
+html:not(.dark) .nx-shimmer {
+  background: linear-gradient(
+    110deg,
+    transparent 33%,
+    color-mix(in oklab, var(--foreground) 10%, transparent) 50%,
+    transparent 66%
+  ) !important;
+  background-size: 200% 100% !important;
+}
+
+/* omni-shimmer / thinking-panel — same idea, darker sweep on light. */
+html:not(.dark) .omni-shimmer,
+html:not(.dark) .thinking-panel {
+  background: linear-gradient(90deg, oklch(0.93 0.003 80) 25%, oklch(0.97 0.003 80) 50%, oklch(0.93 0.003 80) 75%) !important;
+  background-size: 800px 100% !important;
+}
+
+/* The chat's "typing dots" use literal bg-[#ff5a5f] — keep brand but
+   soften to match the light card. The selector is hex-specific so we
+   don't accidentally touch other utilities. */
+html:not(.dark) .nx-dot { opacity: 0.55; }
+
+/* Voice orbs etc. use literal white for the bars — make them ink. */
+html:not(.dark) .voice-bar { background: var(--foreground) !important; }
+
+/* nx-progress-track + thin scrollbar thumbs had rgba(255,255,255,X)
+   backgrounds → switch to ink-based tints for visibility on light. */
+html:not(.dark) .nx-progress-track { background-color: var(--accent) !important; }
+html:not(.dark) .nx-scroll::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--foreground) 14%, transparent) !important; }
+html:not(.dark) .nx-scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--primary) 45%, transparent) !important; }
+
+/* omni-prose code blocks + inline code already theme-aware (the
+   .dark overrides are below); nothing extra needed for light — they
+   fall through to the base rules which use warm grays. */
+
+/* Message entrance + status-shimmer: opacity-only — no change needed. */
+
+/* End of light-mode utility swaps. */
 
 /* ---- Scrollbar: minimal, appears on hover ---- */
 .omni-scroll::-webkit-scrollbar { width: 6px; height: 6px; }

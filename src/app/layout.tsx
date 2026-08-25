@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk, IBM_Plex_Sans_Arabic } from "next/font/google";
+import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -60,10 +61,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Inline pre-hydration script: reads the persisted preferences from
-  // localStorage BEFORE React mounts, so the <html> dir/lang + dark class
-  // are correct on first paint — eliminates the LTR→RTL + light→dark
-  // flash that would otherwise occur for Arabic / dark-mode users.
+  // Inline pre-hydration script: applies the persisted Arabic (RTL)
+  // preference BEFORE React mounts so <html dir/lang> is correct on
+  // first paint (no LTR→RTL flash). next-themes runs its own
+  // pre-hydration script to set the `.dark` class on <html> from its
+  // own `theme` localStorage key, so we no longer touch the dark class
+  // here — that's the single source of truth for theme now.
   // Matches the same key + shape used by src/lib/preferences.ts.
   const themeBootScript = `
     (function(){
@@ -71,7 +74,6 @@ export default function RootLayout({
         var raw = localStorage.getItem('nexus-preferences');
         if (!raw) return;
         var s = JSON.parse(raw).state;
-        if (s && s.theme === 'dark') document.documentElement.classList.add('dark');
         if (s && s.language === 'ar') {
           document.documentElement.setAttribute('dir', 'rtl');
           document.documentElement.setAttribute('lang', 'ar');
@@ -87,8 +89,15 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} ${ibmPlexArabic.variable} antialiased bg-background text-foreground`}
       >
-        {children}
-        <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem={false}
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -25,7 +25,8 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat, streamExternalChatCompletion } from '@/lib/ai-providers'
-import { zaiStreamChat, zaiOnCooldown, getZAI } from '@/lib/zai'
+import { zaiStreamChat, zaiOnCooldown, zaiConfigured, getZAI } from '@/lib/zai'
+import { openrouterConfigured, openrouterStreamChatCallback } from '@/lib/openrouter'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName } from '@/lib/cli-skills'
@@ -1890,12 +1891,43 @@ export async function POST(req: NextRequest) {
               send({ type: 'assistant_delta', delta })
             }
 
-            // 0) Z.AI BUILT-IN ENGINE — the platform's millisecond-latency
+            // 0) OPENROUTER — the primary LLM on Vercel (replaces Z.ai).
+            //    Tried first when configured; emits assistant_delta chunks
+            //    exactly like the Z.ai path so the frontend is unchanged.
+            //    On Vercel Z.ai's SDK isn't bundled — this branch handles
+            //    every chat request. In the sandbox it's also tried first
+            //    when OPENROUTER_API_KEY is set (better quality than the
+            //    anonymous free pool); Z.ai remains a fallback below.
+            if (openrouterConfigured()) {
+              try {
+                content = await openrouterStreamChatCallback(
+                  llmMessages as Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string }>,
+                  emitDelta,
+                  { maxTokens: 4000, timeoutMs: 60_000 }
+                )
+                didStream = true
+                console.log('[api/chat] served by OpenRouter (primary)')
+              } catch (orErr) {
+                if (streamedSoFar.trim()) {
+                  // Partial OpenRouter output already on screen — keep it.
+                  content = streamedSoFar
+                  didStream = true
+                } else {
+                  console.warn(
+                    '[api/chat] OpenRouter failed, falling back:',
+                    orErr instanceof Error ? orErr.message : orErr
+                  )
+                }
+              }
+            }
+
+            // 0b) Z.AI BUILT-IN ENGINE — the platform's millisecond-latency
             //    gateway (GLM). Serves the request FIRST when healthy; the
             //    circuit breaker skips it automatically after failures.
             //    This is the root fix for "the AI is extremely slow": the
             //    anonymous free pool (5-50s) only runs as a fallback now.
-            if (!zaiOnCooldown()) {
+            //    Only attempted in the sandbox (zaiConfigured() === true).
+            if (!didStream && !zaiOnCooldown() && (await zaiConfigured())) {
               try {
                 content = await zaiStreamChat(
                   llmMessages as Array<{ role: string; content: string }>,

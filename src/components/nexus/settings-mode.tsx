@@ -39,6 +39,7 @@ import {
   Puzzle,
   ShieldCheck,
   Sparkles,
+  Sun,
   Trash2,
   Wand2,
   type LucideIcon,
@@ -53,6 +54,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { usePreferences } from '@/lib/preferences'
 import { useI18n } from '@/lib/i18n'
+import { useTheme } from 'next-themes'
 import { getCurrentUser, signOut } from '@/lib/supabase'
 import { BRAND, tint } from './shared'
 import { NexusAuthModal } from './auth-modal'
@@ -836,6 +838,7 @@ export function NexusSettingsMode() {
   const { toast } = useToast()
   const { t, lang } = useI18n()
   const prefs = usePreferences()
+  const { theme, setTheme } = useTheme()
 
   /* ---------------- user + profile ---------------- */
   const [user, setUser] = useState<ProfileUser | null>(null)
@@ -1509,6 +1512,45 @@ export function NexusSettingsMode() {
           delay={0.18}
         >
           <div className="space-y-4">
+            {/* Theme (Light / Dark) — backed by next-themes. The `.dark`
+                class on <html> flips the entire shell + chat + overlays
+                via the light-mode overrides in globals.css. */}
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium text-zinc-200">{t('settings.theme')}</span>
+              <div
+                className="flex overflow-hidden rounded-full border border-white/10 bg-black/30"
+                role="group"
+                aria-label={t('settings.theme')}
+              >
+                <button
+                  type="button"
+                  onClick={() => setTheme('light')}
+                  aria-pressed={theme === 'light'}
+                  className={`flex min-h-[36px] items-center gap-1.5 px-5 text-sm font-semibold transition ${
+                    theme === 'light'
+                      ? 'bg-[#ff5a5f]/15 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Sun className="h-3.5 w-3.5" aria-hidden />
+                  {t('settings.light')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTheme('dark')}
+                  aria-pressed={theme === 'dark'}
+                  className={`flex min-h-[36px] items-center gap-1.5 border-l border-white/10 px-5 text-sm font-semibold transition ${
+                    theme === 'dark'
+                      ? 'bg-[#ff5a5f]/15 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Moon className="h-3.5 w-3.5" aria-hidden />
+                  {t('settings.dark')}
+                </button>
+              </div>
+            </div>
+
             {/* Language */}
             <div className="flex items-center justify-between gap-4">
               <span className="text-sm font-medium text-zinc-200">{t('settings.language')}</span>
@@ -1541,23 +1583,6 @@ export function NexusSettingsMode() {
                 >
                   عربي
                 </button>
-              </div>
-            </div>
-
-            {/* Dark-by-design note */}
-            <div className="flex items-center gap-3.5 rounded-xl border border-white/8 bg-black/20 p-3.5">
-              <span
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-                style={{ background: tint('#ff5a5f', 0.1), color: '#ff5a5f' }}
-                aria-hidden
-              >
-                <Moon className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-zinc-300">{t('settings.dark')}</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-                  {t('settings.darkByDesign')}
-                </p>
               </div>
             </div>
           </div>

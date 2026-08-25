@@ -5,10 +5,10 @@ import { mkdir, writeFile, readFile, rm } from 'fs/promises'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
-import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { videoJobs, pruneVideoJobs, type VideoJob } from '@/lib/video-jobs'
+import { agnesConfigured, agnesCreateVideo } from '@/lib/agnes-video'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
 import { getCurrentUser } from '@/lib/auth'
@@ -103,6 +103,71 @@ export async function POST(req: NextRequest) {
     }
     pruneVideoJobs()
     videoJobs.set(id, job)
+
+    /* ---- AGNES AI path (when configured) ----
+     * When AGNES_API_KEY + AGNES_BASE_URL are set, hand off video
+     * generation to Agnes and let the status route poll its API.
+     * The local ffmpeg pipeline (below) is the sandbox fallback. */
+    if (agnesConfigured()) {
+      ;(async () => {
+        try {
+          job.status = 'planning'
+          job.progress = 10
+          job.message = 'Submitting to Agnes AI…'
+          const { jobId: agnesJobId } = await agnesCreateVideo({
+            prompt,
+            scenes: sceneCount,
+            style,
+          })
+          job.agnesJobId = agnesJobId
+          job.agnesPolledAt = Date.now()
+          job.status = 'rendering'
+          job.progress = 25
+          job.message = 'Agnes AI is generating the video…'
+
+          // Persist a placeholder record so the library shows the
+          // in-progress job. Updated when the status route sees completion.
+          try {
+            await db.generatedVideo.create({
+              data: {
+                prompt,
+                scenes: sceneCount,
+                voice,
+                style,
+                url: null,
+                jobId: id,
+                status: 'rendering',
+                userId: user?.id ?? null,
+              },
+            })
+          } catch (e) {
+            console.error('[video] agnes db placeholder save failed:', e)
+          }
+        } catch (err) {
+          console.error(`[video job ${id}] agnes submit failed:`, err)
+          job.status = 'error'
+          job.error = err instanceof Error ? err.message : 'Agnes submission failed.'
+          try {
+            await db.generatedVideo.create({
+              data: {
+                prompt,
+                scenes: sceneCount,
+                voice,
+                style,
+                url: null,
+                jobId: id,
+                status: 'error',
+                userId: user?.id ?? null,
+              },
+            })
+          } catch (e) {
+            console.error('[video] agnes db error-path save failed:', e)
+          }
+        }
+      })()
+
+      return NextResponse.json({ jobId: id })
+    }
 
     // Run the whole pipeline in the background
     ;(async () => {

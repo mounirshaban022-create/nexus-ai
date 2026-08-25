@@ -1,5 +1,10 @@
 import { getActiveAiProvider, externalChatCompletion, anonymousFallbackChat, type ExternalChatMessage } from './ai-providers'
-import { zaiChatCompletion, zaiOnCooldown } from './zai'
+import { zaiChatCompletion, zaiOnCooldown, zaiConfigured } from './zai'
+import {
+  openrouterConfigured,
+  openrouterChatCompletion,
+  type OpenRouterMessage,
+} from './openrouter'
 import type { AiTask } from './smart-chat-types'
 
 /**
@@ -163,12 +168,43 @@ export async function smartChat(
   const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
   const maxModelAttempts = isVoiceTask ? 2 : 4
 
-  /* ---- Layer 0: the platform's built-in Z.ai engine (GLM) ----
+  /* ---- Layer 0: OpenRouter (primary on Vercel) ----
+   * When OPENROUTER_API_KEY is set, OpenRouter is tried FIRST for every
+   * task. It's a high-quality, well-rounded gateway (Claude, GPT, etc.)
+   * that works the same in sandbox and on Vercel. Z.ai remains as a
+   * Layer 0b fallback for the sandbox dev environment (faster, free).
+   * On Vercel the Z.ai SDK is unavailable — `zaiConfigured()` returns
+   * false and Layer 0b is skipped automatically. */
+  if (openrouterConfigured()) {
+    try {
+      const content = await openrouterChatCompletion(
+        messages as OpenRouterMessage[],
+        {
+          maxTokens,
+          temperature,
+          timeoutMs: effectiveTimeoutMs ?? 60_000,
+        }
+      )
+      if (content.trim()) {
+        console.log(`[smartChat] served by OpenRouter (task: ${task})`)
+        return content
+      }
+    } catch (orErr) {
+      console.warn(
+        '[smartChat] OpenRouter failed, falling through:',
+        orErr instanceof Error ? orErr.message : orErr
+      )
+    }
+  }
+
+  /* ---- Layer 0b: the platform's built-in Z.ai engine (GLM) ----
    * Millisecond-latency gateway shipped with the sandbox — by far the
-   * fastest engine available. Tried first for EVERY task; the free pool
-   * and user providers only serve as fallbacks when Z.ai is cooling down
+   * fastest engine available. Only attempted in the sandbox dev
+   * environment (the SDK isn't bundled on Vercel). Tried first for
+   * EVERY task when OpenRouter isn't configured; the free pool and
+   * user providers only serve as fallbacks when Z.ai is cooling down
    * (circuit breaker) or fails. This is the root fix for "AI is slow". */
-  if (!zaiOnCooldown()) {
+  if (!zaiOnCooldown() && (await zaiConfigured())) {
     try {
       const content = await zaiChatCompletion(
         messages as Array<{ role: string; content: string }>,

@@ -66,7 +66,7 @@ export function FramedPanel({
         <div
           className={
             fill
-              ? `flex min-h-0 flex-1 flex-col ${
+              ? `flex min-h-0 flex-1 flex-col framed-panel-dark ${
                   dark
                     ? 'bg-[#0c0c0e] text-zinc-100 ring-1 ring-white/5 ring-inset'
                     : 'bg-white p-4 text-zinc-900 ring-1 ring-zinc-950/5 ring-inset md:p-6'

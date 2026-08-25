@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the .env.example template IS committed (placeholder values only)
+!.env.example
 
 # vercel
 .vercel
@@ -60,3 +62,7 @@ upload/
 *.pid
 .env.example.local
 worklog.md
+
+
+# agent tool-results (not for the repo)
+tool-results

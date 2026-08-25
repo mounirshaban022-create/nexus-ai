@@ -1,18 +1,86 @@
-import ZAI from 'z-ai-web-dev-sdk'
+/* ------------------------------------------------------------------ */
+/* Z.ai ENGINE — the sandbox's built-in millisecond-latency gateway.   */
+/*                                                                    */
+/* IMPORTANT: z-ai-web-dev-sdk is INSTALLED only in the sandbox. On     */
+/* Vercel the SDK is not bundled — every import is dynamic and        */
+/* wrapped in try/catch so a missing/unusable SDK never crashes the     */
+/* server. The smart-chat router checks `zaiConfigured()` first and    */
+/* skips Z.ai when the SDK can't load (OpenRouter is the primary on    */
+/* Vercel anyway).                                                    */
+/* ------------------------------------------------------------------ */
 
-const globalForZAI = globalThis as unknown as {
-  zai: Awaited<ReturnType<typeof ZAI.create>> | undefined
+type ZaiSdk = {
+  chat: {
+    completions: {
+      create: (
+        args: {
+          messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+          max_tokens?: number
+          temperature?: number
+          stream?: boolean
+        }
+      ) => Promise<
+        | { choices?: Array<{ message?: { content?: string } }> }
+        | AsyncIterable<unknown>
+      >
+    }
+  }
 }
 
-/**
- * Shared, lazily-initialized ZAI SDK singleton.
- * MUST only be imported from server-side code (API routes / server components).
- */
-export async function getZAI() {
-  if (!globalForZAI.zai) {
-    globalForZAI.zai = await ZAI.create()
+const globalForZAI = globalThis as unknown as {
+  zai?: ZaiSdk
+  zaiInitFailed?: boolean
+  zaiInitError?: string
+}
+
+/** Loads the Z.ai SDK if possible. Returns null when unavailable
+ *  (missing/unusable — e.g. on Vercel). Memoized. */
+async function loadZaiSdk(): Promise<ZaiSdk | null> {
+  if (globalForZAI.zai) return globalForZAI.zai
+  if (globalForZAI.zaiInitFailed) return null
+  try {
+    const mod = (await import('z-ai-web-dev-sdk')) as {
+      default?: { create: () => Promise<ZaiSdk> }
+      create?: () => Promise<ZaiSdk>
+    }
+    const factory = mod.default ?? (mod as unknown as { create: () => Promise<ZaiSdk> })
+    globalForZAI.zai = await factory.create()
+    return globalForZAI.zai
+  } catch (err) {
+    globalForZAI.zaiInitFailed = true
+    globalForZAI.zaiInitError =
+      err instanceof Error ? err.message : String(err)
+    console.warn(
+      '[zai] SDK unavailable — Z.ai engine disabled (likely on Vercel):',
+      globalForZAI.zaiInitError
+    )
+    return null
   }
-  return globalForZAI.zai
+}
+
+/** True when the Z.ai SDK successfully loaded AND is usable. The
+ *  smart-chat router uses this to decide whether Z.ai is available as
+ *  a Layer 0b fallback. */
+export async function zaiConfigured(): Promise<boolean> {
+  const sdk = await loadZaiSdk()
+  return Boolean(sdk)
+}
+
+// NOTE: `export` is required — 9 modules (chat/voice/tts/asr/vision/image/video/
+// office/plan routes, web-access, connectors) statically import { getZAI } from
+// '@/lib/zai'. Dropping the keyword (as a prior refactor did) makes Turbopack
+// fail the entire app-route graph with "Export getZAI doesn't exist in target
+// module", which Next.js 16 surfaces as a sticky global 500 HTML error page on
+// EVERY API route — including /api/email/accounts, so the email connector
+// reports "failed" even with correct credentials. Keep this exported.
+export async function getZAI(): Promise<ZaiSdk> {
+  const sdk = await loadZaiSdk()
+  if (!sdk) {
+    throw new Error(
+      `Z.ai SDK unavailable (${globalForZAI.zaiInitError ?? 'not loaded'})`
+    )
+  }
+  return sdk
 }
 
 /* ------------------------------------------------------------------ */
@@ -77,11 +145,11 @@ export async function zaiChatCompletion(
   if (zaiOnCooldown()) throw new Error('Z.ai on cooldown')
   const zai = await getZAI()
   try {
-    const res = await zai.chat.completions.create({
+    const res = (await zai.chat.completions.create({
       messages: messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
       max_tokens: opts.maxTokens ?? 4000,
       temperature: opts.temperature ?? 0.7,
-    })
+    })) as { choices?: Array<{ message?: { content?: string } }> }
     const text = res?.choices?.[0]?.message?.content ?? ''
     if (!text.trim()) throw new Error('Z.ai returned an empty completion')
     markZaiSuccess()
@@ -106,12 +174,12 @@ export async function zaiStreamChat(
   const zai = await getZAI()
   let full = ''
   try {
-    const stream = await zai.chat.completions.create({
+    const stream = (await zai.chat.completions.create({
       messages: messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
       max_tokens: opts.maxTokens ?? 4000,
       temperature: opts.temperature ?? 0.7,
       stream: true,
-    })
+    })) as AsyncIterable<unknown>
 
     // DIRECTIVE-SAFE streaming — same peek/trailing-guard semantics as the
     // external providers: TOOL_CALL / ARTIFACT_PATCH text never becomes a
@@ -123,7 +191,7 @@ export async function zaiStreamChat(
     let buf = ''
     const deadline = Date.now() + (opts.timeoutMs ?? 60_000)
 
-    for await (const raw of stream as AsyncIterable<unknown>) {
+    for await (const raw of stream) {
       if (Date.now() > deadline) throw new Error('Z.ai stream timeout')
       const piece = typeof raw === 'string' ? raw : decoder.decode(raw as Uint8Array, { stream: true })
       buf += piece
@@ -147,6 +215,7 @@ export async function zaiStreamChat(
       }
     }
     guard.end()
+    full = guard.content() || full
     if (!full.trim()) throw new Error('Z.ai stream produced no content')
     markZaiSuccess()
     return full

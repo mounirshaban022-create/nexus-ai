@@ -34,6 +34,7 @@ import { useI18n } from '@/lib/i18n'
 import { usePreferences } from '@/lib/preferences'
 import type { AppUser, SessionItem, View } from './shared'
 import { AGENCY_STATS, BrandLockup, DIVISION_MAP, agentOrNexus, tint, useActiveChatSession } from './shared'
+import { ThemeToggle } from './theme-toggle'
 
 export interface NexusShellProps {
   view: View
@@ -395,6 +396,7 @@ function SidebarContent({
               <span className="block truncate text-[13px] text-zinc-300">{user.name || user.email}</span>
               {user.name ? <span className="block truncate text-[11px] text-zinc-600">{user.email}</span> : null}
             </span>
+            <ThemeToggle />
             <LanguageToggle />
             <button
               type="button"
@@ -415,6 +417,7 @@ function SidebarContent({
             >
               {t('nav.signIn')}
             </button>
+            <ThemeToggle />
             <LanguageToggle />
           </div>
         )}

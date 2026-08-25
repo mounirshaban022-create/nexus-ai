@@ -10,6 +10,11 @@ export interface VideoJob {
   error?: string
   startedAt: number
   scenes?: Array<{ caption: string }>
+  /** When set, the job was submitted to Agnes AI and the status route
+   *  must poll Agnes (agnesGetVideoStatus) on every read. */
+  agnesJobId?: string
+  /** Timestamp of the most recent Agnes poll — used to throttle polls. */
+  agnesPolledAt?: number
 }
 
 const globalForJobs = globalThis as unknown as { videoJobs?: Map<string, VideoJob> }
