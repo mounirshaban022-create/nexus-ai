@@ -1412,11 +1412,22 @@ export async function POST(req: NextRequest) {
           const fullRes = await fetch(`${origin}/api/documents?id=${encodeURIComponent(data.document.id)}`)
           const fullData = await fullRes.json()
           const doc = fullData.document ?? data.document
+          // IMPORTANT: prefer the FULL raw text (doc.text) over the sectioned
+          // view. extractSections() treats short metadata lines like
+          // "Author: ..." / "Date: ..." as headings, and when such a line is
+          // immediately followed by another heading with no body between,
+          // it is DROPPED from the sections array. Rebuilding the context
+          // from sections therefore silently loses standalone metadata the
+          // user attached — the AI would then say "the document doesn't
+          // mention the author" even though it does. doc.text is the
+          // complete extracted content (capped at 100k chars by the
+          // documents route) and preserves every line. Sections remain as
+          // a fallback for older parsed docs that only have sections.
           const parts: string[] = []
-          if (Array.isArray(doc.sections) && doc.sections.length > 0) {
-            for (const s of doc.sections) parts.push(`## ${s.heading}\n${s.content}`)
-          } else if (doc.text) {
+          if (doc.text) {
             parts.push(doc.text)
+          } else if (Array.isArray(doc.sections) && doc.sections.length > 0) {
+            for (const s of doc.sections) parts.push(`## ${s.heading}\n${s.content}`)
           } else if (doc.preview) {
             parts.push(doc.preview)
           }
@@ -1641,8 +1652,25 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // Track stream lifecycle so send() becomes a safe no-op once the
+        // controller is closed. Without this, an error thrown after a
+        // controller.close() (e.g. the direct-answer path at line ~1677
+        // already closed it, or a mid-stream provider error fires after
+        // the stream was torn down) makes send() throw
+        // "Invalid state: Controller is already closed" — which then masks
+        // the REAL error message and leaves the frontend waiting for an
+        // assistant_end that never arrives. The flag + try/catch make
+        // every send() after close a silent no-op so the catch/finally
+        // below can still surface the true cause.
+        let streamClosed = false
         const send = (event: Record<string, unknown>) => {
-          controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'))
+          if (streamClosed) return
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'))
+          } catch {
+            // controller was closed mid-flight — stop sending silently
+            streamClosed = true
+          }
         }
 
         // DIRECT ANSWER: creator identity (bypass LLM to prevent wrong answers)
@@ -2110,7 +2138,15 @@ export async function POST(req: NextRequest) {
             message: error instanceof Error ? error.message : 'Chat failed.',
           })
         } finally {
-          controller.close()
+          // Mark closed BEFORE calling controller.close() so any in-flight
+          // send() (including the error send above, if it raced) becomes a
+          // no-op rather than throwing "Controller is already closed".
+          streamClosed = true
+          try {
+            controller.close()
+          } catch {
+            /* already closed — nothing to do */
+          }
         }
       },
     })
