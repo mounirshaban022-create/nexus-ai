@@ -220,7 +220,7 @@ export default function Page() {
               className="flex items-center gap-2"
               aria-label="NEXUS AI home"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
+              { }
               <img src="/nexus-icon.png" alt="" className="h-7 w-7 rounded-lg" />
               <span className="text-sm font-bold">NEXUS</span>
             </button>

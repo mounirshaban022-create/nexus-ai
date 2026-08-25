@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
+    // Rate limit: 60 reads per minute per client (prevents scraping/DoS)
+    const rl = rateLimit(`file-read:${clientKey(req)}`, 60, 60_000)
+    if (!rl.ok) {
+      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
+    }
+
   try {
     const kind = req.nextUrl.searchParams.get('kind') === 'agent' ? 'agent' : 'chat'
     const sessions = await db.chatSession.findMany({

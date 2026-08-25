@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { readFile } from 'fs/promises'
 import path from 'path'
 
@@ -22,6 +23,12 @@ const MIME_TYPES: Record<string, string> = {
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, context: RouteContext) {
+    // Rate limit: 60 reads per minute per client (prevents scraping/DoS)
+    const rl = rateLimit(`file-read:${clientKey(req)}`, 60, 60_000)
+    if (!rl.ok) {
+      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
+    }
+
   try {
     const { id } = await context.params
     if (!/^[a-zA-Z0-9-]+$/.test(id)) {
