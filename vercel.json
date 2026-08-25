@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "buildCommand": "bun run build",
   "installCommand": "bun install",
+  "regions": ["sin1"],
   "functions": {
     "src/app/api/chat/route.ts": {
       "maxDuration": 120
