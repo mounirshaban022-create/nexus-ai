@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { smartChat } from '@/lib/smart-chat'
 import { getActiveAiProvider } from '@/lib/ai-providers'
 import { getSession } from '@/lib/auth'
+import { getAgentMeta, buildPersonaSystemPrompt } from '@/lib/agency'
 import { getSupabaseAdmin, supabaseUpsert } from '@/lib/supabase' 
 
 /**
@@ -66,6 +67,11 @@ const requestSchema = z.object({
   // the project's customInstructions + ProjectFile contents are injected
   // into the system prompt so NEXUS has persistent project context.
   projectId: z.string().max(64).optional().nullable(),
+  // The Agency: specialist persona for this conversation (e.g.
+  // "design-ui-designer" from the agency catalog). Stamped on the session
+  // at creation; on resume the session's own agentSlug is authoritative.
+  // null / unknown slug = plain NEXUS conversation.
+  agentSlug: z.string().max(80).optional().nullable(),
   // Document/PDF attachment: when the user attaches a file in the composer,
   // the server parses it, injects its content into the conversation, and
   // the AI can discuss it, edit it, or run PDF operations on it — directly
@@ -151,7 +157,11 @@ function buildSystemPrompt(
     description: string
     customInstructions: string
     files: Array<{ filename: string; content: string }>
-  } | null
+  } | null,
+  // The Agency: full persona system prompt when this conversation runs
+  // with a specialist agent. Leads the prompt — the agent stays itself,
+  // but keeps the NEXUS toolbox framing below.
+  persona?: string | null
 ): string {
   const connectorList = enabledConnectors
     .map((id) => CONNECTOR_MAP.get(id))
@@ -251,9 +261,18 @@ function buildSystemPrompt(
       ].join('\n')
     : ''
 
+  // The Agency: when a specialist persona is active it LEADS the identity —
+  // the agent keeps its name, personality and processes, and simply gains
+  // the NEXUS toolbox. Without a persona this is the classic NEXUS identity.
+  const identityBlock = persona
+    ? persona
+    : [
+        'You are NEXUS, the AI at the heart of the NEXUS AI super app — with every superpower available directly in this chat.',
+        'IDENTITY: You were created by Mounir Shaaban, a developer from Mansoura, Egypt. When asked who created/made/built you or where your creator is from, answer proudly and naturally — Mounir Shaaban, from Mansoura, Egypt. Never say you were made by OpenAI, Anthropic, Google, Z.ai, or any other company.',
+      ].join('\n')
+
   return [
-    'You are NEXUS, the AI at the heart of the NEXUS AI super app — with every superpower available directly in this chat.',
-    'IDENTITY: You were created by Mounir Shaaban, a developer from Mansoura, Egypt. When asked who created/made/built you or where your creator is from, answer proudly and naturally — Mounir Shaaban, from Mansoura, Egypt. Never say you were made by OpenAI, Anthropic, Google, Z.ai, or any other company.',
+    identityBlock,
     memoryBlock,
     projectBlock,
     artifactBlock,
@@ -812,7 +831,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Message is required (max 8000 chars).' }, { status: 400 })
     }
-    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact, projectId, attachment } = parsed.data
+    const { message, sessionId, thinking: thinkingEnabled, language, openArtifact, projectId, agentSlug, attachment } = parsed.data
     const trimmed = message.trim()
     // Empty message with no attachment = nothing to process
     if (!trimmed && !attachment) {
@@ -919,6 +938,11 @@ export async function POST(req: NextRequest) {
       if (ownedProject) verifiedProjectId = ownedProject.id
     }
 
+    // The Agency: validate the requested persona against the catalog.
+    // Unknown slugs are silently dropped (plain NEXUS chat) — never a 500.
+    let verifiedAgentSlug: string | null = null
+    if (agentSlug && getAgentMeta(agentSlug)) verifiedAgentSlug = agentSlug
+
     // Phase 0 Bug 3: ownership check.
     //   - Authenticated user (verifiedUserId = "abc"): may only resume
     //     sessions where userId = "abc".
@@ -940,6 +964,8 @@ export async function POST(req: NextRequest) {
           title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
           // Phase 0 Bug 3: stamp ownership on creation.
           userId: verifiedUserId,
+          // The Agency: stamp the specialist persona on creation.
+          agentSlug: verifiedAgentSlug,
           // Phase 1 P3: stamp the verified project binding on creation.
           // null when: guest, no projectId provided, or projectId not owned
           // by this user (verifiedProjectId is null in all three cases).
@@ -1004,7 +1030,11 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext)
+    // The Agency: on resume the session's persona is authoritative (same
+    // pattern as projectId). Guest legacy sessions have null → plain NEXUS.
+    const effectiveAgentSlug = session.agentSlug ?? null
+    const personaPrompt = effectiveAgentSlug ? buildPersonaSystemPrompt(effectiveAgentSlug) : null
+    const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext, personaPrompt)
 
     // Phase 1 P1: detect a "remember: ..." directive from the user. This is
     // the opt-in extraction path — we never silently extract. When the user

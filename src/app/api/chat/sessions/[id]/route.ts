@@ -21,6 +21,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         id: session.id,
         title: session.title,
         kind: session.kind,
+        agentSlug: session.agentSlug ?? null,
         updatedAt: session.updatedAt,
         messages: session.messages.map((m) => ({
           id: m.id,

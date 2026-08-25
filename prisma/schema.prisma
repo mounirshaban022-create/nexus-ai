@@ -13,6 +13,11 @@ model ChatSession {
   id        String        @id @default(cuid())
   title     String        @default("New conversation")
   kind      String        @default("chat") // "chat" | "agent"
+  // The Agency: when a conversation runs with a specialist persona, this is
+  // the agent slug (e.g. "design-ui-designer") from src/data/agency-catalog.json.
+  // null = plain NEXUS conversation (no persona). Stamped on session creation
+  // and authoritative on resume — same pattern as projectId below.
+  agentSlug String?
   // Phase 0 Bug 3: ownership. null = guest session (any guest may resume).
   // Non-null = owned by a specific authenticated user; only that user may resume.
   userId    String?
