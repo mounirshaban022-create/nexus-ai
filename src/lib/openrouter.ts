@@ -302,3 +302,71 @@ export async function openrouterStreamChatCallback(
   }
   return full
 }
+
+/* ------------------------------------------------------------------ */
+/* IMAGE GENERATION (OpenAI-compatible /images/generations endpoint)   */
+/* ------------------------------------------------------------------ */
+/* On Vercel the Z.ai image SDK is unavailable. When OpenRouter is       */
+/* configured, this provides a real image-generation backend using the  */
+/* user's OpenRouter key (which bills at the chosen model's rate).      */
+/* Models: openai/dall-e-3, black-forest-labs/flux-1-sapplied,         */
+/* google/imagen-3, stabilityai/stable-diffusion-3, etc.               */
+/* See https://openrouter.ai/models?q=image for the live catalog.        */
+/* ------------------------------------------------------------------ */
+
+export interface OpenRouterImageOptions {
+  prompt: string
+  size?: string // '1024x1024' | '768x1344' | '1344x768' | etc.
+  /** Model id (e.g. 'openai/dall-e-3'). Defaults to a sensible image model. */
+  model?: string
+  timeoutMs?: number
+}
+
+export async function openrouterGenerateImage(
+  opts: OpenRouterImageOptions
+): Promise<{ base64: string; format: string }> {
+  const cfg = readConfig()
+  if (!cfg) throw new Error('OpenRouter is not configured (OPENROUTER_API_KEY missing)')
+  const model = opts.model?.trim() || process.env.OPENROUTER_IMAGE_MODEL || 'openai/dall-e-3'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 90_000)
+  try {
+    const res = await fetch(`${cfg.baseUrl}/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey}`,
+        'HTTP-Referer': cfg.siteUrl || 'https://nexus-ai.vercel.app',
+        'X-Title': cfg.appName || 'NEXUS AI',
+      },
+      body: JSON.stringify({
+        model,
+        prompt: opts.prompt,
+        n: 1,
+        size: opts.size ?? '1024x1024',
+        response_format: 'b64_json',
+      }),
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`OpenRouter image API ${res.status}: ${text.slice(0, 300)}`)
+    }
+    const data = (await res.json()) as { data?: Array<{ b64_json?: string; url?: string }> }
+    const base64 = data.data?.[0]?.b64_json
+    const url = data.data?.[0]?.url
+    if (base64) return { base64, format: 'png' }
+    // Some models return a URL instead of base64 — fetch + re-encode
+    if (url) {
+      const imgRes = await fetch(url)
+      if (!imgRes.ok) throw new Error(`Failed to fetch image from ${url}`)
+      const arr = new Uint8Array(await imgRes.arrayBuffer())
+      if (arr.length < 1000) throw new Error('Image fetch returned no data')
+      const buf = Buffer.from(arr)
+      return { base64: buf.toString('base64'), format: url.match(/\.jpe?g$/i) ? 'jpg' : 'png' }
+    }
+    throw new Error('OpenRouter image API returned no image data')
+  } finally {
+    clearTimeout(timer)
+  }
+}

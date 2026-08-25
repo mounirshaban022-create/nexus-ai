@@ -5,7 +5,8 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
-import { getZAI } from '@/lib/zai'
+import { getZAI, zaiConfigured } from '@/lib/zai'
+import { openrouterConfigured, openrouterGenerateImage } from '@/lib/openrouter'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { getCurrentUser } from '@/lib/auth'
 
@@ -62,16 +63,40 @@ export async function POST(req: NextRequest) {
         clearTimeout(timer)
       }
     } else {
-      const zai = await getZAI()
-      const response = await zai.images.generations.create({
-        prompt: trimmedPrompt,
-        size: chosenSize,
-      })
-      const base64 = response.data?.[0]?.base64
-      if (!base64) {
-        throw new Error('Image generation returned no data. Please try again.')
+      // IMAGE GENERATION — Z.ai (sandbox) with OpenRouter fallback (Vercel).
+      // On Vercel the Z.ai SDK can't load, so we fall through to OpenRouter's
+      // /images/generations endpoint using the user's OPENROUTER_API_KEY.
+      // This keeps image generation working end-to-end on Vercel without
+      // needing a separate image-specific API key.
+      let generated = false
+      if (await zaiConfigured()) {
+        try {
+          const zai = await getZAI()
+          const response = await zai.images.generations.create({
+            prompt: trimmedPrompt,
+            size: chosenSize,
+          })
+          const base64 = response.data?.[0]?.base64
+          if (base64) {
+            buffer = Buffer.from(base64, 'base64')
+            generated = true
+          }
+        } catch (zaiImgErr) {
+          console.warn('[api/image] Z.ai image gen failed, trying OpenRouter:', zaiImgErr instanceof Error ? zaiImgErr.message : zaiImgErr)
+        }
       }
-      buffer = Buffer.from(base64, 'base64')
+      if (!generated && openrouterConfigured()) {
+        const { base64, format } = await openrouterGenerateImage({
+          prompt: trimmedPrompt,
+          size: chosenSize,
+        })
+        buffer = Buffer.from(base64, 'base64')
+        console.log(`[api/image] generated via OpenRouter (${format})`)
+        generated = true
+      }
+      if (!generated) {
+        throw new Error('Image generation is unavailable. Set OPENROUTER_API_KEY or use the "free" provider.')
+      }
     }
     const filename = `${randomUUID()}.png`
 
