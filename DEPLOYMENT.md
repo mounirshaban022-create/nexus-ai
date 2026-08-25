@@ -12,6 +12,7 @@ Everything you need to ship NEXUS AI to Vercel: keys, database, build settings, 
 - **Email connector fixed** — a missing `export` on `getZAI()` broke 9 API routes (including `/api/email/accounts`); the connector now works with correct Gmail/Outlook/Yahoo App Passwords.
 - **Light mode toggle** — sun/moon icon in the sidebar + Appearance picker in Settings.
 - **Supabase sync** activates automatically when the three `SUPABASE_*` env vars are set (chat messages, sessions, generated docs, AI providers all mirror to the cloud).
+- **Default model is now `stealth/ox-alpha`** ("Ox Alpha") — a FREE coding/reasoning model on OpenRouter with 1M token context + multimodal input, built for sustained agentic work. Set in `.env.local` / `.env.vercel.local` / `.env.example` + the OpenRouter client fallback. Users can still switch models in Settings → AI Models.
 
 ---
 
@@ -128,21 +129,31 @@ After Vercel shows "Ready", visit your `https://<project>.vercel.app`:
 
 ## 7. Model choice for OpenRouter
 
-The default is `anthropic/claude-3.7-sonnet` (premium, strong reasoning + writing). Alternatives you can set in `OPENROUTER_DEFAULT_MODEL` or pick in **Settings → AI Models**:
+The default is **`stealth/ox-alpha`** ("Ox Alpha") — a FREE coding/reasoning model with **1M token context**, multimodal input (text + image + video), built for sustained agentic work and production workloads. No credits needed on your OpenRouter account. This is the model the user picked for coding tasks.
 
-- `openai/gpt-4o-mini` — cheap, fast, great for chat
+Alternatives you can set in `OPENROUTER_DEFAULT_MODEL` or pick in **Settings → AI Models**:
+
+- `stealth/ox-alpha` — **default**, free, coding/reasoning, 1M context (recommended)
+- `openai/gpt-4o-mini` — cheap, fast, great for general chat
 - `openai/gpt-4o` — premium OpenAI
-- `anthropic/claude-3.7-sonnet` — premium Anthropic (recommended)
+- `anthropic/claude-sonnet-4.5` — premium Anthropic (requires credits)
 - `google/gemini-flash-2.0` — fast + multimodal
-- `nvidia/nemotron-3-super-120b-a12b:free` — free tier, no credits needed
+- `deepseek/deepseek-chat` — strong coding, low cost
 
-See <https://openrouter.ai/models> for the full catalog.
+See <https://openrouter.ai/models> for the full catalog (418+ models).
 
 ---
 
-## 8. "Alpha ox" note
+## 8. "Alpha Ox" = the default coding model
 
-You mentioned "Alpha ox" — there's no widely-known service or model by that exact name. If you meant a specific OpenRouter model (e.g., an alpha/release-candidate model), set it in `OPENROUTER_DEFAULT_MODEL`. If you meant a separate service, share the base URL + docs and I'll wire it in. The current setup uses OpenRouter + Agnes AI as you specified.
+"Alpha Ox" (the name you used) maps to the OpenRouter model **`stealth/ox-alpha`** (display name "Ox Alpha"). It is already configured as the default:
+
+- `.env.local` → `OPENROUTER_DEFAULT_MODEL=stealth/ox-alpha` (sandbox)
+- `.env.vercel.local` → `OPENROUTER_DEFAULT_MODEL=stealth/ox-alpha` (paste into Vercel)
+- `.env.example` → `OPENROUTER_DEFAULT_MODEL=stealth/ox-alpha` (committed template)
+- `src/lib/openrouter.ts` fallback → `'stealth/ox-alpha'` (used if the env var is unset)
+
+**Why this model:** free ($0 prompt / $0 completion), 1,048,576-token context window, accepts text + image + video input, 131K max completion tokens, designed for coding + long-horizon agentic work. No renaming of the app or UI was needed — it's just the model slug powering the chat.
 
 ---
 

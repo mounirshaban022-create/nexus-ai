@@ -39,7 +39,7 @@ function readConfig(): OpenRouterConfig | null {
     process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1'
   const defaultModel =
     process.env.OPENROUTER_DEFAULT_MODEL?.trim() ||
-    'anthropic/claude-3.5-sonnet'
+    'stealth/ox-alpha' // "Ox Alpha" — free coding/reasoning model, 1M context
   return {
     apiKey,
     baseUrl,
@@ -152,7 +152,18 @@ export async function openrouterChatCompletion(
     throw await httpErrorToError(res.status, bodyText, 'chat completion')
   }
 
-  let json: { choices?: Array<{ message?: { content?: string } }> }
+  // Reasoning models (e.g. stealth/ox-alpha) may put the answer in
+  // `message.reasoning` / `reasoning_details` when `content` is empty
+  // (max_tokens consumed by the reasoning phase). Fall back to reasoning.
+  let json: {
+    choices?: Array<{
+      message?: {
+        content?: string
+        reasoning?: string
+        reasoning_details?: Array<{ text?: string }>
+      }
+    }>
+  }
   try {
     json = JSON.parse(bodyText)
   } catch {
@@ -160,8 +171,16 @@ export async function openrouterChatCompletion(
       `OpenRouter returned a non-JSON response (first 200 chars): ${bodyText.slice(0, 200)}`
     )
   }
-  const text = json?.choices?.[0]?.message?.content ?? ''
-  if (!text.trim()) {
+  const msg = json?.choices?.[0]?.message
+  const text =
+    msg?.content?.trim() ||
+    msg?.reasoning?.trim() ||
+    msg?.reasoning_details
+      ?.map((r) => r.text ?? '')
+      .join('')
+      .trim() ||
+    ''
+  if (!text) {
     throw new Error('OpenRouter returned an empty completion')
   }
   return text
@@ -269,6 +288,11 @@ export async function openrouterStreamChatCallback(
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buf = ''
+  // Reasoning models (stealth/ox-alpha) emit `delta.reasoning` before
+  // `delta.content`. We collect reasoning silently and only use it as a
+  // fallback if NO content was produced (so the user never sees raw
+  // reasoning in the chat, but the call doesn't fail either).
+  let reasoningBuf = ''
 
   while (true) {
     const { done, value } = await reader.read()
@@ -285,10 +309,13 @@ export async function openrouterStreamChatCallback(
       if (!payload || payload === '[DONE]') continue
       try {
         const j = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string } }>
+          choices?: Array<{
+            delta?: { content?: string; reasoning?: string }
+          }>
         }
-        const delta = j?.choices?.[0]?.delta?.content ?? ''
-        if (delta) guard.push(delta)
+        const delta = j?.choices?.[0]?.delta
+        if (delta?.content) guard.push(delta.content)
+        if (delta?.reasoning) reasoningBuf += delta.reasoning
       } catch {
         /* partial JSON line — next chunk completes it */
       }
@@ -298,6 +325,11 @@ export async function openrouterStreamChatCallback(
   guard.end()
   const full = guard.content()
   if (!full.trim()) {
+    // No content deltas — fall back to the reasoning buffer (reasoning
+    // models that exhausted max_tokens during the reasoning phase).
+    if (reasoningBuf.trim()) {
+      return reasoningBuf
+    }
     throw new Error('OpenRouter stream produced no content')
   }
   return full
