@@ -90,26 +90,47 @@ export async function getCurrentUser(req: NextRequest) {
   return user
 }
 
-/** Set the session cookie on a NextResponse (httpOnly, 30-day, lax, secure in prod). */
-export function setSessionCookie(res: NextResponse, token: string): void {
-  res.cookies.set(SESSION_COOKIE, token, {
+/**
+ * Session-cookie attributes that work everywhere the app is reachable.
+ *
+ * The sandbox preview panel embeds the app in a third-party iframe. Browsers
+ * silently REJECT SameSite=Lax cookies in that context — signup/signin
+ * returned 200 yet the session never stuck, so users saw "always an error"
+ * and profile updates failed with 401. Over HTTPS (the gateway/preview, or
+ * any production deployment) we therefore emit SameSite=None; Secure, which
+ * browsers accept inside cross-site iframes. Plain localhost over http keeps
+ * the classic first-party Lax cookie.
+ */
+function sessionCookieAttrs(req?: NextRequest) {
+  const forwardedProto = req?.headers
+    .get('x-forwarded-proto')
+    ?.split(',')[0]
+    ?.trim()
+    .toLowerCase()
+  const host = (req?.headers.get('host') ?? '').toLowerCase()
+  const isLocalHttp =
+    (host === 'localhost' || host.startsWith('localhost:') || host.startsWith('127.0.0.1')) &&
+    forwardedProto !== 'https'
+  // Third-party-safe (iframe-friendly) whenever we're NOT plain-local http:
+  // https deployments + the sandbox gateway (external host, TLS upstream).
+  const iframeSafe = !isLocalHttp
+  return {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: (iframeSafe ? 'none' : 'lax') as 'none' | 'lax',
+    secure: iframeSafe,
     maxAge: SESSION_TTL_SECONDS,
     path: '/',
-  })
+  }
 }
 
-/** Clear the session cookie on a NextResponse. */
-export function clearSessionCookie(res: NextResponse): void {
-  res.cookies.set(SESSION_COOKIE, '', {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 0,
-    path: '/',
-  })
+/** Set the session cookie on a NextResponse (httpOnly, 30-day, iframe-safe). */
+export function setSessionCookie(res: NextResponse, token: string, req?: NextRequest): void {
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieAttrs(req))
+}
+
+/** Clear the session cookie on a NextResponse (same attributes, empty value). */
+export function clearSessionCookie(res: NextResponse, req?: NextRequest): void {
+  res.cookies.set(SESSION_COOKIE, '', { ...sessionCookieAttrs(req), maxAge: 0 })
 }
 
 export const SESSION_COOKIE_NAME = SESSION_COOKIE

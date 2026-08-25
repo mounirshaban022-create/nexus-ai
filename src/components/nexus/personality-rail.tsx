@@ -74,6 +74,34 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
     active?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [selected])
 
+  // Wheel-to-horizontal scroll. Desktop mice have no natural way to scroll a
+  // horizontal rail whose scrollbar is hidden by design — a vertical wheel
+  // over the rail did nothing, so desktop users could never reach the later
+  // personalities. Translate the wheel into horizontal scroll and release the
+  // gesture back to the page at either edge (nothing gets trapped).
+  useEffect(() => {
+    const el = railRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      // Trackpads send real horizontal deltas — let the browser handle those.
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      if (el.scrollWidth <= el.clientWidth) return
+      // Normalize line/page delta modes to pixels.
+      const dy =
+        e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * el.clientHeight : e.deltaY
+      // RTL rails scroll toward negative scrollLeft — mirror the direction.
+      const sign = getComputedStyle(el).direction === 'rtl' ? -1 : 1
+      const before = el.scrollLeft
+      el.scrollLeft = before + sign * dy
+      if (el.scrollLeft !== before) {
+        e.preventDefault() // consumed — the rail moved
+      }
+      // else: at an edge — don't preventDefault so the page keeps scrolling.
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   const total = AGENCY_STATS.agents
 
   return (

@@ -67,10 +67,8 @@ export interface AgentsDirectoryPageProps {
 
 export function AgentsDirectoryPage(props: AgentsDirectoryPageProps) {
   return (
-    <div className="nx-scroll flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-6xl">
-        <DirectoryBody {...props} onClose={props.onBack} />
-      </div>
+    <div className="mx-auto flex h-[calc(100dvh_-_111px_-_env(safe-area-inset-bottom))] w-full max-w-6xl flex-col md:h-screen">
+      <DirectoryBody {...props} onClose={props.onBack} />
     </div>
   )
 }
@@ -230,8 +228,11 @@ function DirectoryBody({
         </div>
       )}
 
-      {/* Agent grid */}
-      <div className={inModal ? 'nx-scroll min-h-0 flex-1 overflow-y-auto' : ''}>
+      {/* Agent grid — scrolls internally in BOTH variants. (Page fix: the
+          old page variant had no scroll container at all — the list grew the
+          document while overscroll-behavior:contain ate wheel events, so the
+          agents below the fold were unreachable.) */}
+      <div className="nx-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((a) => (
             <AgentCard

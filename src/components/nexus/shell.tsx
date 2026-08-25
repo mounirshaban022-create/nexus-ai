@@ -581,9 +581,15 @@ export function NexusShell(props: NexusShellProps) {
         </header>
 
         {/* Non-chat views get bottom padding so the fixed tab bar never
-         * covers their content (the chat view computes its own exact height). */}
+         * covers their content (the chat view computes its own exact height).
+         *
+         * Layout fix: flex-1 (NOT min-h-screen) — the mobile column already
+         * adds the 56px top bar above main, so min-h-screen here made the
+         * document 56px taller than the viewport on every screen (a phantom
+         * scroll + rubber-band on mobile). flex-1 still stretches main to
+         * fill the viewport via the column's root-level min-h-screen. */}
         <main
-          className={`flex min-h-screen w-full min-w-0 flex-col ${
+          className={`flex min-h-0 w-full min-w-0 flex-1 flex-col ${
             view.type === 'chat' ? '' : 'pb-[calc(55px_+_env(safe-area-inset-bottom))] md:pb-0'
           }`}
         >
