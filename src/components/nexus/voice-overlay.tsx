@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Globe, Loader2, Mic, MicOff, PhoneOff, Send, X } from 'lucide-react'
+import { ExternalLink, Globe, Loader2, Mic, MicOff, PhoneOff, Send, X } from 'lucide-react'
 import { BrandMark } from './shared'
 import { VoicePicker, KOKORO_PREFIX } from './voice-picker'
 import { useToast } from '@/hooks/use-toast'
@@ -1249,11 +1249,24 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
               {micDenied && (
                 <div className="nx-rise mt-3 flex max-w-md items-start gap-2.5 rounded-2xl border border-[#f5a623]/25 bg-[#f5a623]/10 px-3.5 py-2.5 text-left">
                   <MicOff className="mt-0.5 h-4 w-4 shrink-0 text-[#f5a623]" aria-hidden />
-                  <p className="text-xs leading-relaxed text-zinc-300">
-                    {inIframe
-                      ? 'The microphone is blocked in this preview frame. Open the app in a new tab to talk — or type below and NEXUS will still reply out loud.'
-                      : 'Microphone access is blocked. Allow the mic in your browser to talk — or type below and NEXUS will still reply out loud.'}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs leading-relaxed text-zinc-300">
+                      {inIframe
+                        ? 'The microphone is blocked in this preview frame. Open the app in a new tab to talk — or type below and NEXUS will still reply out loud.'
+                        : 'Microphone access is blocked. Allow the mic in your browser to talk — or type below and NEXUS will still reply out loud.'}
+                    </p>
+                    {inIframe && (
+                      <a
+                        href={typeof window !== 'undefined' ? window.location.href : '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[#f5a623]/40 bg-[#f5a623]/15 px-3 text-xs font-semibold text-[#f5a623] transition hover:bg-[#f5a623]/25"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                        Open in new tab for voice
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
 
