@@ -50,11 +50,11 @@ Your repo is already initialized at `github.com/mounirshaban022-create/nexus-ai.
 
 The sandbox uses SQLite; Vercel needs a real Postgres. Supabase gives you one free.
 
-1. **Supabase Dashboard → your project** (`wopzantzdnobajjlzwpl`)
+1. **Supabase Dashboard → your project** (`wopzantzdnobajjlzwzl`)
 2. **Use the DIRECT connection** (recommended for this project):
-   - `postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwpl.supabase.co:5432/postgres`
-   - Why direct (not the pooler): the Supavisor transaction pooler returned `tenant/user postgres.wopzantzdnobajjlzwpl not found` for this project — the pooler doesn't recognize the tenant. The direct connection bypasses the pooler and uses native Postgres auth (user `postgres`, no tenant lookup). For low-to-medium traffic this is fine on Vercel.
-   - (If you later enable the pooler in Dashboard → Database → Connection pooling, you can switch to `postgresql://postgres.wopzantzdnobajjlzwpl:<PASSWORD>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true`.)
+   - `postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres`
+   - Why direct (not the pooler): the Supavisor transaction pooler returned `tenant/user postgres.wopzantzdnobajjlzwzl not found` for this project — the pooler doesn't recognize the tenant. The direct connection bypasses the pooler and uses native Postgres auth (user `postgres`, no tenant lookup). For low-to-medium traffic this is fine on Vercel.
+   - (If you later enable the pooler in Dashboard → Database → Connection pooling, you can switch to `postgresql://postgres.wopzantzdnobajjlzwzl:<PASSWORD>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true`.)
 3. **Create the 13 tables** — pick ONE:
    - **Option A — manual SQL paste (works anywhere):** Supabase Dashboard → SQL Editor → New Query → paste the entire contents of [`supabase-schema.sql`](./supabase-schema.sql) → Run.
    - **Option B — automated endpoint (recommended, no copy-paste):** Add `ADMIN_MIGRATION_TOKEN` (any random 32+ char string) to Vercel env vars + redeploy. Then visit:
@@ -67,7 +67,7 @@ The sandbox uses SQLite; Vercel needs a real Postgres. Supabase gives you one fr
    - Tables created (auto-generated from `prisma/schema.prisma`): `User`, `ChatSession`, `ChatMessage`, `GeneratedImage`, `GeneratedVideo`, `GeneratedDocument`, `EmailAccount`, `AiProvider`, `UserMemory`, `Project`, `ProjectFile`, `WhatsAppAccount`, `WhatsAppMessage`.
    - Uses PascalCase names (matches Prisma exactly — no `@@map`), TEXT `cuid()` IDs, no references to `auth.users` (this app has its own `User` table + custom JWT auth, not Supabase's built-in auth).
 4. **Settings → API** → confirm:
-   - Project URL: `https://wopzantzdnobajjlzwpl.supabase.co`
+   - Project URL: `https://wopzantzdnobajjlzwzl.supabase.co`
    - `anon` public key + `service_role` key (both already in your `.env.local`)
 
 The build script (`package.json` → `build`) auto-switches Prisma from `sqlite` to `postgresql` when `DATABASE_URL` starts with `postgres`, then runs `prisma generate`. Nothing to change.
@@ -92,8 +92,8 @@ Add EACH of these for **Production + Preview + Development** environments (or at
 
 | Key | Value | Notes |
 |-----|-------|-------|
-| `DATABASE_URL` | `postgresql://postgres.wopzantzdnobajjlzwpl:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres` | From Supabase → Database → Connection string (Transaction pooler). **Critical:** must start with `postgres` so the build switches the Prisma provider. |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://wopzantzdnobajjlzwpl.supabase.co` | Supabase project URL |
+| `DATABASE_URL` | `postgresql://postgres.wopzantzdnobajjlzwzl:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres` | From Supabase → Database → Connection string (Transaction pooler). **Critical:** must start with `postgres` so the build switches the Prisma provider. |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://wopzantzdnobajjlzwzl.supabase.co` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `eyJhbGciOiJIUzI1NiIs...` (anon JWT) | Safe for the browser |
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJhbGciOiJIUzI1NiIs...` (service_role JWT) | **Server only** — used for cloud sync inserts |
 | `OPENROUTER_API_KEY` | `sk-or-v1-...` | Your OpenRouter key |
@@ -121,7 +121,7 @@ The first deploy runs `prisma generate` (via the `postinstall` hook). Creating t
    - **Or: run the SQL manually** in Supabase Dashboard → SQL Editor → paste [`supabase-schema.sql`](./supabase-schema.sql) → Run.
    - **Or: run `prisma db push` locally** with the Supabase `DATABASE_URL` (requires the direct connection — the pooler rejects this project as a tenant):
      ```bash
-     DATABASE_URL="postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwpl.supabase.co:5432/postgres" bun run db:push
+     DATABASE_URL="postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres" bun run db:push
      ```
      (The provider swap is handled by the `build` script on Vercel; for a local push you can pass `--schema=prisma/schema.prisma` after temporarily switching the provider to `postgresql`.)
 2. Confirm in Supabase → Table Editor → you see `ChatSession`, `ChatMessage`, `User`, `EmailAccount`, etc. (or just look at the JSON `tablesAfter` from the endpoint).
