@@ -576,6 +576,13 @@ nav[aria-label="Primary"] {
 .nx-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  /* SCROLL-GLITCH FIX: the browser's scroll anchoring adjusts scrollTop on
+     its own when content above the viewport changes height (markdown
+     re-render, code blocks, images). Combined with our stick-to-bottom
+     writes that produced visible jitter/jumps — disable it and let the
+     app's own auto-scroll logic be the single writer. */
+  overflow-anchor: none;
+  overscroll-behavior-y: contain;
 }
 .nx-scroll::-webkit-scrollbar {
   width: 8px;
@@ -593,6 +600,22 @@ nav[aria-label="Primary"] {
 .nx-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 90, 95, 0.45);
   background-clip: padding-box;
+}
+
+/* Live status line shown next to the typing dots while the agent works
+   ("Picking the right specialist…", "Thinking…") — a soft breathing shimmer
+   so the wait feels alive, never dead. */
+.nx-status-shimmer {
+  animation: nx-status-breathe 2.2s ease-in-out infinite;
+}
+@keyframes nx-status-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* Video card progress bar */

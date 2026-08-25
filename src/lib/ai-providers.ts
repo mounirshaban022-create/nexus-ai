@@ -358,16 +358,78 @@ export async function externalChatCompletion(
   }
 }
 
+/**
+ * STREAMING variant for a user-connected provider — SSE token-by-token
+ * through the same directive-safe peek buffer as the free pool, so chat
+ * feels alive (word-by-word) on EVERY path, not just the anonymous one.
+ * Falls back transparently to the non-streaming completion when the
+ * provider rejects stream:true (some do).
+ */
+export async function streamExternalChatCompletion(
+  provider: ResolvedAiProvider,
+  messages: ExternalChatMessage[],
+  onDelta: (delta: string) => void,
+  opts: { model?: string; maxTokens?: number; timeoutMs?: number } = {}
+): Promise<string> {
+  const model = opts.model ?? provider.defaultModel
+  const isAnonymous = ANONYMOUS_PROVIDER_IDS.has(provider.providerId)
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  let emittedLen = 0
+  const track = (d: string) => {
+    emittedLen += d.length
+    onDelta(d)
+  }
+  try {
+    const res = await fetch(`${provider.baseUrl}/chat/completions`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(isAnonymous
+          ? { 'HTTP-Referer': 'https://nexus-ai.app', 'X-Title': 'NEXUS AI' }
+          : { Authorization: `Bearer ${provider.apiKey}` }),
+        ...(provider.providerId === 'openrouter'
+          ? { 'HTTP-Referer': 'https://nexus-ai.app', 'X-Title': 'NEXUS AI' }
+          : {}),
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        temperature: 0.7,
+        max_tokens: opts.maxTokens ?? 800,
+      }),
+    })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+      throw new Error(body.error?.message || `Provider responded ${res.status}`)
+    }
+    if (!res.body) throw new Error('No stream body')
+    return await consumeSSEWithPeek(res.body.getReader(), track)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    // Deltas already visible to the user → NEVER fall back to a fresh
+    // completion (it would duplicate/diverge on screen). Propagate so the
+    // caller keeps the partial text (same semantics as the free-pool race).
+    if (emittedLen > 0) throw err
+    // Hard provider errors (bad key, rate limit, 5xx) propagate to the
+    // caller's fallback chain — no silent retry.
+    if (/responded (4\d\d|5\d\d)/i.test(msg) || /No stream body/.test(msg)) throw err
+    // Transport/stream glitch before any output → single-shot completion.
+    return externalChatCompletion(provider, messages, {
+      model,
+      maxTokens: opts.maxTokens,
+      timeoutMs,
+    })
+  }
+}
+
 /** Verifies a provider API key by listing models (or a tiny completion). */
 export async function verifyAiProvider(
   baseUrl: string,
   apiKey: string,
   providerId: string
 ): Promise<{ ok: boolean; message: string }> {
-  // ──────────────────────────────────────────────────────────────
-  // Zero-key providers: there is nothing to verify — they always work
-  // anonymously. We mark them as connected immediately so the user can
-  // "connect" them from the UI without ever pasting a key.
   // ──────────────────────────────────────────────────────────────
   if (ANONYMOUS_PROVIDER_IDS.has(providerId)) {
     return {
@@ -561,6 +623,20 @@ export async function anonymousFallbackChat(
   messages: ExternalChatMessage[],
   opts: { maxTokens?: number; timeoutMs?: number; task?: AiTask } = {}
 ): Promise<{ content: string; providerId: string; model: string }> {
+  // SPEED: race the free pool in parallel first — the sequential chain was
+  // the #1 source of multi-second chat latency (each dead provider burned
+  // its full timeout before the next was tried). Hedged requests: fire the
+  // top model of EVERY provider simultaneously; first non-empty answer wins.
+  try {
+    return await raceAnonymousFallbackChat(messages, opts)
+  } catch (raceErr) {
+    const msg = raceErr instanceof Error ? raceErr.message : ''
+    // Only fall through to the sequential chain when the race genuinely
+    // exhausted (all waves failed). Timeouts are handled inside the race.
+    if (!/all waves exhausted/i.test(msg)) {
+      /* fall through to sequential chain as final safety net */
+    }
+  }
   const chain = chainOrderForTask(opts.task)
   let lastError: unknown = null
   for (const provider of chain) {
@@ -591,6 +667,97 @@ export async function anonymousFallbackChat(
 }
 
 /* ------------------------------------------------------------------ */
+/* HEDGED (PARALLEL) FREE-POOL RACING — the speed fix                  */
+/*                                                                     */
+/* Instead of trying providers one-by-one (LLM7 timeout → OVH timeout  */
+/* → Kilo…, easily 10-20s of dead air), we fire one request per        */
+/* provider SIMULTANEOUSLY and take the first usable answer. Waves:    */
+/*   wave 1: top model of each provider (3 parallel requests)          */
+/*   wave 2: second model of each provider                             */
+/*   then:   give up → caller's sequential fallback chain              */
+/* Every provider has its OWN rate-limit budget, so a parallel fan-out */
+/* of one request per provider is within all documented limits.        */
+/* ------------------------------------------------------------------ */
+
+interface RaceWinner {
+  content: string
+  providerId: string
+  model: string
+}
+
+/** Promise wrapper that NEVER rejects — resolves null on failure. */
+function soft<T>(p: Promise<T>): Promise<T | null> {
+  return p.then(
+    (v) => v,
+    () => null
+  )
+}
+
+/** Resolves with the first non-null result; rejects only when ALL fail. */
+function firstSuccess<T>(promises: Array<Promise<T | null>>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let pending = promises.length
+    let settled = false
+    if (!pending) reject(new Error('nothing to race'))
+    for (const p of promises) {
+      p.then((v) => {
+        if (settled) return
+        if (v != null) {
+          settled = true
+          resolve(v)
+        } else if (--pending === 0) {
+          reject(new Error('all candidates failed'))
+        }
+      })
+    }
+  })
+}
+
+/** Raced anonymous completion — wave-per-wave parallel hedging. */
+export async function raceAnonymousFallbackChat(
+  messages: ExternalChatMessage[],
+  opts: { maxTokens?: number; timeoutMs?: number; task?: AiTask; maxWaves?: number } = {}
+): Promise<RaceWinner> {
+  const chain = chainOrderForTask(opts.task)
+  const normalized = normalizeSystemRole(messages)
+  const maxWaves = Math.min(opts.maxWaves ?? 2, 3)
+  // Per-request cap: the race only needs ONE provider to answer fast —
+  // don't let a slow zombie request hold the wave open.
+  const perRequestMs = Math.min(opts.timeoutMs ?? 30_000, 30_000)
+  let lastError: unknown = null
+
+  for (let wave = 0; wave < maxWaves; wave++) {
+    const candidates = chain
+      .map((provider) => ({ provider, model: provider.models[wave] }))
+      .filter((c): c is { provider: AnonymousProvider; model: string } => Boolean(c.model))
+    if (!candidates.length) break
+
+    const raced = candidates.map(({ provider, model }) =>
+      soft(
+        anonymousChatCompletion(provider, normalized, {
+          model,
+          maxTokens: opts.maxTokens,
+          timeoutMs: perRequestMs,
+        }).then<RaceWinner | null>((content) =>
+          content.trim() ? { content, providerId: provider.id, model } : null
+        )
+      )
+    )
+
+    try {
+      const winner = await firstSuccess(raced)
+      return winner
+    } catch (err) {
+      lastError = err
+      // next wave
+    }
+  }
+  throw lastError instanceof Error
+    ? new Error(`race: all waves exhausted (${lastError.message})`)
+    : new Error('race: all waves exhausted')
+}
+
+/* ------------------------------------------------------------------ */
 /* STREAMING anonymous fallbacks (SSE token-by-token)                 */
 /* ------------------------------------------------------------------ */
 
@@ -614,18 +781,24 @@ function normalizeSystemRole(
  * Streams a completion from ONE anonymous provider (SSE, token-by-token),
  * emitting deltas through onDelta as they arrive. Falls back to the
  * non-streaming endpoint if the provider rejects stream:true.
+ * Accepts an AbortSignal so losing racers can be cancelled.
  */
 async function streamAnonymousCompletion(
   provider: AnonymousProvider,
   messages: ExternalChatMessage[],
   onDelta: (delta: string) => void,
-  opts: { model?: string; maxTokens?: number; timeoutMs?: number } = {}
+  opts: { model?: string; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<string> {
   const model = opts.model ?? provider.models[0]
   const timeoutMs = opts.timeoutMs ?? 60_000
+  // Combine the racer's abort signal with a hard timeout (AbortSignal.any
+  // is available in Bun/Node 20+). Losers get aborted instantly; the winner
+  // is still bounded by the timeout.
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal
   const res = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
-    signal: AbortSignal.timeout(timeoutMs),
+    signal,
     headers: {
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://nexus-ai.app',
@@ -648,15 +821,21 @@ async function streamAnonymousCompletion(
 }
 
 /**
- * STREAMING anonymous fallback chain — the rate-limit bypass for the
- * main chat route. When Z.ai's stream fails (typically a 429 storm),
- * this keeps the chat experience IDENTICAL for the user: token-by-token
- * streaming from LLM7.io → OVHcloud → Kilo Code, no API key needed.
+ * RACED STREAMING fallback — the speed fix for the main chat.
  *
- * Retry safety: if a provider fails BEFORE any delta was emitted, the
- * chain moves to the next provider/model. If it fails MID-STREAM (deltas
- * already visible to the user), retrying would duplicate text on screen
- * — so we return the partial content that was already shown.
+ * Fires the free pool in PARALLEL (one stream per provider) instead of
+ * sequentially waiting for each to fail. The first provider to emit a
+ * visible delta LOCKS the race: from that moment only its deltas reach
+ * onDelta, and every other stream is aborted. Losers are cancelled the
+ * instant they lose — no wasted quota, no duplicated text.
+ *
+ * Wave model (mirrors raceAnonymousFallbackChat):
+ *   wave 1 → top model of each provider, raced
+ *   wave 2 → second model of each provider, raced
+ *   give up → caller falls back to non-streamed smartChat
+ *
+ * Mid-stream failure of the LOCKED winner keeps the partial text already
+ * shown to the user (retrying would duplicate on screen).
  */
 export async function streamAnonymousFallbackChat(
   messages: ExternalChatMessage[],
@@ -665,37 +844,72 @@ export async function streamAnonymousFallbackChat(
 ): Promise<{ content: string; providerId: string; model: string }> {
   const normalized = normalizeSystemRole(messages)
   const chain = chainOrderForTask(opts.task)
+  const perRequestMs = Math.min(opts.timeoutMs ?? 60_000, 90_000)
   let lastError: unknown = null
-  for (const provider of chain) {
-    for (const model of provider.models) {
-      let emitted = ''
-      try {
-        const full = await streamAnonymousCompletion(
-          provider,
-          normalized,
-          (d) => {
-            emitted += d
-            onDelta(d)
-          },
-          { model, maxTokens: opts.maxTokens, timeoutMs: opts.timeoutMs }
-        )
-        if (full.trim()) {
-          return { content: full, providerId: provider.id, model }
-        }
-      } catch (err) {
-        lastError = err
-        // Mid-stream failure after emitting deltas: the user already saw
-        // this text — return it as the (truncated) answer instead of
-        // retrying and duplicating content on screen.
-        if (emitted.trim()) {
-          console.error(
-            `[streamAnonymousFallback] ${provider.id}/${model} failed mid-stream — keeping partial output (${emitted.length} chars)`
-          )
-          return { content: emitted, providerId: provider.id, model }
-        }
-        continue
-      }
+
+  for (let wave = 0; wave < 2; wave++) {
+    const candidates = chain
+      .map((provider) => ({ provider, model: provider.models[wave] }))
+      .filter((c): c is { provider: AnonymousProvider; model: string } => Boolean(c.model))
+    if (!candidates.length) break
+
+    /** Locked once any racer emits its first visible delta. */
+    let lockedIdx = -1
+    const controllers = candidates.map(() => new AbortController())
+    // Abort every racer EXCEPT the locked winner (call after lock).
+    const abortLosers = (winner: number) => {
+      controllers.forEach((c, i) => {
+        if (i !== winner) c.abort()
+      })
     }
+
+    const racers = candidates.map(({ provider, model }, i) => {
+      let emitted = ''
+      return {
+        promise: (async (): Promise<{ content: string; providerId: string; model: string } | null> => {
+          try {
+            const full = await streamAnonymousCompletion(
+              provider,
+              normalized,
+              (d) => {
+                emitted += d
+                // FIRST delta from this racer: try to lock the race.
+                if (lockedIdx === -1) {
+                  lockedIdx = i
+                  abortLosers(i)
+                }
+                if (lockedIdx === i) onDelta(d) // only the winner reaches the UI
+              },
+              { model, maxTokens: opts.maxTokens, timeoutMs: perRequestMs, signal: controllers[i].signal }
+            )
+            if (full.trim()) return { content: full, providerId: provider.id, model }
+            // Stream completed empty — only the winner is a real result.
+            return lockedIdx === i && emitted.trim()
+              ? { content: emitted, providerId: provider.id, model }
+              : null
+          } catch (err) {
+            lastError = err
+            // Winner failing mid-stream: keep the visible partial output.
+            if (lockedIdx === i && emitted.trim()) {
+              console.error(
+                `[streamRace] ${provider.id}/${model} failed mid-stream — keeping partial (${emitted.length} chars)`
+              )
+              return { content: emitted, providerId: provider.id, model }
+            }
+            return null
+          }
+        })(),
+      }
+    })
+
+    const winner = await firstSuccess(racers.map((r) => soft(r.promise)))
+    // Defensive: abort anything still running (e.g. winner resolved empty
+    // after a loser locked, or a zombie connection).
+    abortLosers(lockedIdx >= 0 ? lockedIdx : -1)
+    if (winner) return winner
+    // all wave-1 racers failed before any delta → next wave
   }
-  throw lastError ?? new Error('All anonymous streaming fallbacks failed.')
+  throw lastError instanceof Error
+    ? new Error(`stream race failed: ${lastError.message}`)
+    : new Error('All anonymous streaming fallbacks failed.')
 }

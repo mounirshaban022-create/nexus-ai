@@ -16,6 +16,7 @@ import {
   MessageCircle,
   Pin,
   Plus,
+  Puzzle,
   Search,
   Settings,
   Users,
@@ -263,6 +264,13 @@ function SidebarContent({
             active={view.type === 'whatsapp'}
             onClick={() => go({ type: 'whatsapp' })}
             iconClassName="text-emerald-400"
+          />
+          <NavItem
+            icon={Puzzle}
+            label="Skills"
+            badge="79"
+            active={view.type === 'skills'}
+            onClick={() => go({ type: 'skills' })}
           />
           <NavItem
             icon={Settings}

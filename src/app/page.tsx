@@ -26,6 +26,7 @@ import { VoiceOverlay } from '@/components/nexus/voice-overlay'
 import { FramedPanel } from '@/components/nexus/framed-panel'
 import { WhatsAppMode } from '@/components/omni/whatsapp-mode'
 import { SettingsMode } from '@/components/omni/settings-mode'
+import { SkillsMode } from '@/components/omni/skills-mode'
 
 export default function Page() {
   // Apply saved theme + language preferences (from Settings). The nexus
@@ -132,6 +133,15 @@ export default function Page() {
     setView({ type: 'chat' })
   }, [])
 
+  /* Hand a skill prompt to the chat composer. The chat consumes `prefill`
+   * on mount only (useState initializer), so bump chatEpoch to remount it —
+   * same pattern as handleNewChat / handleSessionSelect. */
+  const handleUseSkillInChat = useCallback((prompt: string) => {
+    setPrefill(prompt)
+    setChatEpoch((e) => e + 1)
+    setView({ type: 'chat' })
+  }, [])
+
   // While the session cookie is being checked: minimal dark splash so a
   // signed-in user never sees the marketing landing flash.
   if (!authChecked) {
@@ -196,6 +206,17 @@ export default function Page() {
             description="Connect your number, automate replies with the NEXUS agent, and chat with customers."
           >
             <WhatsAppMode />
+          </FramedPanel>
+        )}
+
+        {view.type === 'skills' && (
+          <FramedPanel
+            fill
+            dark
+            title="Agent Skills"
+            description="79 CLI-Anything skills that connect NEXUS to real apps — from Blender and LibreOffice to browser automation and n8n."
+          >
+            <SkillsMode onUseInChat={handleUseSkillInChat} />
           </FramedPanel>
         )}
 

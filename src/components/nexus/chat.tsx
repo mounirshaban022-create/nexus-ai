@@ -141,6 +141,12 @@ export function NexusChat(props: NexusChatProps) {
   const abortRef = useRef<AbortController | null>(null)
   const assignRef = useRef<AgentAssignEvent | null>(null)
   const seqRef = useRef(0)
+  /** Live status line from the server ("Picking the right specialist…") —
+   *  shown next to the typing dots so waiting never feels dead. */
+  const [statusText, setStatusText] = useState('')
+  /** Typewriter reveal state — animates one-shot bursts word-by-word. */
+  const typewriterRef = useRef<{ timer: ReturnType<typeof setInterval> | null }>({ timer: null })
+  const scrollFrameRef = useRef<number | null>(null)
 
   const nextId = (prefix: string) => `${prefix}-${Date.now()}-${seqRef.current++}`
 
@@ -201,21 +207,54 @@ export function NexusChat(props: NexusChatProps) {
     return () => {
       abortRef.current?.abort()
       if (flushTimerRef.current) clearInterval(flushTimerRef.current)
+      if (typewriterRef.current.timer) clearInterval(typewriterRef.current.timer)
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
     }
   }, [])
 
-  /* ---------- smart auto-scroll (sticks while near the bottom) ---------- */
+  /* ---------- smart auto-scroll (sticks while near the bottom) ----------
+   * SCROLL-GLITCH FIX — three hardening measures:
+   *   1. rAF throttling: the DOM height settles within one animation frame
+   *      before we pin to the bottom (no fighting mid-layout writes).
+   *   2. Hysteresis: stick again at ≤140px from the bottom, but only
+   *      un-stick beyond 260px — mobile rubber-banding at the bottom edge
+   *      no longer randomly detaches the auto-scroll.
+   *   3. `overflow-anchor:none` on .nx-scroll (globals.css) stops the
+   *      browser's own scroll-anchoring from fighting our scrollTop writes.
+   */
+  const scrollToEnd = useCallback(() => {
+    if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const el = scrollRef.current
+      if (!el || !stickToBottomRef.current) return
+      el.scrollTop = el.scrollHeight
+    })
+  }, [])
+
   useEffect(() => {
-    const el = scrollRef.current
-    if (!el || !stickToBottomRef.current) return
-    el.scrollTop = el.scrollHeight
-  }, [messages, streaming])
+    if (!stickToBottomRef.current) return
+    scrollToEnd()
+  }, [messages, streaming, scrollToEnd])
+
+  /* Mobile keyboards + viewport resizes change the container height without
+   * a messages update — re-stick to the bottom so the newest content stays
+   * visible instead of being cut off under the composer. */
+  useEffect(() => {
+    const onResize = () => {
+      if (stickToBottomRef.current) scrollToEnd()
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [scrollToEnd])
 
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    stickToBottomRef.current = distFromBottom <= 150
+    // Hysteresis band: easily re-stick near the bottom, hard to un-stick.
+    if (distFromBottom <= 140) stickToBottomRef.current = true
+    else if (distFromBottom > 260) stickToBottomRef.current = false
   }
 
   /* ---------- textarea auto-resize (rows 1 → 6) ---------- */
@@ -257,6 +296,33 @@ export function NexusChat(props: NexusChatProps) {
       appendDelta(chunk)
     }
   }, [appendDelta])
+
+  /* ---------- typewriter reveal (the "alive" effect) ----------
+   * When the backend hands us a finished text in ONE burst (non-streaming
+   * fallback path, or a coalesced mega-delta), animating it word-by-word
+   * keeps the ChatGPT feel instead of a jarring wall of text. Reveal is
+   * chunked so even long answers finish in ~1.2s. */
+  const revealTypewriter = useCallback((id: string, fullText: string) => {
+    if (typewriterRef.current.timer) {
+      clearInterval(typewriterRef.current.timer)
+      typewriterRef.current.timer = null
+    }
+    if (!fullText) return
+    const total = fullText.length
+    // ~70 ticks × 16ms ≈ 1.1s regardless of length; min 2 chars/tick.
+    const chunk = Math.max(2, Math.ceil(total / 70))
+    let pos = 0
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: '' } : m)))
+    typewriterRef.current.timer = setInterval(() => {
+      pos = Math.min(total, pos + chunk)
+      const slice = fullText.slice(0, pos)
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: slice } : m)))
+      if (pos >= total) {
+        if (typewriterRef.current.timer) clearInterval(typewriterRef.current.timer)
+        typewriterRef.current.timer = null
+      }
+    }, 16)
+  }, [])
 
   /** Patch the live tool chip that matches (toolName, index). */
   const updateTool = useCallback(
@@ -309,8 +375,27 @@ export function NexusChat(props: NexusChatProps) {
       setAttachError('')
       setStreaming(true)
       stickToBottomRef.current = true
+      setStatusText('')
 
       abortRef.current = new AbortController()
+
+      // STREAM WATCHDOG (defense-in-depth): if the server ever fails to
+      // close the NDJSON stream, reader.read() hangs forever and the
+      // composer stays locked in "generating". This timer aborts the fetch
+      // after 90s of total silence and frees the UI. Declared OUTSIDE the
+      // try so the finally block can always disarm it.
+      let watchdog: ReturnType<typeof setTimeout> | null = null
+      const armWatchdog = () => {
+        if (watchdog) clearTimeout(watchdog)
+        watchdog = setTimeout(() => {
+          abortRef.current?.abort()
+        }, 90_000)
+      }
+      const disarmWatchdog = () => {
+        if (watchdog) clearTimeout(watchdog)
+        watchdog = null
+      }
+
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
@@ -336,10 +421,12 @@ export function NexusChat(props: NexusChatProps) {
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        armWatchdog()
 
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break
+          armWatchdog()
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split('\n')
           buffer = lines.pop() ?? ''
@@ -371,6 +458,12 @@ export function NexusChat(props: NexusChatProps) {
                 ])
                 break
               }
+              case 'status': {
+                // Live server status line — displayed with the typing dots
+                // until the first delta lands.
+                setStatusText(event.message)
+                break
+              }
               case 'assistant_start': {
                 streamIdRef.current = event.id
                 const slug = pinnedAgent ?? assignRef.current?.agentSlug ?? null
@@ -381,6 +474,19 @@ export function NexusChat(props: NexusChatProps) {
                 break
               }
               case 'assistant_delta': {
+                setStatusText('')
+                const id = streamIdRef.current
+                // BURST DETECTION: a huge first delta means the backend
+                // handed us a finished text in one shot (non-streaming
+                // fallback) — reveal it with the typewriter instead of
+                // slamming a wall of text on screen.
+                if (id && event.delta.length > 160) {
+                  const bubbleEmpty = !messagesRef.current.find((m) => m.id === id)?.content
+                  if (bubbleEmpty && !typewriterRef.current.timer) {
+                    revealTypewriter(id, event.delta)
+                    break
+                  }
+                }
                 pendingDeltaRef.current += event.delta
                 startDeltaFlusher()
                 break
@@ -412,29 +518,33 @@ export function NexusChat(props: NexusChatProps) {
                 streamIdRef.current = null
                 const attachments = Array.isArray(event.attachments) ? event.attachments : []
                 if (id) {
+                  // Typewriter reveal — the full text arrived in one shot;
+                  // animate it word-by-word so it feels alive.
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === id
                         ? {
                             ...m,
-                            content: event.content,
                             streaming: false,
                             ...(attachments.length > 0 ? { attachments } : {}),
                           }
                         : m
                     )
                   )
+                  revealTypewriter(id, event.content)
                 } else {
+                  const freshId = nextId('a')
                   setMessages((prev) => [
                     ...prev,
                     {
-                      id: nextId('a'),
+                      id: freshId,
                       role: 'assistant',
-                      content: event.content,
+                      content: '',
                       agentSlug: pinnedAgent ?? assignRef.current?.agentSlug ?? null,
                       ...(attachments.length > 0 ? { attachments } : {}),
                     },
                   ])
+                  revealTypewriter(freshId, event.content)
                 }
                 break
               }
@@ -497,9 +607,11 @@ export function NexusChat(props: NexusChatProps) {
           },
         ])
       } finally {
+        disarmWatchdog()
         stopDeltaFlusher()
         streamIdRef.current = null
         setStreaming(false)
+        setStatusText('')
         setMessages((prev) =>
           prev.map((m) =>
             m.streaming ? { ...m, streaming: false } : m.toolStatus === 'running' ? { ...m, toolStatus: 'done' } : m
@@ -507,7 +619,7 @@ export function NexusChat(props: NexusChatProps) {
         )
       }
     },
-    [attach, sessionId, streaming, pinnedAgent, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated]
+    [attach, sessionId, streaming, pinnedAgent, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated, revealTypewriter]
   )
 
   /* ---------- attachments (composer) ---------- */
@@ -769,10 +881,19 @@ export function NexusChat(props: NexusChatProps) {
                     {m.isError ? (
                       <p className="text-sm leading-relaxed text-red-300">{m.content}</p>
                     ) : m.streaming && !m.content ? (
-                      <span className="flex items-center gap-1 py-1.5" role="status" aria-label="Thinking">
-                        <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
-                        <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
-                        <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                      <span
+                        className="flex items-center gap-2 py-1.5"
+                        role="status"
+                        aria-label={statusText || 'Thinking'}
+                      >
+                        <span className="flex items-center gap-1" aria-hidden>
+                          <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                          <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                          <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                        </span>
+                        {statusText ? (
+                          <span className="nx-status-shimmer text-xs text-zinc-500">{statusText}</span>
+                        ) : null}
                       </span>
                     ) : (
                       /* `dark` wrapper activates the existing .dark .omni-prose rules */
@@ -792,10 +913,34 @@ export function NexusChat(props: NexusChatProps) {
               )
             })}
 
+            {/* PENDING INDICATOR — the moment a message is sent, show the
+                agent thinking row (avatar + dots + live status) even before
+                the first stream event arrives. Never a blank pause. */}
+            {streaming && (() => {
+              const last = messages[messages.length - 1]
+              const waitingForFirstEvent =
+                !last || last.role === 'user' || (last.role === 'agent' && !streamIdRef.current)
+              return waitingForFirstEvent ? (
+                <div className="nx-rise flex gap-3">
+                  <AgentAvatar agent={agentOrNexus(pinnedAgent ?? assign?.agentSlug)} size={32} className="mt-0.5" />
+                  <div className="flex items-center gap-2 py-1.5" role="status" aria-label={statusText || 'Working'}>
+                    <span className="flex items-center gap-1" aria-hidden>
+                      <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                      <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                      <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+                    </span>
+                    <span className="nx-status-shimmer text-xs text-zinc-500">
+                      {statusText || 'Thinking…'}
+                    </span>
+                  </div>
+                </div>
+              ) : null
+            })()}
+
             {streaming && messages.length === 0 ? (
               <p className="flex items-center gap-2 pl-11 text-xs text-zinc-500">
                 <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
-                NEXUS is routing your message…
+                {statusText || 'NEXUS is routing your message…'}
               </p>
             ) : null}
           </div>

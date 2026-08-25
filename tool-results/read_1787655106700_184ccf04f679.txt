@@ -1,0 +1,905 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * NEXUS One — THE unified chat.
+     5→ *
+     6→ * One ChatGPT-style conversation where 255 specialist agents auto-take-over
+     7→ * (agent_assign handoff pills), with every superpower inline: images, live
+     8→ * video jobs, documents (Word/Excel/PDF), code, real browser, email and
+     9→ * WhatsApp. NDJSON streaming client modeled on the battle-tested
+    10→ * agency-chat implementation (deltas buffered + flushed every 80ms).
+    11→ */
+    12→
+    13→import { useCallback, useEffect, useRef, useState } from 'react'
+    14→import { motion, type Variants } from 'framer-motion'
+    15→import {
+    16→  ArrowUp,
+    17→  Clapperboard,
+    18→  FileText,
+    19→  Image as ImageIcon,
+    20→  Mail,
+    21→  Mic,
+    22→  MousePointerClick,
+    23→  Paperclip,
+    24→  Pin,
+    25→  Square,
+    26→  Users,
+    27→  X,
+    28→} from 'lucide-react'
+    29→import { Markdown } from '@/components/omni/markdown'
+    30→import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent } from './shared'
+    31→import { BrandMark, DIVISION_MAP, agentOrNexus } from './shared'
+    32→import { AgentAvatar, AttachmentList, HandoffPill, ToolCard, type ToolCardInfo } from './chat-parts'
+    33→
+    34→export interface NexusChatProps {
+    35→  sessionId?: string
+    36→  prefill?: string
+    37→  pinnedAgent: string | null
+    38→  onPinnedAgentChange: (slug: string | null) => void
+    39→  /** call when the stream creates/uses a session so the sidebar refreshes */
+    40→  onSessionCreated: (id: string) => void
+    41→  onOpenAgents: () => void
+    42→  onOpenVoice: () => void
+    43→  onOpenWhatsApp: () => void
+    44→}
+    45→
+    46→/* ------------------------------------------------------------------ */
+    47→/* Local message model (extends the shared view with routing extras)   */
+    48→/* ------------------------------------------------------------------ */
+    49→
+    50→interface NxMsg extends Omit<ChatMessageView, 'role'> {
+    51→  role: 'user' | 'assistant' | 'tool' | 'agent'
+    52→  isError?: boolean
+    53→  /** filename the user attached with this message */
+    54→  attachName?: string
+    55→  /** role:'agent' → the routing handoff pill */
+    56→  assign?: AgentAssignEvent
+    57→  /** live tool chip state for role:'tool' rows */
+    58→  toolStatus?: 'running' | 'done' | 'error'
+    59→  toolMessage?: string
+    60→  toolIndex?: number
+    61→  toolArgs?: Record<string, unknown> | null
+    62→}
+    63→
+    64→const SUGGESTIONS = [
+    65→  'Design a logo for my coffee shop',
+    66→  'Make a 4-scene video about AI',
+    67→  'Build an Excel budget tracker',
+    68→  "What's the latest AI news?",
+    69→]
+    70→
+    71→interface Capability {
+    72→  icon: typeof ImageIcon
+    73→  title: string
+    74→  desc: string
+    75→  prompt?: string
+    76→  voice?: boolean
+    77→  whatsapp?: boolean
+    78→}
+    79→
+    80→const CAPABILITIES: Capability[] = [
+    81→  {
+    82→    icon: ImageIcon,
+    83→    title: 'Create images',
+    84→    desc: 'Logos, art and photo edits in seconds',
+    85→    prompt: 'Generate an image of ',
+    86→  },
+    87→  {
+    88→    icon: Clapperboard,
+    89→    title: 'Produce videos',
+    90→    desc: 'AI scenes with narration and captions',
+    91→    prompt: 'Make a 4-scene video about ',
+    92→  },
+    93→  {
+    94→    icon: FileText,
+    95→    title: 'Documents',
+    96→    desc: 'Word, Excel, PowerPoint and PDF files',
+    97→    prompt: 'Create a Word document that ',
+    98→  },
+    99→  {
+   100→    icon: MousePointerClick,
+   101→    title: 'Browse the real web',
+   102→    desc: 'Opens, clicks and reads live pages',
+   103→    prompt: 'Open https://en.wikipedia.org/wiki/Artificial_intelligence and summarize it',
+   104→  },
+   105→  { icon: Mic, title: 'Voice chat', desc: 'Talk hands-free with live captions', voice: true },
+   106→  { icon: Mail, title: 'Email & WhatsApp', desc: 'Drafts and sends real messages', whatsapp: true },
+   107→]
+   108→
+   109→const stagger: Variants = {
+   110→  hidden: {},
+   111→  show: { transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
+   112→}
+   113→
+   114→const fadeUp: Variants = {
+   115→  hidden: { opacity: 0, y: 14 },
+   116→  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
+   117→}
+   118→
+   119→/* ------------------------------------------------------------------ */
+   120→/* The chat                                                            */
+   121→/* ------------------------------------------------------------------ */
+   122→
+   123→export function NexusChat(props: NexusChatProps) {
+   124→  const { pinnedAgent, onPinnedAgentChange, onSessionCreated } = props
+   125→
+   126→  const [messages, setMessages] = useState<NxMsg[]>([])
+   127→  const [streaming, setStreaming] = useState(false)
+   128→  const [sessionId, setSessionId] = useState<string | undefined>(props.sessionId)
+   129→  const [input, setInput] = useState(props.prefill ?? '')
+   130→  const [attach, setAttach] = useState<{ filename: string; dataUrl: string } | null>(null)
+   131→  const [attachError, setAttachError] = useState('')
+   132→  const [assign, setAssign] = useState<AgentAssignEvent | null>(null)
+   133→
+   134→  const scrollRef = useRef<HTMLDivElement>(null)
+   135→  const textareaRef = useRef<HTMLTextAreaElement>(null)
+   136→  const fileRef = useRef<HTMLInputElement>(null)
+   137→  const stickToBottomRef = useRef(true)
+   138→  const streamIdRef = useRef<string | null>(null)
+   139→  const pendingDeltaRef = useRef('')
+   140→  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+   141→  const abortRef = useRef<AbortController | null>(null)
+   142→  const assignRef = useRef<AgentAssignEvent | null>(null)
+   143→  const seqRef = useRef(0)
+   144→
+   145→  const nextId = (prefix: string) => `${prefix}-${Date.now()}-${seqRef.current++}`
+   146→
+   147→  /* ---------- session resume + one-time pin sync ---------- */
+   148→  // The session to resume is captured at MOUNT: page.tsx remounts the chat
+   149→  // (chatEpoch key) whenever the user switches sessions, and later
+   150→  // props.sessionId changes (e.g. when THIS chat creates its own session)
+   151→  // must NOT re-trigger a refetch that would clobber the live transcript
+   152→  // (handoff pills, tool cards and attachments are stream-only state).
+   153→  const [resumeId] = useState(props.sessionId)
+   154→  useEffect(() => {
+   155→    if (!resumeId) return
+   156→    let cancelled = false
+   157→    ;(async () => {
+   158→      try {
+   159→        const res = await fetch(`/api/chat/sessions/${encodeURIComponent(resumeId)}`)
+   160→        if (!res.ok) return
+   161→        const data = (await res.json().catch(() => null)) as { session?: unknown } | null
+   162→        const s =
+   163→          data && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
+   164→        if (cancelled || !s) return
+   165→        const rowsRaw = Array.isArray(s.messages) ? s.messages : []
+   166→        const sessionAgentSlug = typeof s.agentSlug === 'string' ? s.agentSlug : null
+   167→        const rows: NxMsg[] = rowsRaw
+   168→          .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+   169→          .map((m, i): NxMsg => {
+   170→            const role = m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool' : 'assistant'
+   171→            return {
+   172→              id: typeof m.id === 'string' ? m.id : `m-${i}`,
+   173→              role,
+   174→              content: typeof m.content === 'string' ? m.content : '',
+   175→              toolName: typeof m.toolName === 'string' ? m.toolName : null,
+   176→              toolData: typeof m.toolData === 'string' ? m.toolData : null,
+   177→              toolStatus: role === 'tool' ? 'done' : undefined,
+   178→              agentSlug: role === 'assistant' ? sessionAgentSlug : undefined,
+   179→              // NEXUS One: attachments persisted server-side (image/video/
+   180→              // document/code cards) survive resume.
+   181→              attachments: Array.isArray(m.attachments) ? m.attachments : undefined,
+   182→            }
+   183→          })
+   184→        setMessages(rows)
+   185→        setSessionId(typeof s.id === 'string' ? s.id : resumeId)
+   186→        // Sync page-level pin state ONCE after the session loads.
+   187→        onPinnedAgentChange(s.agentPinned === true && sessionAgentSlug ? sessionAgentSlug : null)
+   188→      } catch {
+   189→        /* failed to load — fall back to an empty transcript */
+   190→      }
+   191→    })()
+   192→    return () => {
+   193→      cancelled = true
+   194→    }
+   195→    // Mount-per-session resume (page.tsx remounts via chatEpoch); the pin
+   196→    // sync must fire exactly once per loaded session.
+   197→  }, [resumeId])
+   198→
+   199→  /* ---------- abort any live stream on unmount ---------- */
+   200→  useEffect(() => {
+   201→    return () => {
+   202→      abortRef.current?.abort()
+   203→      if (flushTimerRef.current) clearInterval(flushTimerRef.current)
+   204→    }
+   205→  }, [])
+   206→
+   207→  /* ---------- smart auto-scroll (sticks while near the bottom) ---------- */
+   208→  useEffect(() => {
+   209→    const el = scrollRef.current
+   210→    if (!el || !stickToBottomRef.current) return
+   211→    el.scrollTop = el.scrollHeight
+   212→  }, [messages, streaming])
+   213→
+   214→  const onScroll = () => {
+   215→    const el = scrollRef.current
+   216→    if (!el) return
+   217→    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+   218→    stickToBottomRef.current = distFromBottom <= 150
+   219→  }
+   220→
+   221→  /* ---------- textarea auto-resize (rows 1 → 6) ---------- */
+   222→  useEffect(() => {
+   223→    const el = textareaRef.current
+   224→    if (!el) return
+   225→    el.style.height = 'auto'
+   226→    el.style.height = `${Math.min(el.scrollHeight, 144)}px`
+   227→  }, [input])
+   228→
+   229→  /* ---------- streaming helpers ---------- */
+   230→
+   231→  const appendDelta = useCallback((delta: string) => {
+   232→    const id = streamIdRef.current
+   233→    if (!id || !delta) return
+   234→    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: m.content + delta } : m)))
+   235→  }, [])
+   236→
+   237→  /** Deltas are buffered and flushed every 80ms so react-markdown is not
+   238→   * re-parsed on every single token — keeps long streams silky. */
+   239→  const startDeltaFlusher = useCallback(() => {
+   240→    if (flushTimerRef.current) return
+   241→    flushTimerRef.current = setInterval(() => {
+   242→      if (!pendingDeltaRef.current) return
+   243→      const chunk = pendingDeltaRef.current
+   244→      pendingDeltaRef.current = ''
+   245→      appendDelta(chunk)
+   246→    }, 80)
+   247→  }, [appendDelta])
+   248→
+   249→  const stopDeltaFlusher = useCallback(() => {
+   250→    if (flushTimerRef.current) {
+   251→      clearInterval(flushTimerRef.current)
+   252→      flushTimerRef.current = null
+   253→    }
+   254→    if (pendingDeltaRef.current) {
+   255→      const chunk = pendingDeltaRef.current
+   256→      pendingDeltaRef.current = ''
+   257→      appendDelta(chunk)
+   258→    }
+   259→  }, [appendDelta])
+   260→
+   261→  /** Patch the live tool chip that matches (toolName, index). */
+   262→  const updateTool = useCallback(
+   263→    (tool: string, index: number, patch: Partial<NxMsg>) => {
+   264→      setMessages((prev) => {
+   265→        let target = -1
+   266→        for (let i = prev.length - 1; i >= 0; i--) {
+   267→          const m = prev[i]
+   268→          if (m.role === 'tool' && m.toolName === tool && m.toolIndex === index) {
+   269→            target = i
+   270→            break
+   271→          }
+   272→        }
+   273→        if (target === -1) {
+   274→          for (let i = prev.length - 1; i >= 0; i--) {
+   275→            const m = prev[i]
+   276→            if (m.role === 'tool' && m.toolName === tool && m.toolStatus === 'running') {
+   277→              target = i
+   278→              break
+   279→            }
+   280→          }
+   281→        }
+   282→        if (target === -1) return prev
+   283→        const copy = [...prev]
+   284→        copy[target] = { ...copy[target], ...patch }
+   285→        return copy
+   286→      })
+   287→    },
+   288→    []
+   289→  )
+   290→
+   291→  /* ---------- send ---------- */
+   292→
+   293→  const send = useCallback(
+   294→    async (text: string) => {
+   295→      const trimmed = text.trim()
+   296→      const hasAttach = attach != null
+   297→      if (streaming) return
+   298→      if (!trimmed && !hasAttach) return
+   299→
+   300→      const userMsg: NxMsg = {
+   301→        id: nextId('local'),
+   302→        role: 'user',
+   303→        content: trimmed,
+   304→        ...(hasAttach ? { attachName: attach!.filename } : {}),
+   305→      }
+   306→      setMessages((prev) => [...prev, userMsg])
+   307→      setInput('')
+   308→      setAttach(null)
+   309→      setAttachError('')
+   310→      setStreaming(true)
+   311→      stickToBottomRef.current = true
+   312→
+   313→      abortRef.current = new AbortController()
+   314→      try {
+   315→        const res = await fetch('/api/chat', {
+   316→          method: 'POST',
+   317→          headers: { 'Content-Type': 'application/json' },
+   318→          body: JSON.stringify({
+   319→            message: trimmed,
+   320→            ...(sessionId ? { sessionId } : {}),
+   321→            // '' = auto-routing; a slug pins the session persona (idempotent).
+   322→            agentSlug: pinnedAgent ?? '',
+   323→            ...(hasAttach
+   324→              ? { attachment: { filename: attach!.filename, dataUrl: attach!.dataUrl } }
+   325→              : {}),
+   326→          }),
+   327→          signal: abortRef.current.signal,
+   328→        })
+   329→
+   330→        if (!res.ok || !res.body) {
+   331→          const data = (await res.json().catch(() => null)) as { error?: string } | null
+   332→          throw new Error(data?.error || 'Chat request failed.')
+   333→        }
+   334→
+   335→        // Consume the NDJSON stream.
+   336→        const reader = res.body.getReader()
+   337→        const decoder = new TextDecoder()
+   338→        let buffer = ''
+   339→
+   340→        for (;;) {
+   341→          const { done, value } = await reader.read()
+   342→          if (done) break
+   343→          buffer += decoder.decode(value, { stream: true })
+   344→          const lines = buffer.split('\n')
+   345→          buffer = lines.pop() ?? ''
+   346→          for (const line of lines) {
+   347→            const text = line.trim()
+   348→            if (!text) continue
+   349→            let event: ChatStreamEvent
+   350→            try {
+   351→              event = JSON.parse(text) as ChatStreamEvent
+   352→            } catch {
+   353→              continue // partial / malformed line — skip
+   354→            }
+   355→
+   356→            switch (event.type) {
+   357→              case 'user': {
+   358→                setMessages((prev) =>
+   359→                  prev.map((m) =>
+   360→                    m.id === userMsg.id ? { ...m, id: event.id, content: event.content } : m
+   361→                  )
+   362→                )
+   363→                break
+   364→              }
+   365→              case 'agent_assign': {
+   366→                assignRef.current = event
+   367→                setAssign(event)
+   368→                setMessages((prev) => [
+   369→                  ...prev,
+   370→                  { id: nextId('assign'), role: 'agent', content: '', assign: event },
+   371→                ])
+   372→                break
+   373→              }
+   374→              case 'assistant_start': {
+   375→                streamIdRef.current = event.id
+   376→                const slug = pinnedAgent ?? assignRef.current?.agentSlug ?? null
+   377→                setMessages((prev) => [
+   378→                  ...prev,
+   379→                  { id: event.id, role: 'assistant', content: '', streaming: true, agentSlug: slug },
+   380→                ])
+   381→                break
+   382→              }
+   383→              case 'assistant_delta': {
+   384→                pendingDeltaRef.current += event.delta
+   385→                startDeltaFlusher()
+   386→                break
+   387→              }
+   388→              case 'assistant_end': {
+   389→                stopDeltaFlusher()
+   390→                const id = streamIdRef.current
+   391→                streamIdRef.current = null
+   392→                if (id) {
+   393→                  const attachments = Array.isArray(event.attachments) ? event.attachments : []
+   394→                  setMessages((prev) =>
+   395→                    prev.map((m) =>
+   396→                      m.id === id
+   397→                        ? {
+   398→                            ...m,
+   399→                            streaming: false,
+   400→                            ...(attachments.length > 0 ? { attachments } : {}),
+   401→                          }
+   402→                        : m
+   403→                    )
+   404→                  )
+   405→                }
+   406→                break
+   407→              }
+   408→              case 'assistant': {
+   409→                // Full-message fallback (non-streaming providers).
+   410→                stopDeltaFlusher()
+   411→                const id = streamIdRef.current
+   412→                streamIdRef.current = null
+   413→                const attachments = Array.isArray(event.attachments) ? event.attachments : []
+   414→                if (id) {
+   415→                  setMessages((prev) =>
+   416→                    prev.map((m) =>
+   417→                      m.id === id
+   418→                        ? {
+   419→                            ...m,
+   420→                            content: event.content,
+   421→                            streaming: false,
+   422→                            ...(attachments.length > 0 ? { attachments } : {}),
+   423→                          }
+   424→                        : m
+   425→                    )
+   426→                  )
+   427→                } else {
+   428→                  setMessages((prev) => [
+   429→                    ...prev,
+   430→                    {
+   431→                      id: nextId('a'),
+   432→                      role: 'assistant',
+   433→                      content: event.content,
+   434→                      agentSlug: pinnedAgent ?? assignRef.current?.agentSlug ?? null,
+   435→                      ...(attachments.length > 0 ? { attachments } : {}),
+   436→                    },
+   437→                  ])
+   438→                }
+   439→                break
+   440→              }
+   441→              case 'tool_start': {
+   442→                setMessages((prev) => [
+   443→                  ...prev,
+   444→                  {
+   445→                    id: nextId(`tool-${event.index}`),
+   446→                    role: 'tool',
+   447→                    content: '',
+   448→                    toolName: event.tool,
+   449→                    toolIndex: event.index,
+   450→                    toolStatus: 'running',
+   451→                    toolArgs: event.args,
+   452→                  },
+   453→                ])
+   454→                break
+   455→              }
+   456→              case 'tool_progress': {
+   457→                updateTool(event.tool, event.index, { toolMessage: event.message })
+   458→                break
+   459→              }
+   460→              case 'tool_result': {
+   461→                let data: string | null = null
+   462→                try {
+   463→                  data = JSON.stringify(event.result)
+   464→                } catch {
+   465→                  data = null
+   466→                }
+   467→                updateTool(event.tool, event.index, {
+   468→                  toolStatus: event.ok ? 'done' : 'error',
+   469→                  toolData: data,
+   470→                })
+   471→                break
+   472→              }
+   473→              case 'done': {
+   474→                setSessionId(event.sessionId)
+   475→                onSessionCreated(event.sessionId)
+   476→                break
+   477→              }
+   478→              case 'error': {
+   479→                throw new Error(event.message)
+   480→              }
+   481→            }
+   482→          }
+   483→        }
+   484→      } catch (error) {
+   485→        if (error instanceof DOMException && error.name === 'AbortError') return
+   486→        setMessages((prev) => [
+   487→          ...prev,
+   488→          {
+   489→            id: nextId('err'),
+   490→            role: 'assistant',
+   491→            content:
+   492→              error instanceof Error
+   493→                ? `Something went wrong: ${error.message}`
+   494→                : 'Something went wrong. Please try again.',
+   495→            isError: true,
+   496→            agentSlug: pinnedAgent ?? assignRef.current?.agentSlug ?? null,
+   497→          },
+   498→        ])
+   499→      } finally {
+   500→        stopDeltaFlusher()
+   501→        streamIdRef.current = null
+   502→        setStreaming(false)
+   503→        setMessages((prev) =>
+   504→          prev.map((m) =>
+   505→            m.streaming ? { ...m, streaming: false } : m.toolStatus === 'running' ? { ...m, toolStatus: 'done' } : m
+   506→          )
+   507→        )
+   508→      }
+   509→    },
+   510→    [attach, sessionId, streaming, pinnedAgent, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated]
+   511→  )
+   512→
+   513→  /* ---------- attachments (composer) ---------- */
+   514→
+   515→  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+   516→    const file = e.target.files?.[0]
+   517→    e.target.value = '' // allow re-picking the same file
+   518→    if (!file) return
+   519→    if (file.size > 14 * 1024 * 1024) {
+   520→      setAttachError('That file is too large (max 14 MB).')
+   521→      return
+   522→    }
+   523→    const reader = new FileReader()
+   524→    reader.onload = () => {
+   525→      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+   526→      if (!dataUrl) {
+   527→        setAttachError('Could not read that file.')
+   528→        return
+   529→      }
+   530→      setAttach({ filename: file.name, dataUrl })
+   531→      setAttachError('')
+   532→    }
+   533→    reader.onerror = () => setAttachError('Could not read that file.')
+   534→    reader.readAsDataURL(file)
+   535→  }
+   536→
+   537→  /* ---------- keyboard ---------- */
+   538→
+   539→  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   540→    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+   541→      e.preventDefault()
+   542→      void send(input)
+   543→    }
+   544→  }
+   545→
+   546→  const stop = () => abortRef.current?.abort()
+   547→
+   548→  /* ---------- derived ---------- */
+   549→
+   550→  const headerAgent = agentOrNexus(pinnedAgent ?? assign?.agentSlug)
+   551→  const headerDivision = DIVISION_MAP[headerAgent.division]
+   552→  const isPinned = pinnedAgent != null
+   553→  const showWelcome = messages.length === 0 && !streaming
+   554→  const canSend = (input.trim().length > 0 || attach != null) && !streaming
+   555→  const placeholder = `Message ${headerAgent.name}…`
+   556→
+   557→  const applyCapability = (c: Capability) => {
+   558→    if (c.voice) {
+   559→      props.onOpenVoice()
+   560→      return
+   561→    }
+   562→    if (c.whatsapp) {
+   563→      props.onOpenWhatsApp()
+   564→      return
+   565→    }
+   566→    if (c.prompt) {
+   567→      setInput(c.prompt)
+   568→      textareaRef.current?.focus()
+   569→    }
+   570→  }
+   571→
+   572→  /* Index of the newest handoff pill — it shimmers while its reply streams. */
+   573→  let lastAssignIdx = -1
+   574→  for (let i = messages.length - 1; i >= 0; i--) {
+   575→    if (messages[i].role === 'agent') {
+   576→      lastAssignIdx = i
+   577→      break
+   578→    }
+   579→  }
+   580→
+   581→  return (
+   582→    <div className="flex h-[calc(100dvh-56px)] flex-col md:h-screen">
+   583→      {/* ---------- Header: current agent identity ---------- */}
+   584→      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/8 px-3 sm:px-4">
+   585→        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+   586→          {isPinned ? (
+   587→            <>
+   588→              <AgentAvatar agent={headerAgent} size={34} />
+   589→              <div className="min-w-0">
+   590→                <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+   591→                  <span className="truncate">{headerAgent.name}</span>
+   592→                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+   593→                    <Pin className="h-2.5 w-2.5" aria-hidden />
+   594→                    pinned
+   595→                  </span>
+   596→                </p>
+   597→                {headerDivision ? (
+   598→                  <p className="truncate text-[11px]" style={{ color: headerDivision.color }}>
+   599→                    {headerDivision.label}
+   600→                  </p>
+   601→                ) : null}
+   602→              </div>
+   603→              <button
+   604→                type="button"
+   605→                onClick={() => onPinnedAgentChange(null)}
+   606→                aria-label={`Unpin ${headerAgent.name} and return to auto-routing`}
+   607→                title="Unpin — return to auto-routing"
+   608→                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200"
+   609→              >
+   610→                <X className="h-4 w-4" aria-hidden />
+   611→              </button>
+   612→            </>
+   613→          ) : assign ? (
+   614→            <>
+   615→              <AgentAvatar agent={headerAgent} size={34} />
+   616→              <div className="min-w-0">
+   617→                <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+   618→                  <span className="truncate">{headerAgent.name}</span>
+   619→                  <span className="shrink-0 rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+   620→                    auto
+   621→                  </span>
+   622→                </p>
+   623→                <p className="truncate text-[11px] text-zinc-500">
+   624→                  {assign.divisionLabel ?? headerDivision?.label ?? 'NEXUS core'}
+   625→                </p>
+   626→              </div>
+   627→            </>
+   628→          ) : (
+   629→            <>
+   630→              <BrandMark size={26} />
+   631→              <p className="text-sm font-semibold text-zinc-100">NEXUS</p>
+   632→            </>
+   633→          )}
+   634→        </div>
+   635→        <button
+   636→          type="button"
+   637→          onClick={props.onOpenAgents}
+   638→          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/5"
+   639→        >
+   640→          <Users className="h-3.5 w-3.5" aria-hidden />
+   641→          Agents
+   642→        </button>
+   643→      </header>
+   644→
+   645→      {/* ---------- Messages / welcome ---------- */}
+   646→      <div
+   647→        ref={scrollRef}
+   648→        onScroll={onScroll}
+   649→        className="nx-scroll flex-1 overflow-y-auto overscroll-contain"
+   650→        aria-label="Conversation"
+   651→      >
+   652→        {showWelcome ? (
+   653→          <div className="mx-auto flex w-full max-w-3xl flex-col items-center px-4 pb-10 pt-10 text-center sm:pt-16">
+   654→            <motion.div variants={stagger} initial="hidden" animate="show" className="w-full">
+   655→              <motion.div variants={fadeUp} className="flex justify-center">
+   656→                <span className="nx-aura relative grid place-items-center rounded-2xl p-2">
+   657→                  <BrandMark size={72} />
+   658→                </span>
+   659→              </motion.div>
+   660→              <motion.h1
+   661→                variants={fadeUp}
+   662→                className="font-display mt-5 text-3xl font-bold tracking-tight text-zinc-100 sm:text-4xl"
+   663→              >
+   664→                What can I do for <span className="nx-gradient-text">you?</span>
+   665→              </motion.h1>
+   666→              <motion.p variants={fadeUp} className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-500">
+   667→                One conversation, every superpower — the right specialist takes over automatically.
+   668→              </motion.p>
+   669→
+   670→              <motion.div
+   671→                variants={stagger}
+   672→                className="mt-9 grid grid-cols-1 gap-3 text-left sm:grid-cols-2 lg:grid-cols-3"
+   673→              >
+   674→                {CAPABILITIES.map((c) => (
+   675→                  <motion.button
+   676→                    key={c.title}
+   677→                    type="button"
+   678→                    variants={fadeUp}
+   679→                    onClick={() => applyCapability(c)}
+   680→                    className="nx-glow-card group p-4 text-left sm:p-5"
+   681→                  >
+   682→                    <span
+   683→                      className="mb-3 grid h-10 w-10 place-items-center rounded-xl"
+   684→                      style={{ backgroundColor: 'rgba(255,90,95,0.12)', color: '#ff8a8d' }}
+   685→                      aria-hidden
+   686→                    >
+   687→                      <c.icon className="h-5 w-5" />
+   688→                    </span>
+   689→                    <span className="block text-sm font-semibold text-zinc-100">{c.title}</span>
+   690→                    <span className="mt-1 block text-xs leading-relaxed text-zinc-500">{c.desc}</span>
+   691→                  </motion.button>
+   692→                ))}
+   693→              </motion.div>
+   694→
+   695→              <motion.div variants={fadeUp} className="mt-7 flex flex-wrap justify-center gap-2">
+   696→                {SUGGESTIONS.map((s) => (
+   697→                  <button
+   698→                    key={s}
+   699→                    type="button"
+   700→                    onClick={() => {
+   701→                      setInput(s)
+   702→                      textareaRef.current?.focus()
+   703→                    }}
+   704→                    className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-zinc-300 transition hover:border-[#ff5a5f]/40 hover:bg-white/[0.06] hover:text-zinc-100"
+   705→                  >
+   706→                    {s}
+   707→                  </button>
+   708→                ))}
+   709→              </motion.div>
+   710→            </motion.div>
+   711→          </div>
+   712→        ) : (
+   713→          <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
+   714→            {messages.map((m, i) => {
+   715→              if (m.role === 'user') {
+   716→                return (
+   717→                  <div key={m.id} className="flex justify-end">
+   718→                    <div className="nx-rise max-w-[85%] rounded-2xl rounded-br-md bg-white/8 px-4 py-2.5">
+   719→                      {m.attachName ? (
+   720→                        <p className="mb-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+   721→                          <FileText className="h-3 w-3 shrink-0" aria-hidden />
+   722→                          <span className="truncate">{m.attachName}</span>
+   723→                        </p>
+   724→                      ) : null}
+   725→                      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-100">
+   726→                        {m.content}
+   727→                      </p>
+   728→                    </div>
+   729→                  </div>
+   730→                )
+   731→              }
+   732→
+   733→              if (m.role === 'agent' && m.assign) {
+   734→                return (
+   735→                  <div key={m.id} className="flex pl-11">
+   736→                    <HandoffPill assign={m.assign} live={streaming && i === lastAssignIdx} />
+   737→                  </div>
+   738→                )
+   739→              }
+   740→
+   741→              if (m.role === 'tool') {
+   742→                const info: ToolCardInfo = {
+   743→                  tool: m.toolName ?? '',
+   744→                  status: m.toolStatus ?? 'done',
+   745→                  message: m.toolMessage,
+   746→                  args: m.toolArgs,
+   747→                  data: m.toolData,
+   748→                }
+   749→                return (
+   750→                  <div key={m.id} className="flex pl-11">
+   751→                    <ToolCard info={info} />
+   752→                  </div>
+   753→                )
+   754→              }
+   755→
+   756→              /* assistant */
+   757→              const agent = agentOrNexus(m.agentSlug)
+   758→              const division = DIVISION_MAP[agent.division]
+   759→              const color = division?.color ?? '#ff5a5f'
+   760→              return (
+   761→                <div key={m.id} className="nx-rise flex gap-3">
+   762→                  <AgentAvatar agent={agent} size={32} className="mt-0.5" />
+   763→                  <div className="min-w-0 flex-1">
+   764→                    {agent.slug !== '__nexus' ? (
+   765→                      <p className="mb-1 text-[11px] font-medium" style={{ color }}>
+   766→                        {agent.name}
+   767→                      </p>
+   768→                    ) : null}
+   769→                    {m.isError ? (
+   770→                      <p className="text-sm leading-relaxed text-red-300">{m.content}</p>
+   771→                    ) : m.streaming && !m.content ? (
+   772→                      <span className="flex items-center gap-1 py-1.5" role="status" aria-label="Thinking">
+   773→                        <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   774→                        <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   775→                        <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   776→                      </span>
+   777→                    ) : (
+   778→                      /* `dark` wrapper activates the existing .dark .omni-prose rules */
+   779→                      <div className="dark text-sm text-zinc-100">
+   780→                        <Markdown content={m.content} />
+   781→                        {m.streaming ? (
+   782→                          <span
+   783→                            className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-[#ff5a5f] align-text-bottom"
+   784→                            aria-hidden
+   785→                          />
+   786→                        ) : null}
+   787→                      </div>
+   788→                    )}
+   789→                    <AttachmentList items={m.attachments} />
+   790→                  </div>
+   791→                </div>
+   792→              )
+   793→            })}
+   794→
+   795→            {streaming && messages.length === 0 ? (
+   796→              <p className="flex items-center gap-2 pl-11 text-xs text-zinc-500">
+   797→                <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   798→                NEXUS is routing your message…
+   799→              </p>
+   800→            ) : null}
+   801→          </div>
+   802→        )}
+   803→      </div>
+   804→
+   805→      {/* ---------- Composer ---------- */}
+   806→      <div className="shrink-0 px-3 pb-3 pt-2 md:px-4 md:pb-4">
+   807→        <div className="mx-auto w-full max-w-3xl">
+   808→          {attachError ? (
+   809→            <p role="alert" className="mb-2 px-1 text-xs text-red-400">
+   810→              {attachError}
+   811→            </p>
+   812→          ) : null}
+   813→          {attach ? (
+   814→            <div className="nx-rise mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-300">
+   815→              <FileText className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+   816→              <span className="min-w-0 flex-1 truncate">{attach.filename}</span>
+   817→              <button
+   818→                type="button"
+   819→                onClick={() => setAttach(null)}
+   820→                aria-label="Remove attachment"
+   821→                className="shrink-0 rounded-md p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+   822→              >
+   823→                <X className="h-3.5 w-3.5" aria-hidden />
+   824→              </button>
+   825→            </div>
+   826→          ) : null}
+   827→
+   828→          <form
+   829→            onSubmit={(e) => {
+   830→              e.preventDefault()
+   831→              void send(input)
+   832→            }}
+   833→            className="nx-composer flex items-end gap-1 rounded-2xl p-1.5"
+   834→          >
+   835→            <input
+   836→              ref={fileRef}
+   837→              type="file"
+   838→              hidden
+   839→              accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.png,.jpg"
+   840→              onChange={onPickFile}
+   841→              tabIndex={-1}
+   842→              aria-hidden
+   843→            />
+   844→            <button
+   845→              type="button"
+   846→              onClick={() => fileRef.current?.click()}
+   847→              disabled={streaming}
+   848→              aria-label="Attach a file"
+   849→              title="Attach a file"
+   850→              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+   851→            >
+   852→              <Paperclip className="h-[18px] w-[18px]" aria-hidden />
+   853→            </button>
+   854→            <textarea
+   855→              ref={textareaRef}
+   856→              value={input}
+   857→              onChange={(e) => setInput(e.target.value)}
+   858→              onKeyDown={onKeyDown}
+   859→              rows={1}
+   860→              disabled={streaming}
+   861→              placeholder={placeholder}
+   862→              aria-label={placeholder}
+   863→              className="max-h-[144px] min-h-[40px] flex-1 resize-none bg-transparent px-1.5 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+   864→            />
+   865→            <button
+   866→              type="button"
+   867→              onClick={props.onOpenVoice}
+   868→              disabled={streaming}
+   869→              aria-label="Voice mode"
+   870→              title="Voice mode"
+   871→              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+   872→            >
+   873→              <Mic className="h-[18px] w-[18px]" aria-hidden />
+   874→            </button>
+   875→            {streaming ? (
+   876→              <button
+   877→                type="button"
+   878→                onClick={stop}
+   879→                aria-label="Stop generating"
+   880→                title="Stop generating"
+   881→                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ff5a5f]/15 text-[#ff5a5f] transition hover:bg-[#ff5a5f]/25"
+   882→              >
+   883→                <Square className="h-4 w-4" fill="currentColor" aria-hidden />
+   884→              </button>
+   885→            ) : (
+   886→              <button
+   887→                type="submit"
+   888→                disabled={!canSend}
+   889→                aria-label="Send message"
+   890→                className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+   891→              >
+   892→                <ArrowUp className="h-[18px] w-[18px]" aria-hidden />
+   893→              </button>
+   894→            )}
+   895→          </form>
+   896→          <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
+   897→            {headerAgent.name} can create images &amp; videos, build documents, run code, browse the web and send
+   898→            messages.
+   899→          </p>
+   900→        </div>
+   901→      </div>
+   902→    </div>
+   903→  )
+   904→}
+   905→

@@ -8,6 +8,13 @@
  * brand-gradient hairline along its top edge, inner hairline ring and a deep
  * soft shadow — so the legacy UI reads as an intentional premium card on the
  * dark NEXUS One shell.
+ *
+ * Two optional variants (default behavior is unchanged):
+ *  - fill → the panel occupies the full viewport height like the chat view
+ *           (h-[calc(100dvh-56px)] on mobile, h-screen on desktop) and the
+ *           card stretches to fill the remaining space (flex column).
+ *  - dark → the card surface becomes deep NEXUS dark (zinc) instead of white,
+ *           for views that ship their own premium dark UI (Agent Skills).
  */
 
 import { BRAND, BrandMark } from './shared'
@@ -16,14 +23,26 @@ export function FramedPanel({
   title,
   description,
   children,
+  fill = false,
+  dark = false,
 }: {
   title: string
   description?: string
   children: React.ReactNode
+  /** stretch to the full viewport height (chat-style) instead of auto */
+  fill?: boolean
+  /** deep dark card surface instead of the white legacy card */
+  dark?: boolean
 }) {
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8 md:py-10">
-      <header className="mb-5 flex items-end justify-between gap-4">
+    <div
+      className={
+        fill
+          ? 'mx-auto flex h-[calc(100dvh-56px)] w-full max-w-6xl flex-col px-4 py-4 md:h-screen md:px-8 md:py-6'
+          : 'mx-auto w-full max-w-6xl px-4 py-8 md:px-8 md:py-10'
+      }
+    >
+      <header className={`flex shrink-0 items-end justify-between gap-4 ${fill ? 'mb-3' : 'mb-5'}`}>
         <div className="min-w-0">
           <h1 className="font-display text-2xl font-bold tracking-tight text-zinc-100 md:text-[28px]">
             {title}
@@ -35,10 +54,24 @@ export function FramedPanel({
         <BrandMark size={32} className="hidden shrink-0 opacity-60 sm:block" />
       </header>
 
-      <div className="overflow-hidden rounded-2xl border border-white/10 shadow-[0_32px_90px_-32px_rgba(0,0,0,0.85)]">
-        {/* Brand gradient hairline across the top of the white card */}
-        <div aria-hidden className="h-[3px] w-full" style={{ backgroundImage: BRAND.gradient }} />
-        <div className="bg-white p-4 text-zinc-900 ring-1 ring-zinc-950/5 ring-inset md:p-6">
+      <div
+        className={`overflow-hidden rounded-2xl border border-white/10 shadow-[0_32px_90px_-32px_rgba(0,0,0,0.85)] ${
+          fill ? 'flex min-h-0 flex-1 flex-col' : ''
+        }`}
+      >
+        {/* Brand gradient hairline across the top of the card */}
+        <div aria-hidden className="h-[3px] w-full shrink-0" style={{ backgroundImage: BRAND.gradient }} />
+        <div
+          className={
+            fill
+              ? `flex min-h-0 flex-1 flex-col ${
+                  dark
+                    ? 'bg-[#0c0c0e] text-zinc-100 ring-1 ring-white/5 ring-inset'
+                    : 'bg-white p-4 text-zinc-900 ring-1 ring-zinc-950/5 ring-inset md:p-6'
+                }`
+              : 'bg-white p-4 text-zinc-900 ring-1 ring-zinc-950/5 ring-inset md:p-6'
+          }
+        >
           {children}
         </div>
       </div>

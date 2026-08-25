@@ -334,6 +334,108 @@ export async function readEmail(
   }
 }
 
+/**
+ * ORGANIZE EMAIL — the agent's mailbox housekeeping primitive.
+ * Marks read/unread, flags (star), moves to another folder, or deletes,
+ * on one or many UIDs at once. Returns what actually happened so the
+ * agent can confirm to the user in natural language.
+ */
+export type OrganizeAction = 'mark_read' | 'mark_unread' | 'star' | 'unstar' | 'move' | 'delete'
+
+export async function organizeEmail(
+  account: ResolvedAccount,
+  action: OrganizeAction,
+  uids: number[],
+  opts: { folder?: string; targetFolder?: string } = {}
+): Promise<{ action: OrganizeAction; requested: number; applied: number; folder: string; targetFolder?: string; note: string }> {
+  const folder = opts.folder ?? 'INBOX'
+  const uidList = [...new Set(uids)].filter((u) => Number.isInteger(u) && u > 0).slice(0, 50)
+  if (!uidList.length) throw new Error('No valid email UIDs to organize.')
+  const mailbox = String(uidList[0])
+  const range = uidList.length === 1 ? mailbox : `${mailbox}:${uidList[uidList.length - 1]}`
+
+  const client = new ImapFlow({
+    host: account.imapHost,
+    port: account.imapPort,
+    secure: true,
+    auth: { user: account.username, pass: account.password },
+    logger: false,
+  })
+  await client.connect()
+  let applied = 0
+  try {
+    if (action === 'delete') {
+      const lock = await client.getMailboxLock(folder)
+      try {
+        await client.messageFlagsAdd(range, ['\\Deleted'], { uid: true })
+        await client.expunge()
+        applied = uidList.length
+      } finally {
+        lock.release()
+      }
+    } else if (action === 'move') {
+      const target = opts.targetFolder
+      if (!target) throw new Error('targetFolder required for move.')
+      const lock = await client.getMailboxLock(folder)
+      try {
+        await client.messageMove(range, target, { uid: true })
+        applied = uidList.length
+      } finally {
+        lock.release()
+      }
+    } else {
+      // flag toggles
+      const lock = await client.getMailboxLock(folder)
+      try {
+        if (action === 'mark_read') await client.messageFlagsAdd(range, ['\\Seen'], { uid: true })
+        else if (action === 'mark_unread') await client.messageFlagsRemove(range, ['\\Seen'], { uid: true })
+        else if (action === 'star') await client.messageFlagsAdd(range, ['\\Flagged'], { uid: true })
+        else if (action === 'unstar') await client.messageFlagsRemove(range, ['\\Flagged'], { uid: true })
+        applied = uidList.length
+      } finally {
+        lock.release()
+      }
+    }
+  } finally {
+    await client.logout().catch(() => client.close())
+  }
+
+  const labels: Record<OrganizeAction, string> = {
+    mark_read: 'marked as read',
+    mark_unread: 'marked as unread',
+    star: 'starred',
+    unstar: 'unstarred',
+    move: `moved to ${opts.targetFolder}`,
+    delete: 'deleted',
+  }
+  return {
+    action,
+    requested: uidList.length,
+    applied,
+    folder,
+    targetFolder: opts.targetFolder,
+    note: `${applied} email${applied === 1 ? '' : 's'} ${labels[action]}.`,
+  }
+}
+
+/** Lists the mailbox folders (so the agent knows valid move targets). */
+export async function listEmailFolders(account: ResolvedAccount): Promise<string[]> {
+  const client = new ImapFlow({
+    host: account.imapHost,
+    port: account.imapPort,
+    secure: true,
+    auth: { user: account.username, pass: account.password },
+    logger: false,
+  })
+  await client.connect()
+  try {
+    const list = await client.list()
+    return list.map((f) => f.path).filter(Boolean).slice(0, 60)
+  } finally {
+    await client.logout().catch(() => client.close())
+  }
+}
+
 export async function sendEmail(
   account: ResolvedAccount,
   opts: { to: string; subject: string; body: string }

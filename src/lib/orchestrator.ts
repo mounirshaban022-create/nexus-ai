@@ -103,13 +103,28 @@ export async function routeMessage(
     const convo = history.slice(-6).map((m) => ({ role: m.role, content: String(m.content).slice(0, 400) }))
     convo.push({ role: 'user', content: trim.slice(0, 1200) })
 
-    const raw = await smartChat(
-      [
-        { role: 'assistant', content: SYSTEM_PROMPT },
-        ...convo,
-      ],
-      { maxTokens: 120, temperature: 0.1, builtinOnly: true, task: 'fast', timeoutMs: 12_000 }
-    )
+    // SPEED: routing must NEVER block the user's first token for long.
+    // The smart-chat free pool now RACES all providers in parallel (fast),
+    // and we additionally cap the whole decision at 6s — past that the
+    // message is answered by plain NEXUS (routing failure is never fatal).
+    const ROUTING_BUDGET_MS = 6_000
+    const decision = await Promise.race([
+      smartChat(
+        [
+          { role: 'assistant', content: SYSTEM_PROMPT },
+          ...convo,
+        ],
+        { maxTokens: 120, temperature: 0.1, builtinOnly: true, task: 'fast', timeoutMs: ROUTING_BUDGET_MS }
+      ).then((raw) => ({ ok: true as const, raw })),
+      new Promise<{ ok: false }>((resolve) =>
+        setTimeout(() => resolve({ ok: false }), ROUTING_BUDGET_MS + 500)
+      ),
+    ])
+    if (!decision.ok) {
+      console.warn('[orchestrator] routing exceeded budget — answering as NEXUS')
+      return { ...fallback(), reason: 'routing timeout', elapsedMs: Date.now() - started }
+    }
+    const raw = decision.raw
 
     const match = raw.match(/\{[\s\S]*\}/)
     if (!match) return fallback()

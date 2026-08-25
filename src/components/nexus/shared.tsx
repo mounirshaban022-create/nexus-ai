@@ -42,6 +42,7 @@ export type View =
   | { type: 'chat'; sessionId?: string; prefill?: string }
   | { type: 'agents' }
   | { type: 'whatsapp' }
+  | { type: 'skills' }
   | { type: 'settings' }
 
 /* ------------------------------------------------------------------ */
@@ -170,6 +171,7 @@ export interface AgentAssignEvent {
 export type ChatStreamEvent =
   | ({ type: 'user'; id: string; content: string })
   | ({ type: 'agent_assign' } & AgentAssignEvent)
+  | { type: 'status'; message: string }
   | { type: 'assistant_start'; id: string }
   | { type: 'assistant_delta'; delta: string }
   | { type: 'assistant_end'; attachments?: unknown[] }

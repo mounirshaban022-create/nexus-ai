@@ -24,8 +24,10 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 }
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
-import { streamAnonymousFallbackChat } from '@/lib/ai-providers'
+import { streamAnonymousFallbackChat, streamExternalChatCompletion } from '@/lib/ai-providers'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
+import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
+import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills } from '@/lib/cli-skills'
 
 /** Resolves the app's own origin — works on localhost, Vercel previews,
  *  and production (falls back to localhost for direct dev calls). */
@@ -173,6 +175,26 @@ const CHAT_TOOL_DEFS: Array<{
     description:
       'Run a shell command in the NEXUS CLI sandbox (bash, 15s timeout) — for file operations, git, curl, data processing, system tasks and connecting to other CLI tools. Dangerous operations are blocked. Use run_code for JavaScript/Python.',
     params: 'command (required: the shell command)',
+  },
+  {
+    id: 'use_skill',
+    description:
+      "CLI-Anything AGENT SKILLS — load the manual for one of 79 skills that connect NEXUS to real external apps: browser automation, Blender, GIMP, LibreOffice, Obsidian, Joplin, n8n workflows, Zoom, mailchimp, Exa search, Calibre, Zotero, drawio, music/video tools and more. Call with skill='list' to see the catalog, skill='search' + query to find one, or skill=<name> to load its full manual — then follow the manual using run_command (install + execute).",
+    params:
+      "skill (required: a skill name like 'browser' or 'obsidian', OR 'list' for the catalog, OR 'search'), query (optional: when skill='search'), install (optional: set true to also run the skill's pip install command now)",
+  },
+  {
+    id: 'email_organize',
+    description:
+      "Organize the user's REAL inbox: mark emails read/unread, star/unstar them, move them to a folder (Archive, Trash, custom), or delete them. Works on one or many emails at once (use UIDs from email_list/email_search). Requires a connected email account.",
+    params:
+      'action (required: mark_read|mark_unread|star|unstar|move|delete), uids (required: single number or array of email UIDs), folder (optional: source mailbox, default INBOX), targetFolder (required for move: destination folder name)',
+  },
+  {
+    id: 'email_folders',
+    description:
+      "List the mailbox folders of the user's connected email account (INBOX, Archive, Sent, custom folders) — use before email_organize 'move' to discover valid target folder names.",
+    params: '(none)',
   },
 ]
 
@@ -338,6 +360,7 @@ function buildSystemPrompt(
     '7. THINK BEFORE ACTING: for multi-step requests, plan which tools to use in which order.',
     '8. DOCUMENTS, PDFs & SPREADSHEETS: when the user attached a document (content appears in the conversation), answer questions about it directly — for spreadsheets, reason over the markdown tables (sums, trends, comparisons). If they ask to EDIT/CHANGE/REWRITE a document, call edit_document. If they ask for PDF operations (rotate/delete/reorder/split/watermark pages), call pdf_operation. If they want a spreadsheet, budget, tracker, or tabular data as Excel, call create_spreadsheet with typed cells and formulas. When asked to analyze data in an attached spreadsheet, compute the actual numbers (use run_code for anything non-trivial) — never guess.',
     '9. When you attach or create a file, ALWAYS present the download link clearly and briefly describe what you produced.',
+    '10. SKILLS & EXTERNAL APPS: when the user wants to control or connect an EXTERNAL application (notes apps, design tools, editors, automation platforms, media tools, "connect to X app"), call use_skill first (skill="search" + the app name) to find the matching CLI-Anything skill, then load its manual (use_skill with the skill name) and follow it with run_command. When the user wants to manage their INBOX from chat (check emails, find messages, organize, mark read, move, delete, star), use email_list / email_search / email_read / email_organize / email_folders directly.',
   ].join('\n')
 }
 
@@ -1006,6 +1029,119 @@ async function executeChatTool(
     }
   }
 
+  /* ---- use_skill: CLI-Anything agent skills (connect to real apps) ---- */
+  if (toolId === 'use_skill') {
+    const skillArg = String(args.skill ?? args.name ?? '').trim().slice(0, 100)
+    const queryArg = String(args.query ?? args.q ?? '').trim().slice(0, 200)
+    const wantInstall = args.install === true || args.install === 'true'
+    if (!skillArg) throw new Error("skill required — use 'list' to see the catalog")
+
+    if (skillArg.toLowerCase() === 'list') {
+      const catalog = await cliSkillsCatalog()
+      return {
+        result: {
+          note: 'CLI-Anything skill catalog. Pick a skill and call use_skill with its name to load the manual, then follow it with run_command.',
+          skills: catalog,
+        },
+      }
+    }
+
+    if (skillArg.toLowerCase() === 'search') {
+      if (!queryArg) throw new Error('query required when skill="search"')
+      const found = await searchCliSkills(queryArg, 10)
+      return {
+        result: {
+          query: queryArg,
+          matches: found.map((s) => `${s.name}: ${s.description.slice(0, 140)}`),
+          note: found.length
+            ? 'Call use_skill with a name above to load its manual.'
+            : 'No matching skill — call use_skill with skill="list" for the full catalog.',
+        },
+      }
+    }
+
+    const entry = await getCliSkillDoc(skillArg)
+    if (!entry) throw new Error(`Unknown skill "${skillArg}" — call use_skill with skill="list" to see available skills.`)
+    const { skill, doc } = entry
+
+    // Optional: run the skill's install command now (pip install …).
+    let installOutput: string | null = null
+    if (wantInstall && skill.installCmd) {
+      // Sanitize: strip shell separators; keep only pip/python install lines.
+      const safeInstall = skill.installCmd.replace(/&&|\|\||;|`|\$/g, '').trim().slice(0, 400)
+      const fullCmd = /^pip\s+install/i.test(safeInstall) ? safeInstall : `pip install ${safeInstall}`
+      try {
+        const { spawn } = await import('child_process')
+        const exec = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+          const child = spawn('bash', ['-c', `${fullCmd} 2>&1 | tail -5`], {
+            env: { PATH: process.env.PATH, HOME: process.env.HOME ?? '/tmp', NEXUS_SANDBOX: '1' } as unknown as NodeJS.ProcessEnv,
+            stdio: ['ignore', 'pipe', 'pipe'] as Array<'ignore' | 'pipe'>,
+          })
+          let out = ''
+          child.stdout?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
+          child.stderr?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
+          const timer = setTimeout(() => child.kill('SIGKILL'), 120_000)
+          child.on('error', (err) => { clearTimeout(timer); resolve({ stdout: out + err.message, stderr: '', code: null }) })
+          child.on('close', (code) => { clearTimeout(timer); resolve({ stdout: out, stderr: '', code }) })
+        })
+        installOutput = `exit=${exec.code}\n${exec.stdout.slice(0, 2000)}`
+      } catch (err) {
+        installOutput = `install failed: ${err instanceof Error ? err.message : 'unknown error'}`
+      }
+    }
+
+    return {
+      result: {
+        skill: skill.name,
+        displayName: skill.displayName,
+        category: skill.category,
+        requires: skill.requires ?? null,
+        installCmd: skill.installCmd ?? null,
+        installOutput,
+        manual: doc || '(no SKILL.md found — install the CLI and run "<entry-point> --help")',
+        note: 'Manual loaded. Follow its instructions using run_command to control the real application. If the CLI is not installed yet, install it first (pip install), then run its commands.',
+      },
+    }
+  }
+
+  /* ---- email_organize: real inbox housekeeping (mark/star/move/delete) ---- */
+  if (toolId === 'email_organize') {
+    const account = await getPrimaryAccount()
+    if (!account) {
+      return { result: { error: 'No email account connected. Ask the user to connect one in Settings → Email first.' } }
+    }
+    const action = String(args.action ?? '').trim().toLowerCase()
+    const validActions = ['mark_read', 'mark_unread', 'star', 'unstar', 'move', 'delete']
+    if (!validActions.includes(action)) {
+      throw new Error(`action must be one of ${validActions.join(', ')}`)
+    }
+    // uids: single number, numeric string, or array
+    let uids: number[] = []
+    if (Array.isArray(args.uids)) uids = args.uids.map((u) => parseInt(String(u), 10))
+    else if (typeof args.uids === 'string' && args.uids.includes(',')) uids = args.uids.split(',').map((u) => parseInt(u.trim(), 10))
+    else if (args.uids != null) uids = [parseInt(String(args.uids), 10)]
+    else if (args.uid != null) uids = [parseInt(String(args.uid), 10)]
+    uids = uids.filter((u) => Number.isInteger(u) && u > 0)
+    if (!uids.length) throw new Error('uids required (a uid or array of uids from email_list / email_search)')
+    if (action === 'delete' && uids.length > 10) {
+      throw new Error('Refusing to delete more than 10 emails at once — ask the user to confirm the exact list first.')
+    }
+    const folder = String(args.folder ?? 'INBOX').slice(0, 120)
+    const targetFolder = args.targetFolder != null ? String(args.targetFolder).slice(0, 120) : undefined
+    const outcome = await organizeEmail(account, action as OrganizeAction, uids, { folder, targetFolder })
+    return { result: { ...outcome, account: account.email, tip: 'Confirm to the user in one short sentence.' } }
+  }
+
+  /* ---- email_folders: list mailbox folders (move targets) ---- */
+  if (toolId === 'email_folders') {
+    const account = await getPrimaryAccount()
+    if (!account) {
+      return { result: { error: 'No email account connected. Ask the user to connect one in Settings → Email first.' } }
+    }
+    const folders = await listEmailFolders(account)
+    return { result: { account: account.email, folders, note: 'Use a folder name as targetFolder with email_organize "move".' } }
+  }
+
   // Data connectors pass through
   const connector = CONNECTOR_MAP.get(toolId)
   if (!connector) return { result: { error: `Unknown tool "${toolId}"` } }
@@ -1121,6 +1257,12 @@ export async function POST(req: NextRequest) {
     const verifiedUserId = await getUserIdFromRequest(req)
 
     // Default enabled: abilities + key connectors
+    // AGENT WORK: when the user has connected a real email account, the
+    // inbox tools (list / search / read) become available to the agent so
+    // it can manage the mailbox directly from chat (paired with the
+    // email_organize + email_folders ability tools above).
+    const emailAccount = await getPrimaryAccount().catch(() => null)
+
     const enabledConnectors = [
       'web_search', 'read_page', 'wikipedia', 'weather', 'crypto', 'currency',
       'translate', 'dictionary', 'github', 'hacker_news', 'time', 'calculator',
@@ -1130,6 +1272,8 @@ export async function POST(req: NextRequest) {
       // - air_quality: Open-Meteo air pollution (PM2.5/PM10/CO/O3/NO2/SO2) — pairs with geocode + weather
       // - music: iTunes Search API (songs, podcasts, audiobooks, albums) — no equivalent existed before
       'space_news', 'air_quality', 'music',
+      // Real-inbox connectors (only when an email account is connected):
+      ...(emailAccount ? ['email_list', 'email_search', 'email_read'] : []),
     ]
 
     // Phase 1 P3: verify ownership of the projectId when starting a NEW
@@ -1274,25 +1418,10 @@ export async function POST(req: NextRequest) {
       .slice(-6)
       .map((m) => ({ role: m.role, content: m.content }))
 
-    let effectiveAgentSlug: string | null
-    let routingDecision: RoutingDecision | null = null
-    if (session.agentPinned && session.agentSlug) {
-      effectiveAgentSlug = session.agentSlug
-    } else {
-      // AUTO-ROUTE: pick the best specialist for THIS message
-      routingDecision = await routeMessage(effectiveMessage, routingHistory)
-      effectiveAgentSlug = routingDecision.agentSlug
-      // Reflect the active specialist on the session (never pins)
-      if (session.agentSlug !== effectiveAgentSlug) {
-        await db.chatSession.update({
-          where: { id: session.id },
-          data: { agentSlug: effectiveAgentSlug },
-        }).catch(() => {})
-      }
-    }
-
-    const personaPrompt = effectiveAgentSlug ? buildPersonaSystemPrompt(effectiveAgentSlug) : null
-    const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext, personaPrompt)
+    // NOTE: agent routing + system-prompt build now happen INSIDE the stream
+    // (see start()) so the client receives the `user` + live `status` events
+    // immediately — the old flow held the whole response hostage behind the
+    // routing LLM call, which made the chat feel dead for seconds.
 
     // Phase 1 P1: detect a "remember: ..." directive from the user. This is
     // the opt-in extraction path — we never silently extract. When the user
@@ -1335,6 +1464,11 @@ export async function POST(req: NextRequest) {
           send({ type: 'user', id: userMsg.id, content: trimmed })
           send({ type: 'assistant', content: answer, attachments: [] })
           send({ type: 'done', sessionId: session!.id })
+          // CRITICAL: close the controller — without this the browser's
+          // reader never sees the stream end, the frontend loop hangs and
+          // the chat stays stuck in "generating" forever (the bug that made
+          // the composer lock up after identity questions).
+          controller.close()
           return
         }
 
@@ -1355,6 +1489,31 @@ export async function POST(req: NextRequest) {
             }, { onConflict: 'id' })
           }
           send({ type: 'user', id: userMessage.id, content: trimmed })
+
+          /* ---------- LIVE ROUTING (inside the stream — see note above) ---------- */
+          // The user event is already on screen; now show a live status while
+          // the orchestrator picks the specialist, then announce the takeover.
+          let effectiveAgentSlug: string | null
+          let routingDecision: RoutingDecision | null = null
+          if (session.agentPinned && session.agentSlug) {
+            effectiveAgentSlug = session.agentSlug
+          } else {
+            // AUTO-ROUTE: pick the best specialist for THIS message.
+            // Status event keeps the UI visibly alive during the routing call.
+            send({ type: 'status', message: 'Picking the right specialist…' })
+            routingDecision = await routeMessage(effectiveMessage, routingHistory)
+            effectiveAgentSlug = routingDecision.agentSlug
+            // Reflect the active specialist on the session (never pins)
+            if (session.agentSlug !== effectiveAgentSlug) {
+              await db.chatSession.update({
+                where: { id: session!.id },
+                data: { agentSlug: effectiveAgentSlug },
+              }).catch(() => {})
+            }
+          }
+
+          const personaPrompt = effectiveAgentSlug ? buildPersonaSystemPrompt(effectiveAgentSlug) : null
+          const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext, personaPrompt)
 
           // NEXUS One: announce the agent takeover (or hand-back to NEXUS)
           // so the UI can render the live routing chip. Only emitted for
@@ -1468,51 +1627,96 @@ export async function POST(req: NextRequest) {
           const attachments: Array<Record<string, unknown>> = []
           let toolCallsUsed = 0
 
-          // Determine if we can stream from a user-connected provider
-          // (their provider answers non-streamed via smartChat; otherwise
-          // the free multi-AI pool streams token-by-token directly).
-          const hasUserProvider = !!(await getActiveAiProvider())
+          // USER PROVIDER: resolved once (their key, their quota). When
+          // present it streams FIRST (word-by-word like everything else);
+          // on failure we race the free pool.
+          const userProvider = await getActiveAiProvider()
 
           for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
             const isLast = step === MAX_TOOL_CALLS
 
             // STREAMING PATH — emit assistant_start + assistant_delta chunks
-            // as tokens arrive. Primary engine: the FREE MULTI-AI POOL
-            // (LLM7 → Kilo Code → OVHcloud, task-routed) — no single
-            // dependency, every engine has its own rate-limit budget.
-            let content: string
+            // as tokens arrive on EVERY path (user provider AND free pool).
+            // Open a new assistant bubble + live status right away.
+            let content = ''
             let didStream = false
-            if (!hasUserProvider) {
-              // Open a new assistant message bubble on the client
-              send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
+            send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
+            send({ type: 'status', message: step === 0 ? 'Thinking…' : 'Continuing…' })
+
+            /** Deltas funnel: tracks what is already on screen so a failed
+             *  stream can keep its partial text instead of duplicating. */
+            let streamedSoFar = ''
+            const emitDelta = (delta: string) => {
+              streamedSoFar += delta
+              send({ type: 'assistant_delta', delta })
+            }
+
+            // 1) User's connected provider — streamed, with model rotation
+            //    left to streamExternalChatCompletion's fallback chain.
+            if (userProvider) {
+              try {
+                content = await streamExternalChatCompletion(
+                  userProvider,
+                  llmMessages as Parameters<typeof streamExternalChatCompletion>[1],
+                  emitDelta,
+                  { maxTokens: 4000, timeoutMs: 60_000 }
+                )
+                didStream = true
+                console.log(`[api/chat] served by user provider: ${userProvider.providerId}/${userProvider.defaultModel}`)
+              } catch (provErr) {
+                // Partial text already visible → keep it, no retry (would
+                // duplicate on screen).
+                if (streamedSoFar.trim()) {
+                  content = streamedSoFar
+                  didStream = true
+                } else {
+                  console.error(
+                    '[api/chat] user provider failed, racing the free AI pool:',
+                    provErr instanceof Error ? provErr.message : provErr
+                  )
+                }
+              }
+            }
+
+            // 2) FREE MULTI-AI POOL — raced in parallel (kilo ∥ llm7 ∥ ovh),
+            //    first token wins. Also the fallback when no user provider
+            //    or the user provider failed before emitting anything.
+            if (!didStream) {
               try {
                 const r = await streamAnonymousFallbackChat(
-                  llmMessages,
-                  (delta) => send({ type: 'assistant_delta', delta }),
-                  { maxTokens: 4000, timeoutMs: 60_000, task: 'chat' }
+                  llmMessages as Parameters<typeof streamAnonymousFallbackChat>[0],
+                  emitDelta,
+                  {
+                    maxTokens: 4000,
+                    timeoutMs: 60_000,
+                    task: 'chat',
+                  }
                 )
                 content = r.content
+                didStream = true
                 console.log(`[api/chat] served by free AI pool: ${r.providerId}/${r.model}`)
               } catch (poolErr) {
-                console.error(
-                  '[api/chat] free AI pool failed, trying non-streamed smartChat:',
-                  poolErr instanceof Error ? poolErr.message : poolErr
-                )
-                // Last resort: non-streamed smartChat (user provider →
-                // free pool chain) and emit the visible prelude as one chunk.
-                content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
-                // Emit only the visible prelude (text before any
-                // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
-                // peek-buffer behaviour of the normal streaming path.
-                const prelude = stripToolCall(content)
-                if (prelude) send({ type: 'assistant_delta', delta: prelude })
+                // Mid-race partial output is already visible → keep it.
+                if (streamedSoFar.trim()) {
+                  content = streamedSoFar
+                  didStream = true
+                } else {
+                  console.error(
+                    '[api/chat] free AI pool failed, trying non-streamed smartChat:',
+                    poolErr instanceof Error ? poolErr.message : poolErr
+                  )
+                  // Last resort: non-streamed smartChat (user provider →
+                  // free pool chain) and emit the visible prelude as one chunk.
+                  content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
+                  // Emit only the visible prelude (text before any
+                  // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
+                  // peek-buffer behaviour of the normal streaming path.
+                  const prelude = stripToolCall(content)
+                  if (prelude) send({ type: 'assistant_delta', delta: prelude })
+                }
               }
-              didStream = true
-              if (!content.trim()) throw new Error('Empty model response.')
-            } else {
-              content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
-              if (!content.trim()) throw new Error('Empty model response.')
             }
+            if (!content.trim()) throw new Error('Empty model response.')
 
             const toolCall = isLast ? null : parseToolCall(content)
 
