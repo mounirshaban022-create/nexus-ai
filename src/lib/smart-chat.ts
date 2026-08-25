@@ -1,4 +1,5 @@
 import { getActiveAiProvider, externalChatCompletion, anonymousFallbackChat, type ExternalChatMessage } from './ai-providers'
+import { zaiChatCompletion, zaiOnCooldown } from './zai'
 import type { AiTask } from './smart-chat-types'
 
 /**
@@ -162,6 +163,29 @@ export async function smartChat(
   const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
   const maxModelAttempts = isVoiceTask ? 2 : 4
 
+  /* ---- Layer 0: the platform's built-in Z.ai engine (GLM) ----
+   * Millisecond-latency gateway shipped with the sandbox — by far the
+   * fastest engine available. Tried first for EVERY task; the free pool
+   * and user providers only serve as fallbacks when Z.ai is cooling down
+   * (circuit breaker) or fails. This is the root fix for "AI is slow". */
+  if (!zaiOnCooldown()) {
+    try {
+      const content = await zaiChatCompletion(
+        messages as Array<{ role: string; content: string }>,
+        { maxTokens, temperature, timeoutMs: effectiveTimeoutMs ?? 60_000 }
+      )
+      if (content.trim()) {
+        console.log(`[smartChat] served by Z.ai engine (task: ${task})`)
+        return content
+      }
+    } catch (zaiErr) {
+      console.warn(
+        '[smartChat] Z.ai engine failed, falling through:',
+        zaiErr instanceof Error ? zaiErr.message : zaiErr
+      )
+    }
+  }
+
   /* ---- Layer 1: the user's connected provider (their key, their quota) ---- */
   if (!builtinOnly) {
     const provider = await getActiveAiProvider()
@@ -178,7 +202,7 @@ export async function smartChat(
       let lastError: unknown = null
       for (const model of models.slice(0, maxModelAttempts)) {
         try {
-          const content = await externalChatCompletion(provider, messages, {
+          const content = await externalChatCompletion(provider, messages as ExternalChatMessage[], {
             maxTokens,
             model,
             timeoutMs: effectiveTimeoutMs,

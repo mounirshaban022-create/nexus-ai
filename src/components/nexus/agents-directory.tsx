@@ -16,6 +16,7 @@
 import { useMemo, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ArrowLeft, Hexagon, MessageCircle, Pin, PinOff, Search, X } from 'lucide-react'
+import { useI18n } from '@/lib/i18n'
 import {
   AGENCY_AGENTS,
   AGENCY_DIVISIONS,
@@ -40,6 +41,7 @@ export interface AgentsDirectoryProps {
 }
 
 export function AgentsDirectory(props: AgentsDirectoryProps) {
+  const { t } = useI18n()
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -47,7 +49,7 @@ export function AgentsDirectory(props: AgentsDirectoryProps) {
         className="flex max-h-[88vh] flex-col overflow-hidden border-white/10 bg-[#0c0c0e] p-0 text-zinc-100 sm:max-w-4xl"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>The Agency — specialists directory</DialogTitle>
+          <DialogTitle>{`${t('agents.title')} — ${t('agents.searchLabel')}`}</DialogTitle>
         </DialogHeader>
         <DirectoryBody {...props} onClose={() => props.onOpenChange(false)} inModal />
       </DialogContent>
@@ -92,6 +94,7 @@ function DirectoryBody({
   onClose: () => void
   inModal?: boolean
 }) {
+  const { t, isRTL } = useI18n()
   const [query, setQuery] = useState('')
   const [division, setDivision] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -135,23 +138,23 @@ function DirectoryBody({
           {!inModal && (
             <button
               onClick={onClose}
-              aria-label="Back to chat"
+              aria-label={t('agents.back')}
               className="rounded-xl p-2 text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <ArrowLeft className="h-5 w-5 rtl:-scale-x-100" />
             </button>
           )}
-          <h2 className="font-display truncate text-xl font-bold tracking-tight">The Agency</h2>
+          <h2 className="font-display truncate text-xl font-bold tracking-tight">{t('agents.title')}</h2>
           <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-zinc-400">
             {filtered.length === AGENCY_AGENTS.length
-              ? `${AGENCY_AGENTS.length} specialists`
-              : `${filtered.length} of ${AGENCY_AGENTS.length}`}
+              ? t('agents.specialistsCount', { count: String(AGENCY_AGENTS.length) })
+              : t('agents.specialistsOf', { count: String(filtered.length), total: String(AGENCY_AGENTS.length) })}
           </span>
         </div>
         {inModal && (
           <button
             onClick={onClose}
-            aria-label="Close directory"
+            aria-label={t('agents.close')}
             className="rounded-xl p-2 text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100"
           >
             <X className="h-5 w-5" />
@@ -166,14 +169,14 @@ function DirectoryBody({
           <input
             value={query}
             onChange={(e) => applyQuery(e.target.value)}
-            placeholder="Search specialists — try “frontend” or “logo”…"
-            aria-label="Search specialists"
+            placeholder={t('agents.searchPlaceholder')}
+            aria-label={t('agents.searchLabel')}
             className="h-full min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
           {query && (
             <button
               onClick={() => applyQuery('')}
-              aria-label="Clear search"
+              aria-label={t('agents.clearSearch')}
               className="rounded-lg p-1 text-zinc-500 transition hover:text-zinc-200"
             >
               <X className="h-3.5 w-3.5" />
@@ -181,10 +184,10 @@ function DirectoryBody({
           )}
         </div>
 
-        <div className="nx-rail -mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Filter by division">
+        <div className="nx-rail -mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label={t('agents.filterByDivision')}>
           <DivisionChip
             active={division === null}
-            label="All"
+            label={t('agents.all')}
             count={AGENCY_AGENTS.length}
             onClick={() => applyDivision(null)}
           />
@@ -207,22 +210,22 @@ function DirectoryBody({
         <div
           className="flex items-center gap-3 border-b border-white/8 px-5 py-3"
           style={{
-            background: `linear-gradient(90deg, ${tint(pinnedColor, 0.16)} 0%, transparent 80%)`,
+            background: `linear-gradient(${isRTL ? 270 : 90}deg, ${tint(pinnedColor, 0.16)} 0%, transparent 80%)`,
           }}
         >
           <span className="text-lg" aria-hidden>
             {pinnedAgent.emoji}
           </span>
           <p className="min-w-0 flex-1 truncate text-xs text-zinc-400">
-            Pinned: <span className="font-semibold text-zinc-100">{pinnedAgent.name}</span> —
-            auto-routing paused for this chat.
+            {t('agents.pinnedLabel')}: <span className="font-semibold text-zinc-100">{pinnedAgent.name}</span> —{' '}
+            {t('agents.pinnedNote')}
           </p>
           <button
             onClick={onUnpin}
             className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ff5a5f]/35 px-2.5 py-1.5 text-xs font-medium text-[#ff8a8d] transition hover:bg-[#ff5a5f]/10"
           >
             <PinOff className="h-3.5 w-3.5" />
-            Unpin
+            {t('agents.unpin')}
           </button>
         </div>
       )}
@@ -247,8 +250,10 @@ function DirectoryBody({
                 onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
                 className="rounded-full border border-white/15 px-5 py-2 text-xs font-medium text-zinc-300 transition hover:border-white/30 hover:bg-white/5"
               >
-                Show {Math.min(PAGE_SIZE, filtered.length - visible.length)} more ·{' '}
-                {filtered.length - visible.length} remaining
+                {t('agents.showMore', {
+                  count: String(Math.min(PAGE_SIZE, filtered.length - visible.length)),
+                  remaining: String(filtered.length - visible.length),
+                })}
               </button>
             </div>
           )}
@@ -257,14 +262,14 @@ function DirectoryBody({
             <div className="col-span-full flex flex-col items-center gap-3 py-14 text-center">
               <Hexagon className="h-9 w-9 text-zinc-600" />
               <div>
-                <p className="text-sm font-medium text-zinc-300">No specialists match</p>
-                <p className="mt-1 text-xs text-zinc-500">Try a different search or division.</p>
+                <p className="text-sm font-medium text-zinc-300">{t('agents.noMatchTitle')}</p>
+                <p className="mt-1 text-xs text-zinc-500">{t('agents.noMatchDesc')}</p>
               </div>
               <button
                 onClick={clearFilters}
                 className="nx-gradient-surface rounded-full px-4 py-1.5 text-xs font-semibold"
               >
-                Clear filters
+                {t('agents.clearFilters')}
               </button>
             </div>
           )}
@@ -339,6 +344,7 @@ function AgentCard({
   onUnpin: () => void
   onNewChatWith: (slug: string) => void
 }) {
+  const { t } = useI18n()
   const division = DIVISION_MAP[agent.division]
   const color = division?.color ?? '#ff5a5f'
 
@@ -355,7 +361,7 @@ function AgentCard({
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-zinc-100">{agent.name}</h3>
           <p className="mt-0.5 text-[11px] font-medium uppercase tracking-wide" style={{ color }}>
-            {division?.label ?? 'Agency'}
+            {division?.label ?? t('agents.agency')}
           </p>
         </div>
       </div>
@@ -374,7 +380,7 @@ function AgentCard({
           className="nx-gradient-surface flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold"
         >
           <MessageCircle className="h-3.5 w-3.5" />
-          Chat
+          {t('agents.chat')}
         </button>
         {pinned ? (
           <button
@@ -382,7 +388,7 @@ function AgentCard({
             className="flex items-center gap-1.5 rounded-lg border border-[#ff5a5f]/40 px-3 py-1.5 text-xs font-medium text-[#ff8a8d] transition hover:bg-[#ff5a5f]/10"
           >
             <PinOff className="h-3.5 w-3.5" />
-            Unpin
+            {t('agents.unpin')}
           </button>
         ) : (
           <button
@@ -390,7 +396,7 @@ function AgentCard({
             className="flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/30 hover:bg-white/5"
           >
             <Pin className="h-3.5 w-3.5" />
-            Pin to current chat
+            {t('agents.pin')}
           </button>
         )}
       </div>

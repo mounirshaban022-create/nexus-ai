@@ -30,9 +30,11 @@ export async function POST(req: NextRequest) {
     }
 
     const question = parsed.data.prompt?.trim() || DEFAULT_PROMPT
+    const { image } = parsed.data
 
     const zai = await getZAI()
     const response = await zai.chat.completions.createVision({
+      model: 'glm-4.6v',
       messages: [
         {
           role: 'user',

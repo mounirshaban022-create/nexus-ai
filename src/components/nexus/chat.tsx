@@ -27,8 +27,10 @@ import {
   X,
 } from 'lucide-react'
 import { Markdown } from '@/components/omni/markdown'
+import { useI18n } from '@/lib/i18n'
+import { usePreferences } from '@/lib/preferences'
 import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent } from './shared'
-import { BrandMark, DIVISION_MAP, agentOrNexus } from './shared'
+import { BrandMark, DIVISION_MAP, agentOrNexus, useActiveChatSession } from './shared'
 import { AgentAvatar, AttachmentList, HandoffPill, ToolCard, type ToolCardInfo } from './chat-parts'
 import { PersonalityRail } from './personality-rail'
 
@@ -62,18 +64,15 @@ interface NxMsg extends Omit<ChatMessageView, 'role'> {
   toolArgs?: Record<string, unknown> | null
 }
 
-const SUGGESTIONS = [
-  'Design a logo for my coffee shop',
-  'Make a 4-scene video about AI',
-  'Build an Excel budget tracker',
-  "What's the latest AI news?",
-]
+/* Welcome-screen suggestion chips — i18n keys (rendered via t()). */
+const SUGGESTION_KEYS = ['caps.sugg1', 'caps.sugg2', 'caps.sugg3', 'caps.sugg4'] as const
 
 interface Capability {
   icon: typeof ImageIcon
-  title: string
-  desc: string
-  prompt?: string
+  titleKey: string
+  descKey: string
+  /** composer prefill (i18n key) */
+  promptKey?: string
   voice?: boolean
   whatsapp?: boolean
 }
@@ -81,31 +80,40 @@ interface Capability {
 const CAPABILITIES: Capability[] = [
   {
     icon: ImageIcon,
-    title: 'Create images',
-    desc: 'Logos, art and photo edits in seconds',
-    prompt: 'Generate an image of ',
+    titleKey: 'caps.imageTitle',
+    descKey: 'caps.imageDesc',
+    promptKey: 'caps.imagePrompt',
   },
   {
     icon: Clapperboard,
-    title: 'Produce videos',
-    desc: 'AI scenes with narration and captions',
-    prompt: 'Make a 4-scene video about ',
+    titleKey: 'caps.videoTitle',
+    descKey: 'caps.videoDesc',
+    promptKey: 'caps.videoPrompt',
   },
   {
     icon: FileText,
-    title: 'Documents',
-    desc: 'Word, Excel, PowerPoint and PDF files',
-    prompt: 'Create a Word document that ',
+    titleKey: 'caps.docTitle',
+    descKey: 'caps.docDesc',
+    promptKey: 'caps.docPrompt',
   },
   {
     icon: MousePointerClick,
-    title: 'Browse the real web',
-    desc: 'Opens, clicks and reads live pages',
-    prompt: 'Open https://en.wikipedia.org/wiki/Artificial_intelligence and summarize it',
+    titleKey: 'caps.webTitle',
+    descKey: 'caps.webDesc',
+    promptKey: 'caps.webPrompt',
   },
-  { icon: Mic, title: 'Voice chat', desc: 'Talk hands-free with live captions', voice: true },
-  { icon: Mail, title: 'Email & WhatsApp', desc: 'Drafts and sends real messages', whatsapp: true },
+  { icon: Mic, titleKey: 'caps.voiceTitle', descKey: 'caps.voiceDesc', voice: true },
+  { icon: Mail, titleKey: 'caps.emailTitle', descKey: 'caps.emailDesc', whatsapp: true },
 ]
+
+/** Server status lines arrive in English on the wire — localize the known
+ *  ones client-side so Arabic users still see a fully-Arabic surface. */
+const STATUS_KEYS: Record<string, string> = {
+  'Picking the right specialist…': 'chat.picking',
+  'Thinking…': 'chat.thinking',
+  'Continuing…': 'chat.continuing',
+  'Working…': 'chat.working',
+}
 
 const stagger: Variants = {
   hidden: {},
@@ -123,6 +131,14 @@ const fadeUp: Variants = {
 
 export function NexusChat(props: NexusChatProps) {
   const { pinnedAgent, onPinnedAgentChange, onSessionCreated } = props
+  const { t, lang } = useI18n()
+
+  /** Localize known English server status lines for the active language. */
+  const localizeStatus = (s: string): string => {
+    if (lang !== 'ar') return s
+    const key = STATUS_KEYS[s]
+    return key ? t(key) : s
+  }
 
   const [messages, setMessages] = useState<NxMsg[]>([])
   /** Mirror of `messages` for read-inside-callback checks (burst detection
@@ -166,6 +182,8 @@ export function NexusChat(props: NexusChatProps) {
   // (handoff pills, tool cards and attachments are stream-only state).
   const [resumeId] = useState(props.sessionId)
   useEffect(() => {
+    // Mirror the bound session for the shell (delete-the-active-chat reset).
+    useActiveChatSession.getState().setSession(resumeId)
     if (!resumeId) return
     let cancelled = false
     ;(async () => {
@@ -197,6 +215,7 @@ export function NexusChat(props: NexusChatProps) {
           })
         setMessages(rows)
         setSessionId(typeof s.id === 'string' ? s.id : resumeId)
+        useActiveChatSession.getState().setSession(typeof s.id === 'string' ? s.id : resumeId)
         // Sync page-level pin state ONCE after the session loads.
         onPinnedAgentChange(s.agentPinned === true && sessionAgentSlug ? sessionAgentSlug : null)
       } catch {
@@ -413,6 +432,8 @@ export function NexusChat(props: NexusChatProps) {
             ...(sessionId ? { sessionId } : {}),
             // '' = auto-routing; a slug pins the session persona (idempotent).
             agentSlug: pinnedAgent ?? '',
+            // Answer language — the backend ships full Arabic instructions.
+            language: usePreferences.getState().language,
             ...(hasAttach
               ? { attachment: { filename: attach!.filename, dataUrl: attach!.dataUrl } }
               : {}),
@@ -422,7 +443,7 @@ export function NexusChat(props: NexusChatProps) {
 
         if (!res.ok || !res.body) {
           const data = (await res.json().catch(() => null)) as { error?: string } | null
-          throw new Error(data?.error || 'Chat request failed.')
+          throw new Error(data?.error || t('chat.requestFailed'))
         }
 
         // Consume the NDJSON stream.
@@ -590,6 +611,7 @@ export function NexusChat(props: NexusChatProps) {
               }
               case 'done': {
                 setSessionId(event.sessionId)
+                useActiveChatSession.getState().setSession(event.sessionId)
                 onSessionCreated(event.sessionId)
                 break
               }
@@ -608,8 +630,8 @@ export function NexusChat(props: NexusChatProps) {
             role: 'assistant',
             content:
               error instanceof Error
-                ? `Something went wrong: ${error.message}`
-                : 'Something went wrong. Please try again.',
+                ? t('chat.errorPrefix', { msg: error.message })
+                : t('chat.somethingWrong'),
             isError: true,
             agentSlug: pinnedAgent ?? assignRef.current?.agentSlug ?? null,
           },
@@ -627,7 +649,7 @@ export function NexusChat(props: NexusChatProps) {
         )
       }
     },
-    [attach, sessionId, streaming, pinnedAgent, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated, revealTypewriter]
+    [attach, sessionId, streaming, pinnedAgent, t, lang, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated, revealTypewriter]
   )
 
   /* ---------- attachments (composer) ---------- */
@@ -637,20 +659,20 @@ export function NexusChat(props: NexusChatProps) {
     e.target.value = '' // allow re-picking the same file
     if (!file) return
     if (file.size > 14 * 1024 * 1024) {
-      setAttachError('That file is too large (max 14 MB).')
+      setAttachError(t('chat.attachTooLarge'))
       return
     }
     const reader = new FileReader()
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : ''
       if (!dataUrl) {
-        setAttachError('Could not read that file.')
+        setAttachError(t('chat.attachReadError'))
         return
       }
       setAttach({ filename: file.name, dataUrl })
       setAttachError('')
     }
-    reader.onerror = () => setAttachError('Could not read that file.')
+    reader.onerror = () => setAttachError(t('chat.attachReadError'))
     reader.readAsDataURL(file)
   }
 
@@ -672,7 +694,7 @@ export function NexusChat(props: NexusChatProps) {
   const isPinned = pinnedAgent != null
   const showWelcome = messages.length === 0 && !streaming
   const canSend = (input.trim().length > 0 || attach != null) && !streaming
-  const placeholder = `Message ${headerAgent.name}…`
+  const placeholder = t('chat.messageAgent', { name: headerAgent.name })
 
   const applyCapability = (c: Capability) => {
     if (c.voice) {
@@ -683,8 +705,8 @@ export function NexusChat(props: NexusChatProps) {
       props.onOpenWhatsApp()
       return
     }
-    if (c.prompt) {
-      setInput(c.prompt)
+    if (c.promptKey) {
+      setInput(t(c.promptKey))
       textareaRef.current?.focus()
     }
   }
@@ -699,7 +721,7 @@ export function NexusChat(props: NexusChatProps) {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-56px)] flex-col md:h-screen">
+    <div className="flex h-[calc(100dvh_-_111px_-_env(safe-area-inset-bottom))] flex-col md:h-screen">
       {/* ---------- Header: current agent identity ---------- */}
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/8 px-3 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -711,7 +733,7 @@ export function NexusChat(props: NexusChatProps) {
                   <span className="truncate">{headerAgent.name}</span>
                   <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
                     <Pin className="h-2.5 w-2.5" aria-hidden />
-                    pinned
+                    {t('chat.pinned')}
                   </span>
                 </p>
                 {headerDivision ? (
@@ -723,8 +745,8 @@ export function NexusChat(props: NexusChatProps) {
               <button
                 type="button"
                 onClick={() => onPinnedAgentChange(null)}
-                aria-label={`Unpin ${headerAgent.name} and return to auto-routing`}
-                title="Unpin — return to auto-routing"
+                aria-label={t('chat.unpinAgent', { name: headerAgent.name })}
+                title={t('chat.unpin')}
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200"
               >
                 <X className="h-4 w-4" aria-hidden />
@@ -737,11 +759,11 @@ export function NexusChat(props: NexusChatProps) {
                 <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
                   <span className="truncate">{headerAgent.name}</span>
                   <span className="shrink-0 rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
-                    auto
+                    {t('chat.auto')}
                   </span>
                 </p>
                 <p className="truncate text-[11px] text-zinc-500">
-                  {assign.divisionLabel ?? headerDivision?.label ?? 'NEXUS core'}
+                  {assign.divisionLabel ?? headerDivision?.label ?? t('chat.core')}
                 </p>
               </div>
             </>
@@ -758,7 +780,7 @@ export function NexusChat(props: NexusChatProps) {
           className="flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/5"
         >
           <Users className="h-3.5 w-3.5" aria-hidden />
-          Agents
+          {t('nav.agents')}
         </button>
       </header>
 
@@ -781,23 +803,23 @@ export function NexusChat(props: NexusChatProps) {
                 variants={fadeUp}
                 className="font-display mt-5 text-3xl font-bold tracking-tight text-zinc-100 sm:text-4xl"
               >
-                What can I do for <span className="nx-gradient-text">you?</span>
+                {t('chat.welcomeTitleA')} <span className="nx-gradient-text">{t('chat.welcomeTitleB')}</span>
               </motion.h1>
               <motion.p variants={fadeUp} className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-500">
-                One conversation, every superpower — the right specialist takes over automatically.
+                {t('chat.welcomeSub')}
               </motion.p>
 
               <motion.div
                 variants={stagger}
-                className="mt-9 grid grid-cols-1 gap-3 text-left sm:grid-cols-2 lg:grid-cols-3"
+                className="mt-9 grid grid-cols-1 gap-3 text-start sm:grid-cols-2 lg:grid-cols-3"
               >
                 {CAPABILITIES.map((c) => (
                   <motion.button
-                    key={c.title}
+                    key={c.titleKey}
                     type="button"
                     variants={fadeUp}
                     onClick={() => applyCapability(c)}
-                    className="nx-glow-card group p-4 text-left sm:p-5"
+                    className="nx-glow-card group p-4 text-start sm:p-5"
                   >
                     <span
                       className="mb-3 grid h-10 w-10 place-items-center rounded-xl"
@@ -806,26 +828,29 @@ export function NexusChat(props: NexusChatProps) {
                     >
                       <c.icon className="h-5 w-5" />
                     </span>
-                    <span className="block text-sm font-semibold text-zinc-100">{c.title}</span>
-                    <span className="mt-1 block text-xs leading-relaxed text-zinc-500">{c.desc}</span>
+                    <span className="block text-sm font-semibold text-zinc-100">{t(c.titleKey)}</span>
+                    <span className="mt-1 block text-xs leading-relaxed text-zinc-500">{t(c.descKey)}</span>
                   </motion.button>
                 ))}
               </motion.div>
 
               <motion.div variants={fadeUp} className="mt-7 flex flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => {
-                      setInput(s)
-                      textareaRef.current?.focus()
-                    }}
-                    className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-zinc-300 transition hover:border-[#ff5a5f]/40 hover:bg-white/[0.06] hover:text-zinc-100"
-                  >
-                    {s}
-                  </button>
-                ))}
+                {SUGGESTION_KEYS.map((key) => {
+                  const s = t(key)
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        setInput(s)
+                        textareaRef.current?.focus()
+                      }}
+                      className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-zinc-300 transition hover:border-[#ff5a5f]/40 hover:bg-white/[0.06] hover:text-zinc-100"
+                    >
+                      {s}
+                    </button>
+                  )
+                })}
               </motion.div>
             </motion.div>
           </div>
@@ -835,7 +860,7 @@ export function NexusChat(props: NexusChatProps) {
               if (m.role === 'user') {
                 return (
                   <div key={m.id} className="flex justify-end">
-                    <div className="nx-rise max-w-[85%] rounded-2xl rounded-br-md bg-white/8 px-4 py-2.5">
+                    <div className="nx-rise max-w-[85%] rounded-2xl rounded-ee-md bg-white/8 px-4 py-2.5">
                       {m.attachName ? (
                         <p className="mb-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
                           <FileText className="h-3 w-3 shrink-0" aria-hidden />
@@ -852,7 +877,7 @@ export function NexusChat(props: NexusChatProps) {
 
               if (m.role === 'agent' && m.assign) {
                 return (
-                  <div key={m.id} className="flex pl-11">
+                  <div key={m.id} className="flex ps-11">
                     <HandoffPill assign={m.assign} live={streaming && i === lastAssignIdx} />
                   </div>
                 )
@@ -867,7 +892,7 @@ export function NexusChat(props: NexusChatProps) {
                   data: m.toolData,
                 }
                 return (
-                  <div key={m.id} className="flex pl-11">
+                  <div key={m.id} className="flex ps-11">
                     <ToolCard info={info} />
                   </div>
                 )
@@ -892,7 +917,7 @@ export function NexusChat(props: NexusChatProps) {
                       <span
                         className="flex items-center gap-2 py-1.5"
                         role="status"
-                        aria-label={statusText || 'Thinking'}
+                        aria-label={localizeStatus(statusText) || t('chat.thinking')}
                       >
                         <span className="flex items-center gap-1" aria-hidden>
                           <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
@@ -900,7 +925,7 @@ export function NexusChat(props: NexusChatProps) {
                           <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                         </span>
                         {statusText ? (
-                          <span className="nx-status-shimmer text-xs text-zinc-500">{statusText}</span>
+                          <span className="nx-status-shimmer text-xs text-zinc-500">{localizeStatus(statusText)}</span>
                         ) : null}
                       </span>
                     ) : (
@@ -909,7 +934,7 @@ export function NexusChat(props: NexusChatProps) {
                         <Markdown content={m.content} />
                         {m.streaming ? (
                           <span
-                            className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-[#ff5a5f] align-text-bottom"
+                            className="ms-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-[#ff5a5f] align-text-bottom"
                             aria-hidden
                           />
                         ) : null}
@@ -931,14 +956,14 @@ export function NexusChat(props: NexusChatProps) {
               return waitingForFirstEvent ? (
                 <div className="nx-rise flex gap-3">
                   <AgentAvatar agent={agentOrNexus(pinnedAgent ?? assign?.agentSlug)} size={32} className="mt-0.5" />
-                  <div className="flex items-center gap-2 py-1.5" role="status" aria-label={statusText || 'Working'}>
+                  <div className="flex items-center gap-2 py-1.5" role="status" aria-label={localizeStatus(statusText) || t('chat.working')}>
                     <span className="flex items-center gap-1" aria-hidden>
                       <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                       <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                       <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                     </span>
                     <span className="nx-status-shimmer text-xs text-zinc-500">
-                      {statusText || 'Thinking…'}
+                      {localizeStatus(statusText) || t('chat.thinking')}
                     </span>
                   </div>
                 </div>
@@ -946,9 +971,9 @@ export function NexusChat(props: NexusChatProps) {
             })()}
 
             {streaming && messages.length === 0 ? (
-              <p className="flex items-center gap-2 pl-11 text-xs text-zinc-500">
+              <p className="flex items-center gap-2 ps-11 text-xs text-zinc-500">
                 <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
-                {statusText || 'NEXUS is routing your message…'}
+                {localizeStatus(statusText) || t('chat.routing')}
               </p>
             ) : null}
           </div>
@@ -970,7 +995,7 @@ export function NexusChat(props: NexusChatProps) {
               <button
                 type="button"
                 onClick={() => setAttach(null)}
-                aria-label="Remove attachment"
+                aria-label={t('chat.removeAttachment')}
                 className="shrink-0 rounded-md p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
               >
                 <X className="h-3.5 w-3.5" aria-hidden />
@@ -1001,7 +1026,7 @@ export function NexusChat(props: NexusChatProps) {
               ref={fileRef}
               type="file"
               hidden
-              accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.png,.jpg"
+              accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.md,.csv,.rtf,.json,.png,.jpg,.jpeg,.webp,.gif"
               onChange={onPickFile}
               tabIndex={-1}
               aria-hidden
@@ -1010,8 +1035,8 @@ export function NexusChat(props: NexusChatProps) {
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={streaming}
-              aria-label="Attach a file"
-              title="Attach a file"
+              aria-label={t('chat.attachFile')}
+              title={t('chat.attachFile')}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Paperclip className="h-[18px] w-[18px]" aria-hidden />
@@ -1031,8 +1056,8 @@ export function NexusChat(props: NexusChatProps) {
               type="button"
               onClick={props.onOpenVoice}
               disabled={streaming}
-              aria-label="Voice mode"
-              title="Voice mode"
+              aria-label={t('chat.voiceMode')}
+              title={t('chat.voiceMode')}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Mic className="h-[18px] w-[18px]" aria-hidden />
@@ -1041,8 +1066,8 @@ export function NexusChat(props: NexusChatProps) {
               <button
                 type="button"
                 onClick={stop}
-                aria-label="Stop generating"
-                title="Stop generating"
+                aria-label={t('chat.stopGenerating')}
+                title={t('chat.stopGenerating')}
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ff5a5f]/15 text-[#ff5a5f] transition hover:bg-[#ff5a5f]/25"
               >
                 <Square className="h-4 w-4" fill="currentColor" aria-hidden />
@@ -1051,7 +1076,7 @@ export function NexusChat(props: NexusChatProps) {
               <button
                 type="submit"
                 disabled={!canSend}
-                aria-label="Send message"
+                aria-label={t('chat.sendMessage')}
                 className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
                 <ArrowUp className="h-[18px] w-[18px]" aria-hidden />
@@ -1060,8 +1085,8 @@ export function NexusChat(props: NexusChatProps) {
           </form>
           <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
             {pinnedAgent
-              ? `${headerAgent.name} is pinned — replies start instantly, no routing delay.`
-              : `${headerAgent.name} can create images & videos, build documents, run code, browse the web and send messages.`}
+              ? t('chat.hintPinned', { name: headerAgent.name })
+              : t('chat.hintAuto', { name: headerAgent.name })}
           </p>
         </div>
       </div>

@@ -615,6 +615,12 @@ nav[aria-label="Primary"] {
 .nx-rail::-webkit-scrollbar {
   display: none;
 }
+/* RTL: the rail scrolls toward the LEFT, so the continuation fade mirrors
+   to the left edge (logical "end" of the scroll direction). */
+html[dir="rtl"] .nx-rail {
+  mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
 
 /* Live status line shown next to the typing dots while the agent works
    ("Picking the right specialist…", "Thinking…") — a soft breathing shimmer
@@ -652,4 +658,21 @@ nav[aria-label="Primary"] {
 }
 .nx-rail::-webkit-scrollbar {
   display: none;
+}
+
+/* ============ ARABIC (RTL) ============
+   IBM Plex Sans Arabic — complete, beautiful Naskh UI face. Applied to
+   the whole document whenever <html lang="ar"> is set by the preference
+   boot script / applyPreferences(). Latin glyphs fall back to Inter. */
+html[lang="ar"] body {
+  font-family: var(--font-arabic), var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html[lang="ar"] .font-display,
+html[lang="ar"] h1, html[lang="ar"] h2 {
+  font-family: var(--font-arabic), var(--font-display), sans-serif;
+  letter-spacing: 0 !important;
+}
+/* Keep numerals + code Latin for readability inside RTL prose */
+html[lang="ar"] code, html[lang="ar"] pre, html[lang="ar"] .tabular-nums {
+  font-family: var(--font-mono), ui-monospace, monospace;
 }

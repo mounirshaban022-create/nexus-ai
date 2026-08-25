@@ -9,6 +9,7 @@
  */
 
 import Image from 'next/image'
+import { create } from 'zustand'
 import {
   GraduationCap, PenTool, Code, DollarSign, Gamepad2, Map, Stethoscope,
   Megaphone, Target, Box, ClipboardList, TrendingUp, ShieldCheck, Boxes,
@@ -80,6 +81,27 @@ export function agentOrNexus(slug: string | null | undefined): AgentMeta {
   if (!slug) return NEXUS_AGENT
   return AGENT_MAP[slug] ?? NEXUS_AGENT
 }
+
+/* ------------------------------------------------------------------ */
+/* Active chat session mirror                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Mirrors the session id the chat view is CURRENTLY bound to (set by
+ * NexusChat on mount/resume/stream-done). The shell reads it so "delete the
+ * active conversation" can reset the chat view — necessary because sessions
+ * created INSIDE the chat are not reflected in the `view` object (page-level
+ * state only bumps refreshKey), so `view.sessionId` alone misses them.
+ */
+interface ActiveChatState {
+  sessionId: string | undefined
+  setSession: (id: string | undefined) => void
+}
+
+export const useActiveChatSession = create<ActiveChatState>((set) => ({
+  sessionId: undefined,
+  setSession: (sessionId) => set({ sessionId }),
+}))
 
 /* ------------------------------------------------------------------ */
 /* Brand — the Nexus gradient mark (from the uploaded logo)            */

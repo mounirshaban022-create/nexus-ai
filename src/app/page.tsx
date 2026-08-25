@@ -25,8 +25,9 @@ import { AgentsDirectory, AgentsDirectoryPage } from '@/components/nexus/agents-
 import { VoiceOverlay } from '@/components/nexus/voice-overlay'
 import { FramedPanel } from '@/components/nexus/framed-panel'
 import { WhatsAppMode } from '@/components/omni/whatsapp-mode'
-import { SettingsMode } from '@/components/omni/settings-mode'
+import { NexusSettingsMode } from '@/components/nexus/settings-mode'
 import { SkillsMode } from '@/components/omni/skills-mode'
+import { translate } from '@/lib/i18n'
 
 export default function Page() {
   // Apply saved theme + language preferences (from Settings). The nexus
@@ -202,10 +203,16 @@ export default function Page() {
 
         {view.type === 'whatsapp' && (
           <FramedPanel
+            fill
+            dark
             title="WhatsApp Business"
             description="Connect your number, automate replies with the NEXUS agent, and chat with customers."
           >
-            <WhatsAppMode />
+            {/* WhatsAppMode is built on shadcn semantic tokens — the .dark
+                wrapper resolves them to dark values on the dark framed panel. */}
+            <div className="dark flex h-full min-h-0 flex-1 flex-col">
+              <WhatsAppMode />
+            </div>
           </FramedPanel>
         )}
 
@@ -221,8 +228,13 @@ export default function Page() {
         )}
 
         {view.type === 'settings' && (
-          <FramedPanel title="Settings" description="Profile, AI providers, email, preferences and more.">
-            <SettingsMode />
+          <FramedPanel
+            fill
+            dark
+            title={translate('settings.settings', savedLanguage)}
+            description={translate('settings.settingsDesc', savedLanguage)}
+          >
+            <NexusSettingsMode />
           </FramedPanel>
         )}
       </NexusShell>

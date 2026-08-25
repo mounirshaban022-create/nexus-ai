@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { ArrowRight, Loader2 } from 'lucide-react'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { BrandMark } from './shared'
 
 const inputClass =
@@ -72,6 +72,9 @@ export function NexusAuthModal({
           <DialogTitle className="font-display mt-2 text-xl font-bold tracking-tight">
             {mode === 'signin' ? 'Welcome back' : 'Create your account'}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {mode === 'signin' ? 'Sign in to NEXUS' : 'Create a NEXUS account'}
+          </DialogDescription>
           <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">
             {mode === 'signin'
               ? 'Sign in to continue your conversations.'

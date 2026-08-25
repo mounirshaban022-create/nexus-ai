@@ -1,0 +1,200 @@
+
+Work Log:
+- Launched parallel subagents 5-a (shell/landing/auth/onboarding/home/page.tsx/layout/globals) and 6-a (roster/division-view/agent-profile/agency-chat) with shared.tsx + fixed stub contracts — zero file conflicts
+- Verified golden path with agent-browser: landing ("Hire the entire agency." hero, 17 division dots, stats) → guest → onboarding (division picker) → home (Dubai-time greeting, stats, favorites, featured rail, recent conversations)
+- Roster: search "marketing strategist" live-filters; 18 division chips; Show more pagination
+- Agent profile: Email Marketing Strategist with 4 division-specific suggested openers
+- Persona chat E2E: sent message → streamed in-persona reply ("I'm the Email Marketing Strategist for NEXUS, specializing in data-driven email architectures — segmentation, lifecycle flows, CRM-ESP sync, deliverability…")
+- Mobile 375px: hamburger → Sheet with full nav; zero console/page errors; dev.log clean (session INSERT includes agentSlug; POST /api/chat 200)
+- lint: zero errors; cleaned 4 test sessions; committed c3cc09d
+
+Stage Summary:
+- NEXUS is now The Agency: complete redesign shipped and browser-verified end-to-end
+- All old abilities still available INSIDE persona chats (image/doc/code/search tools via chat protocol)
+- WhatsApp + Settings preserved as channel views; old omni components remain on disk (unused by new nav)
+- KNOWN: last 2 commits not yet pushed to GitHub — credentials still missing (needs user PAT)
+
+---
+Task ID: nexus-one-foundation
+Agent: main (Z.ai Code)
+Task: NEXUS One redesign — backend orchestrator + new tools + brand + frontend foundation
+
+Work Log:
+- Extracted brand assets from uploaded logo (upload/file_00000000fbc48243bafc79ff5508e0c9.png): gradient swirl icon (orange #F5A623 → coral #FF5A5F → magenta #FF2A68) + "Nexus" wordmark → public/brand/{nexus-icon.png, nexus-lockup-dark.png, nexus-lockup-white.png, nexus-icon-dark-tile.png} + public/favicon.ico
+- Prisma: ChatSession.agentPinned Boolean @default(false) added → db:push OK (agentSlug now = latest ACTIVE agent; agentPinned=true only when user pins from directory)
+- src/lib/orchestrator.ts NEW: routeMessage(message, history) — classifies every message against the 255-agent catalog via one bounded smartChat call (task:'fast', 12s timeout, builtinOnly), returns RoutingDecision{agentSlug,name,division,emoji,color,reason,elapsedMs}; small-talk regex + keyword fast-paths skip the LLM; always falls back to plain NEXUS
+- /api/chat: (1) agent_assign NDJSON event emitted after the user event for AUTO-routed sessions (fields: agentSlug/name/division/divisionLabel/emoji/color/reason/elapsedMs/pinned); (2) pin/unpin protocol — request agentSlug=<valid> PINS the session persona, agentSlug:'' UNPINS, absent keeps state; (3) auto-route runs per-message when not pinned (history moved up before systemPrompt build); (4) NEW TOOLS: generate_video (kicks off /api/video/create job, attachment type:'video' with videoJobId), browser_action (agent-browser CLI: open/read/click/fill/press/screenshot — screenshots saved to public/browser-shots + inline image attachment), send_email (@/lib/email sendEmail via primary account), send_whatsapp (@/lib/whatsapp waSendText), run_command (bash sandbox, 15s timeout, destructive-pattern blocklist, temp cwd)
+- /api/chat/sessions + [id]: agentPinned added to serializers
+- globals.css: NEXUS One section appended (.nx-* design tokens: gradient text, glow cards, gradient CTA surface, aura, rise/shimmer/bounce keyframes, composer focus ring, nx-scroll, progress track)
+- src/components/nexus/ NEW folder: shared.tsx (types, BRAND, BrandMark/BrandLockup via next/image, catalog helpers, ChatStreamEvent incl agent_assign, TOOL_META, toolLabel) + WORKING STUBS: landing, auth-modal, shell, chat (minimal NDJSON client), voice-overlay, agents-directory (modal + page with real search/filter), framed-panel
+- page.tsx REWRITTEN: View = chat|agents|whatsapp|settings; auth gate (splash→landing→shell); shared chat state (sessionRefresh/chatEpoch/activeSessionId/pinnedAgent/prefill); directory modal + voice overlay wired; FramedPanel wraps legacy WhatsAppMode/SettingsMode
+- VERIFIED LIVE: orchestrator routes "Design a modern logo for my coffee shop" → design-brand-guardian (agent_assign event + in-persona Brand Guardian reply); "hello" → NEXUS general; image request → design-image-prompt-engineer + generate_image tool fires; agent-browser CLI open/read verified on example.com; tsc clean (only pre-existing errors elsewhere); bun run lint ZERO errors; GET / 200
+
+Stage Summary:
+- Backend COMPLETE: auto-routing orchestrator + agent_assign protocol + 5 new tools (video/browser/email/whatsapp/CLI) on top of existing 8
+- Frontend foundation + contracts in place (nexus/shared.tsx is the single source of truth); stubs compile, render and stream
+- Next: subagents F1 (premium shell+chat+composer+landing+auth) and F2 (voice overlay + premium directory + framed panels) replace the stubs
+
+---
+Task ID: F2
+Agent: full-stack-developer
+Task: NEXUS One — replace 3 stubs with premium implementations: full-screen VoiceOverlay, premium AgentsDirectory (modal + page), FramedPanel for legacy light panels
+
+Work Log:
+- Read worklog (nexus-one-foundation), shared.tsx contract, omni/voice-live-mode.tsx (proven ASR/TTS pipeline), omni/voice-asr-fallback.ts, /api/voice/turn + /api/tts response shapes, dialog.tsx (showCloseButton prop), globals.css .nx-* tokens
+- voice-overlay.tsx: full-screen fixed inset-0 z-50 warm-dark gradient + backdrop-blur; BrandMark orb (116px in 184px radial glass disc) with state-mapped glow — listening: 3 expanding coral rings + live mic-level disc scale; thinking: 5.5s rotating conic-gradient brand ring (CSS mask) + .nx-shimmer; speaking: 1.2s amber rings locked to .nx-dot rhythm + framer pulse + dots. State machine idle→listening→thinking→speaking→listening ported from voice-live-mode (continuous + interim recognition, restart-on-end, pulse interval, full handler cleanup); think = POST /api/voice/turn {message, history 6, language, voice, silent-wav audio}; speak = inline base64 audio from turn response → blob URL → <audio>, fallback POST /api/tts → blob URL, last resort speechSynthesis; all fetches try/catch with visible error line + auto-reset to listening. Interim transcript italic under orb; last-4-turns conversation log with fading opacity; globe language picker (12 locales + neural voices, restarts recognition via langOverride); mute/unmute + red PhoneOff end-call; Escape + X close; graceful "browser doesn't support live voice — try Chrome" + text-input fallback running the same pipeline
+- agents-directory.tsx: shared premium DirectoryBody — display-font "The Agency" header + live count chip, h-11 search with clear button + fuzzy-ish token match over name/description/division-label/vibe, .nx-rail with All + 17 DivisionIcon chips (counts, active = tint() bg+border in division color, toggle-off on reclick), .nx-glow-card p-4 cards (emoji tinted tile, name, division-color label, line-clamp-2 description, italic vibe), hover-reveal Chat (nx-gradient-surface) + "Pin to current chat"/"Unpin" actions (md:opacity-0 md:group-hover:opacity-100, always visible on touch), division-color gradient pinned banner with Unpin, 1/2/3-col grid (modal: internal nx-scroll; page: whole-page scroll), 60-per-page Show more, Hexagon empty state + Clear filters
+- framed-panel.tsx: dark editorial header (display font + description + BrandMark) over rounded-2xl white card with 3px BRAND.gradient hairline div (inline background-image), inset ring, deep shadow, max-w-6xl
+- VERIFIED: tsc --noEmit zero errors in my files; bun run lint PASS; E2E via agent-browser session f2 (guest): directory page (18 chips + counts), search "frontend" → "2 of 255", Marketing chip → "36 of 255"/36 cards, Show more 60→120, Chat on UI Designer → pinned chat, pinned banner + Unpin on page AND modal variants, pin-from-modal closes modal and pins chat; voice overlay: orb + controls render, ASR-deleted fallback message + text input → /api/voice/turn 200 (4.7s) → reply in log → auto-reset, 12-language picker, mute disabled when unsupported, close + Escape; FramedPanel on WhatsApp + Settings; mobile 390px directory + voice clean; ZERO page errors; VLM visual review of orb/directory/framed-panel screenshots all clean (brand images verified complete/naturalWidth>0 — an early broken-image artifact was the dev-server restart window)
+- Dev server died twice mid-session from box memory pressure during F1's parallel compiles → restarted with ((setsid nohup bun run dev > dev.log 2>&1 &)) pattern
+- Screenshots: agent-ctx/f2-* (15 files); work record: agent-ctx/F2-full-stack-developer.md
+
+Stage Summary:
+- F2 complete: premium voice overlay (full state machine + fail-soft pipeline + text fallback), premium 255-agent directory (page + modal, search/filter/pin/pagination), and framed legacy panels — all contract-exact, type-clean, lint-clean, browser-verified with zero page errors
+- Note: /api/tts returns raw audio bytes → overlay builds a client blob object URL and prefers the inline audio already returned by /api/voice/turn (one less round-trip); /api/tts is the fallback path
+
+---
+Task ID: F1
+Agent: full-stack-developer (work finished; report truncated by context deadline — verified by main)
+Task: NEXUS One — replace 4 stubs with premium implementations: NexusShell sidebar, NexusChat unified chat, NexusLanding, NexusAuthModal (+ chat-parts.tsx)
+
+Work Log:
+- shell.tsx (446 lines): 264px dark sidebar — BrandLockup, gradient New chat, live session-search, session list fetched from GET /api/chat/sessions?kind=chat (refreshKey-driven) with agent emoji dots in division tint, relative times, pin indicators, active-session gradient highlight, Agents/WhatsApp/Settings nav, user block + mobile Sheet
+- chat.tsx (901 lines): full NDJSON streaming client (80ms delta buffering, AbortController stop, smart auto-scroll >150px), agent_assign handoff pills, session resume via GET /api/chat/sessions/[id] + pin-state sync, header with agent identity + unpin, welcome state (BrandMark aura, 6 capability glow-cards, 4 suggestion chips), composer (attach→base64, auto-grow textarea, mic, send/stop), prefill support
+- chat-parts.tsx (561 lines): AgentAvatar, HandoffPill, expandable ToolCard (running/done/error with spinner + elapsed), AttachmentList — image inline, VIDEO JOB CARD with /api/video/status polling + progress bar, document download card, code result card
+- landing.tsx (299 lines): premium dark landing — glass header, hero with logo lockup + gradient headline, capability grid, how-it-works strip, stats row, sticky footer (mt-auto), framer-motion stagger
+- auth-modal.tsx (177 lines): BrandMark header, gradient submit, signin/signup toggle, inline errors, guest link
+- tsc + lint clean; image generation E2E tested (dev.log shows GET /api/image/file/... 200)
+
+Stage Summary:
+- F1 complete: premium shell/chat/composer/landing/auth shipped; all contracts exact; verified by main agent (tsc, lint, live image-gen test in dev.log)
+
+---
+Task ID: nexus-one-verification
+Agent: main (Z.ai Code)
+Task: E2E verification of the complete NEXUS One redesign + persistence upgrades + fixes
+
+Work Log:
+- Fixed pre-existing 500 on GET /api/video/status/[id]: route referenced `req` while param was named `_req` (ReferenceError) → renamed rate-limit key to `video-status:${clientKey(_req)}`
+- NEW: attachments now PERSIST across session resume — Prisma ChatMessage.attachments String? column added; /api/chat saves JSON.stringify(attachments) on the final assistant message; /api/chat/sessions/[id] returns parsed attachments; nexus/chat.tsx resume hydrates them (image/video/doc/code cards survive reload)
+- layout.tsx metadata rebranded: "NEXUS — One AI. Every superpower." + /brand/nexus-icon.png favicon + new OG tags
+- BrandLockup next/image aspect-ratio warning fixed (intrinsic 1205x267 + style height/auto width)
+- E2E VERIFIED with agent-browser (session v3):
+  * Landing: hero "One AI. Every superpower.", 9-capability grid, 3-step strip, sticky footer
+  * Guest → welcome state: logo aura, 6 capability glow-cards, 4 suggestion chips, full sidebar with session history + relative times + agent emoji dots
+  * Auto-routing LIVE: "growth marketing plan" → 🚀 Growth Hacker (Marketing) took over → streamed in-persona reply + create_document tool → real downloadable .docx card (12 KB); composer placeholder switched to "Message Growth Hacker…"
+  * Video: "2 scene video robot painting" → 🎬 Visual Storyteller took over → generate_video tool → video job card with live progress bar (polling /api/video/status) → robot video rendered DONE with playable URL
+  * Attachments persist: fresh image session resumed in browser → image RENDERED from DB attachments
+  * Agents directory: 18 division chips with counts, search "frontend" → 2 results, Chat on Frontend Developer → pinned chat ("Message Frontend Developer…") + pinned banner + Unpin
+  * Session resume from sidebar works (coffee-shop session loaded with content)
+  * Voice overlay: premium orb with glow rings, language globe, mute, end-call, graceful mic-blocked message
+  * Auth: wrong password → "Invalid email or password."; signup → signed-in state with Sign out
+  * WhatsApp + Settings framed panels render
+  * Mobile 375px: hamburger → Sheet with full nav; welcome cards stack
+  * browser_action tool E2E: agent opened example.com + read page content (chained tool calls)
+  * run_command tool E2E: `echo hello && date` → stdout returned
+  * Console clean (zero warnings/errors after fix), zero page errors
+- Cleaned 20 guest test sessions + premium@test.io test user; lint ZERO errors
+
+Stage Summary:
+- NEXUS One is COMPLETE and browser-verified: one ChatGPT-style premium chat where 255 specialists auto-take-over, with images/videos/documents/code/CLI/browser/email/WhatsApp/voice — all inline
+- Attachments now survive reloads (major UX upgrade over the old design)
+- Ready to commit
+
+---
+Task ID: 2-a
+Agent: full-stack-developer
+Task: Agent Skills — expose the 79 vendored CLI-Anything skills as a browsable product surface: catalog + manual API routes, premium full-height dark Skills browser, sidebar wiring, and hand-off into the chat composer
+
+Work Log:
+- Read worklog + shared.tsx (View union, tint()), shell.tsx (NavItem pattern), page.tsx (view switch, prefill/chatEpoch model), framed-panel.tsx, rate-limit.ts usage in /api/chat/sessions, agents-directory.tsx + whatsapp-mode.tsx quality patterns, cli-skills.ts API (read-only), registry.json (79 skills, 31 categories, bare names like "blender")
+- NEW src/app/api/skills/route.ts — GET /api/skills?q=&category= → { skills, total: 79 (full catalog size), categories[] sorted }; uses searchCliSkills(q, catalogSize) when q present else listCliSkills(), category filter applied after; rateLimit 60/min per client (skills: key) → 429; try/catch → 500
+- NEW src/app/api/skills/doc/route.ts — GET /api/skills/doc?name= → getCliSkillDoc() → { skill, doc } (7000-char-capped SKILL.md); 400 on missing name, 404 on unknown skill, 60/min rate limit (skills-doc: key)
+- NEW src/components/omni/skills-mode.tsx (922 lines) — premium dark full-height browser: toolbar (display-font "Agent Skills" title + live count badge "X of 79" + subtitle naming Blender/GIMP/Obsidian/LibreOffice/browser/n8n/Zoom/mailchimp + h-11 search with brand focus ring, 250ms-debounced live token filter + clear button) over nx-scroll scrollable grid (max-w-5xl centered, 1/2/3 cols, nx-glow-card cards: category-tinted icon tile, displayName, hue pill, line-clamp-3 description, "View manual" affordance + truncated "needs …" requires hint); category chips map all 31 registry categories → lucide icons + distinct pastel hues (3d→Box, video→Video, audio→AudioLines, web→Globe, ai→Sparkles, office→FileText, automation→Workflow, …, fallback Puzzle), sorted by count, scrollable rail on mobile / wrapped on desktop with "+19 more" expander (active tail category always kept visible — found + fixed a bug where the expanded state hid the collapse button); cards are role=button/tabIndex=0 with Enter+Space handlers + focus-visible brand ring
+- Detail dialog (shadcn, dark #0c0c0e, sm:max-w-3xl, max-h-88vh, sr-only Title+Description): tinted header w/ copy-name (Copy→Check swap), primary nx-gradient-surface "Use this skill in chat" → onUseInChat(`Use the "${name}" skill to help me: `), "Copy name" secondary, copyable install-cmd code block (whitespace-nowrap overflow-x-auto), requires (amber AlertTriangle) + homepage (ExternalLink → hostname), scrollable SKILL.md manual rendered by a light dependency-free markdown pass (frontmatter stripped, fences → mono code blocks, headings by level, bullets w/ brand dots, numbered lists, **bold** + `inline code`, table lines kept monospace-aligned); doc loading skeleton + error + "no manual" empty states
+- Grid loading skeleton (9 pulse cards), catalog error state w/ Try again (reloadKey), empty state "No skills match — try another word" + Clear filters
+- framed-panel.tsx: added optional fill (chat-style h-[calc(100dvh-56px)] md:h-screen flex column, card stretches) + dark (#0c0c0e surface) props — default light/auto behavior byte-identical for WhatsApp/Settings
+- Wiring: shared.tsx View += { type: 'skills' }; shell.tsx NavItem Puzzle "Skills" badge "79" between WhatsApp and Settings (desktop + mobile Sheet); page.tsx renders <FramedPanel fill dark title="Agent Skills" description="79 CLI-Anything skills that connect NEXUS to real apps — from Blender and LibreOffice to browser automation and n8n."><SkillsMode onUseInChat={handleUseSkillInChat}/></FramedPanel> after the whatsapp block; handleUseSkillInChat = setPrefill + chatEpoch bump + setView(chat) — required because chat.tsx consumes prefill via useState initializer (mount-only), verified via grep before wiring
+- E2E VERIFIED with agent-browser (guest): /api/skills → 79 skills/31 categories; q=blender → 1 result "1 of 79"; category=ai chip → 8 cards; q+category compose; doc endpoint 200/400/404; rate limit 429 after 60/min; expander +19↔Show less; copy buttons swap to Check + toast (clipboard denied in headless → graceful destructive toast path also exercised); "Use this skill in chat" on Blender → dialog closes → chat view with composer prefilled `Use the "blender" skill to help me: `; keyboard: card focus + Enter/Space opens dialog, Tab lands on Close (Radix trap), Escape closes; desktop 1440px 3-col grid, toolbar 186px, grid scroll 5433px/560px; mobile 390px: hamburger → Sheet → Skills, 1-col grid, chips rail scrollable, zero horizontal overflow, dialog 358×743 fits viewport; my dialog produces zero Radix warnings (added sr-only DialogDescription); bun run lint PASS; tsc --noEmit zero errors in my files; dev.log clean (skills routes 200)
+- Do-not-touch files untouched: api/chat/route.ts, chat.tsx, ai-providers.ts, smart-chat.ts, orchestrator.ts, email.ts, cli-skills.ts
+- Screenshots: agent-ctx/2a-skills-{desktop,dialog,mobile,mobile-dialog,useinchat}.png; work record: agent-ctx/2-a-full-stack-developer-agent-skills.md (distinct name — agent-ctx/2-a-full-stack-developer.md belongs to an earlier /api/answer task)
+
+Stage Summary:
+- 2-a complete: Agent Skills shipped as a first-class surface — catalog + manual APIs (60/min rate-limited), a premium dark full-height browser over all 79 CLI-Anything skills with live search/category filters/copyable install commands/rendered SKILL.md manuals, sidebar nav with 79 badge, and a verified composer hand-off that remounts chat with the prefill
+- Deviations (minor): (1) FramedPanel extended with opt-in fill/dark variants so the browser fills the panel chat-style without breaking the legacy WhatsApp/Settings framing; (2) category rail shows top-12 chips + "+19 more" expander instead of always wrapping all 31 (31 wrapped chips ate 150px of grid height); (3) /api/skills "total" documented as full-catalog size (79) with the UI computing "X of 79" client-side; (4) skills doc resolver only accepts bare registry names ("blender"), not "cli-anything-blender" — lib behavior, left untouched
+
+---
+Task ID: perf-skills-agent
+Agent: main (Z.ai Code)
+Task: Fix slow chat + word-by-word streaming, install CLI-Anything for skills/app connections, agent work tools (email/social/apps from chat), fix scroll glitch
+
+Work Log:
+- SPEED FIX (19.4s → ~2-4s typical):
+  * ai-providers.ts: added HEDGED PARALLEL RACING — raceAnonymousFallbackChat (waves of one-request-per-provider, first non-empty wins, sequential chain kept as final fallback) + rewrote streamAnonymousFallbackChat as a RACED stream (first provider to emit a delta LOCKS the race, losers aborted via AbortSignal.any-combined signals; mid-stream failure keeps partial output)
+  * orchestrator.ts: routeMessage now capped at 6s hard budget (Promise.race) — routing can never block the answer; free-pool routing itself raced
+  * chat route: agent routing + system-prompt build MOVED INSIDE the ReadableStream start() so the client gets user+status events instantly instead of waiting for routing
+- WORD-BY-WORD / ALIVE FEEL:
+  * New streamExternalChatCompletion — user-connected providers now STREAM token-by-token too (was: full response in one chunk); safe fallback to non-streaming only when nothing was shown yet
+  * New NDJSON `status` events ("Picking the right specialist…", "Thinking…") rendered next to animated typing dots (nx-status-shimmer breathing animation)
+  * Frontend typewriter reveal: one-shot bursts (>160-char first delta or full `assistant` event) animate word-by-word (~70 ticks × 16ms ≈ 1.1s) via revealTypewriter
+  * Pending indicator: agent avatar + dots + status shown the instant a message is sent (before first stream event)
+- CRITICAL BUG FOUND & FIXED: direct-answer path (creator identity questions) never closed the stream controller → frontend reader hung forever → composer locked in "generating" (reproduced + verified fixed). Added 90s stream watchdog (defense-in-depth) + controller.close() on the early-return path
+- SCROLL GLITCH FIX: overflow-anchor:none + overscroll-behavior:contain on .nx-scroll (browser scroll-anchoring fought our scrollTop writes), rAF-throttled auto-scroll, hysteresis stick/unstick band (140px/260px — mobile rubber-banding no longer detaches), resize listener re-stick (mobile keyboard)
+- CLI-ANYTHING INSTALLED (https://github.com/HKUDS/CLI-Anything):
+  * Vendored skills/ (79 SKILL.md manuals) + registry.json + public_registry.json into /cli-anything/ (908K, Apache-2.0)
+  * src/lib/cli-skills.ts: listCliSkills / searchCliSkills / getCliSkillDoc (cached, 7K-char cap)
+  * New chat tool use_skill: skill='list'|'search'|<name> loads the manual (+ optional sanitized pip install execution) → agent follows it via run_command. Verified live: obsidian manual loaded, ok:true
+  * System prompt rule 10: agent routes external-app requests to use_skill, inbox requests to the email tools
+  * [Subagent 2-a] /api/skills + /api/skills/doc routes, skills-mode.tsx browser UI (search, 31 categories, manual dialog, copy install cmd, "Use this skill in chat" prefill → chat remount), Skills nav item (badge 79), View wiring — all E2E verified
+- AGENT WORK (email/social/apps from chat):
+  * email.ts: NEW organizeEmail (mark_read/unread, star/unstar, move, delete — batch up to 50, delete capped at 10 with confirm-guard) + listEmailFolders
+  * New chat tools: email_organize + email_folders; email_list/email_search/email_read connectors now ENABLED in chat when an email account is connected
+  * run_command extended conceptually via skills (agent can pip-install CLI-Anything harnesses for Blender/Obsidian/n8n/Zoom/etc.)
+- Dev server restarted (Turbopack, double-fork daemon) after it died mid-session
+- E2E verified with agent-browser: chat speed (3.8s total, instant status, token deltas), agent takeover pills, typewriter (partial at T+0.5s → full at T+1.5s), tool call flow (web_search → streamed answer → sources), composer unlocks after every path, Skills browser (search/filter/detail/prefill), mobile 390px no overflow, scroll atBottom=true, zero page errors, lint clean
+
+Stage Summary:
+- Chat latency fixed at the root (parallel hedging + routing inside stream + 6s routing cap); word-by-word streaming on ALL paths + typewriter fallback + live status events
+- CLI-Anything integrated: 79 real-app skills browseable in UI and callable by the agent from chat (use_skill → manual → run_command)
+- Email agent work complete: list/search/read/organize/folders from chat when account connected
+- Fixed pre-existing stuck-"generating" bug (unclosed controller) + scroll glitch (overflow-anchor, rAF, hysteresis)
+
+---
+Task ID: personality-rail-skills
+Agent: main (Z.ai Code)
+Task: Add a scrollable "Personality" selector in the chat (ChatGPT-connector style) so pinning a personality skips routing and the chat is faster; fix "skills don't work" so the AI actually uses external-app abilities
+
+Work Log:
+- PERSONALITY RAIL (the user-visible feature):
+  * New src/components/nexus/personality-rail.tsx — horizontally SCROLLABLE chip rail above the composer, labeled "Personality": Auto chip + 24 curated specialists (UI Designer, AI Engineer, Growth Hacker, Financial Analyst, Resume Tailor, …) + "All 255" chip that opens the existing Agents directory dialog
+  * Selecting a chip pins that personality (existing pinnedAgent plumbing) → the backend skips the ~2.5s orchestrator routing LLM call ENTIRELY → replies start instantly (the speed fix the user asked for); selecting the active chip again returns to Auto
+  * Dynamic chip for personalities pinned from the directory (not in the curated list) so the rail always reflects the active persona; active chip auto-scrolls into view (scrollIntoView on change)
+  * .nx-rail CSS in globals.css: hidden scrollbar + right-edge fade; division-colored glow on the active chip; rail disabled while streaming
+  * chat.tsx wiring + footer hint swaps to "<Agent> is pinned — replies start instantly, no routing delay."
+- ROOT-CAUSE FOUND FOR "skills don't work" (reproduced live):
+  * The 255 persona prompts are long CV-style self-descriptions that LED the system prompt — free-pool models responded with self-introductions ("Hello! I'm Quinn, 14 years of experience…") instead of emitting TOOL_CALL lines; web_search/use_skill never ran
+  * A second failure mode: models emitting tool args as a bare JSON code block WITHOUT the TOOL_CALL prefix — peek buffer let it through, parseToolCall found nothing, tool never executed, and when the whole output was an unparsed directive the user got an EMPTY bubble
+  * Third: `pip install` inside run_command hit PEP 668 (system pip blocks --user; venv pip rejects --user) and the 15s timeout killed git+https installs — every CLI-Anything install silently failed
+- SKILLS FIX (route.ts + agency.ts + cli-skills.ts):
+  * buildSystemPrompt RESTRUCTURED: tool protocol + rules now LEAD, persona moved to the END framed as voice/tone with explicit precedence rules; new rule 5 bans self-introductions; rule 11 rewritten action-first (use_skill FIRST for any external app, install via python3 -m pip, never bare pip); rule 12 forces web_search for anything time-sensitive
+  * buildPersonaSystemPrompt: persona body trimmed to 1600 chars + PERSONA RULES that override persona habits (tool protocol wins, no intros)
+  * LENIENT TOOL_CALL parsing: accepts `TOOL_CALL: use_skill {...}` (bare tool id + args) and `{"use_skill": {...}}` wrapper styles
+  * BARE-ARGS INTERCEPTOR: scans responses for JSON objects with unambiguous tool signatures ({"skill":…} → use_skill, {"command":…} → run_command, single-key {"query"} → web_search, etc.) and executes them — fixes models that emit args without the directive prefix
+  * EMPTY-BUBBLE FIX: final-answer path now emits the stripped answer when the peek buffer hid everything (streamedSoFar empty)
+  * SKILL-INTENT HINT: deterministic nudge injected when the message names a skill/app ("obsidian", "blender", "connect to…") forcing use_skill as the first action
+  * run_command: persistent workspace (/tmp/nexus-workspace) instead of per-command mkdtemp; dynamic timeout (90s for installs / 20s otherwise); transparent pip rewrites — bare `pip install X` → `python3 -m pip install X` AND short skill names (cli-anything-mermaid) → the registry's real git+URL
+  * use_skill install: venv pip (python3 -m pip) + new ready-to-run installCommand field in the result; MAX_TOOL_CALLS 4→5; tool-cap fallback message now tells the user to say "continue"
+  * findCliSkillByName exported from cli-skills.ts for the short-name rewrite
+- CRASH BUG FIXED: chat.tsx referenced an undefined `messagesRef` in the burst-detection path (>160-char first delta) — would have thrown ReferenceError mid-stream; added a proper messages→messagesRef mirror
+- TOOL_META labels added (use_skill "Loading skill", email_organize, email_folders, email_list/search/read)
+- E2E VERIFIED (curl NDJSON + agent-browser + VLM screenshot review):
+  * Pinned personality (agentSlug sent): NO routing status, instant assistant_start, web_search called + streamed answer with sources, no persona intro (before: 2.5s routing + CV blabber)
+  * Skill flow via UI: "Loading skill" tool chip rendered; via curl: use_skill(search) → use_skill(obsidian) → manual-grounded answer
+  * DEFINITIVE skill E2E: mermaid — use_skill search → manual → `cli-anything-mermaid --help` (not installed) → `python3 -m pip install git+…#subdirectory=mermaid/agent-harness` (REAL git clone + install, exit ok) → `cli-anything-mermaid --help` (REAL Usage/Commands output) → final answer quoting actual CLI help; CLI persists in /home/z/.venv/bin for future turns
+  * Rail: 26 chips, scrollWidth 3762px in 679px viewport (scrollable), Personality label + All 255 button present; pin from rail updates header ("AI Engineer / pinned / Engineering"); pin from directory auto-scrolls rail to the active chip; Auto restores; mobile 390px: rail scrollable, ZERO horizontal page overflow
+  * Auto mode still routes (handoff pill + status); small-talk fast path intact; composer unlocks after every path; only pre-existing Radix DialogContent aria warning in console; bun run lint PASS; tsc clean for all touched files; dev.log free of errors
+
+Stage Summary:
+- Personality selector shipped as a scrollable in-chat rail (exactly like ChatGPT's connector row) — pinning = instant replies (routing skipped); Auto = specialist takeover as before
+- "Skills don't work" fixed at THREE layers: prompt priority (tool protocol leads, persona subordinate + anti-intro), parsing robustness (lenient TOOL_CALL + bare-args interceptor + empty-bubble fix), and execution reality (persistent workspace, venv-pip installs with git-URL rewriting, 90s install timeouts) — verified by a live install-and-run of the mermaid CLI from chat
+- Also fixed a latent messagesRef ReferenceError crash in the streaming burst-detection path

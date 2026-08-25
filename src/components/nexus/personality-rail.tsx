@@ -16,6 +16,7 @@
 
 import { useEffect, useRef } from 'react'
 import { Sparkles, Users, Zap } from 'lucide-react'
+import { useI18n } from '@/lib/i18n'
 import { AGENCY_STATS, AGENT_MAP, DIVISION_MAP, tint } from './shared'
 
 /* ------------------------------------------------------------------ */
@@ -63,6 +64,7 @@ interface PersonalityRailProps {
 }
 
 export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled = false }: PersonalityRailProps) {
+  const { t } = useI18n()
   const railRef = useRef<HTMLDivElement>(null)
   // Keep the ACTIVE chip scrolled into view (e.g. after picking from the
   // directory dialog while the rail is scrolled away).
@@ -75,11 +77,11 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
   const total = AGENCY_STATS.agents
 
   return (
-    <div className="mb-2 flex items-center gap-2" role="group" aria-label="Personality">
+    <div className="mb-2 flex items-center gap-2" role="group" aria-label={t('personality.label')}>
       {/* Label — names the selector exactly "Personality" */}
-      <span className="hidden shrink-0 select-none items-center gap-1.5 pl-1 text-[11px] font-medium text-zinc-500 sm:flex">
+      <span className="hidden shrink-0 select-none items-center gap-1.5 ps-1 text-[11px] font-medium text-zinc-500 sm:flex">
         <Sparkles className="h-3 w-3 text-[#ff8a8d]" aria-hidden />
-        Personality
+        {t('personality.label')}
       </span>
 
       {/* The scrollable chip rail */}
@@ -94,7 +96,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
           aria-pressed={selected == null}
           disabled={disabled}
           onClick={() => onSelect(null)}
-          title="NEXUS picks the right specialist automatically"
+          title={t('personality.autoDesc')}
           className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
             selected == null
               ? 'border-[#ff5a5f]/60 bg-[#ff5a5f]/15 text-zinc-100 shadow-[0_0_0_3px_rgba(255,90,95,0.08)]'
@@ -102,7 +104,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
           }`}
         >
           <Zap className="h-3 w-3" aria-hidden />
-          Auto
+          {t('personality.auto')}
         </button>
 
         {/* Pinned personality pinned from the DIRECTORY (not in the curated
@@ -120,7 +122,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
               aria-pressed
               disabled={disabled}
               onClick={() => onSelect(null)}
-              title={`${agent.name}${division ? ` — ${division.label}` : ''} (pinned from directory — click to return to Auto)`}
+              title={`${agent.name}${division ? ` — ${division.label}` : ''} (${t('personality.pinnedFromDir')})`}
               className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium text-zinc-100 transition disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 borderColor: `${color}99`,
@@ -149,7 +151,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
               aria-pressed={active}
               disabled={disabled}
               onClick={() => onSelect(active ? null : slug)}
-              title={`${agent.name}${division ? ` — ${division.label}` : ''} · ${agent.vibe}${active ? ' (pinned — instant, no routing delay)' : ''}`}
+              title={`${agent.name}${division ? ` — ${division.label}` : ''} · ${agent.vibe}${active ? ` (${t('personality.pinnedInstant')})` : ''}`}
               className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
                   ? 'text-zinc-100'
@@ -176,11 +178,11 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
           type="button"
           onClick={onOpenDirectory}
           disabled={disabled}
-          title={`Browse all ${total} specialists`}
+          title={t('agents.specialistsCount', { count: String(total) })}
           className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-white/15 px-3 text-xs font-medium text-zinc-500 transition hover:border-[#ff5a5f]/40 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Users className="h-3 w-3" aria-hidden />
-          All {total}
+          {t('personality.allAgents', { count: String(total) })}
         </button>
       </div>
     </div>

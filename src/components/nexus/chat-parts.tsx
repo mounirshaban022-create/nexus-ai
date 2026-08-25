@@ -20,6 +20,7 @@ import {
   Terminal,
   X,
 } from 'lucide-react'
+import { useI18n } from '@/lib/i18n'
 import type { AgentAssignEvent, AgentMeta } from './shared'
 import { BrandMark, DIVISION_MAP, tint, toolLabel } from './shared'
 
@@ -98,6 +99,7 @@ export function AgentAvatar({
 /* ------------------------------------------------------------------ */
 
 export function HandoffPill({ assign, live = false }: { assign: AgentAssignEvent; live?: boolean }) {
+  const { t } = useI18n()
   const division = assign.division ? DIVISION_MAP[assign.division] : undefined
   const color =
     division?.color ?? (typeof assign.color === 'string' && assign.color ? assign.color : '#ff5a5f')
@@ -117,7 +119,7 @@ export function HandoffPill({ assign, live = false }: { assign: AgentAssignEvent
       {assign.divisionLabel ? (
         <span className="hidden shrink-0 text-zinc-500 sm:inline">· {assign.divisionLabel}</span>
       ) : null}
-      <span className="shrink-0 text-zinc-500">took over</span>
+      <span className="shrink-0 text-zinc-500">{t('chat.tookOver')}</span>
       {assign.reason ? (
         <span className="hidden min-w-0 truncate text-zinc-600 md:inline">— {assign.reason}</span>
       ) : null}
@@ -250,7 +252,7 @@ export function ToolCard({ info }: { info: ToolCardInfo }) {
         <span className="shrink-0">{error ? `${label} failed` : label}</span>
         {lines.length > 0 ? (
           <ChevronDown
-            className={`ml-auto h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-180' : ''}`}
+            className={`ms-auto h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-180' : ''}`}
             aria-hidden
           />
         ) : null}
@@ -399,6 +401,7 @@ function VideoJobCard({
 /* ------------------------------------------------------------------ */
 
 function AttachmentCard({ item }: { item: unknown }) {
+  const { t } = useI18n()
   const a = asRecord(item)
   if (!a) return null
   const type = str(a.type)
@@ -448,7 +451,7 @@ function AttachmentCard({ item }: { item: unknown }) {
       <a
         href={url}
         download
-        aria-label={`Download ${title}`}
+        aria-label={`${t('common.download')} ${title}`}
         className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 transition hover:border-[#ff5a5f]/35 hover:bg-white/[0.05]"
       >
         <span className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-lg">

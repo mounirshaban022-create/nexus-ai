@@ -1,7 +1,8 @@
 /**
  * Shared SSE stream consumer for OpenAI-compatible /chat/completions
- * streaming responses — used by BOTH the built-in Z.ai engine and the
- * anonymous free-LLM fallback chain so they share identical semantics.
+ * streaming responses — used by the built-in Z.ai engine, user-connected
+ * providers and the anonymous free-LLM fallback chain so they all share
+ * identical semantics.
  *
  * DIRECTIVE-SAFE STREAMING (peek + trailing guard):
  *   The assistant's raw stream can contain TOOL_CALL / ARTIFACT_PATCH
@@ -38,27 +39,80 @@ function findDirective(text: string): number {
   return earliest
 }
 
+/**
+ * Reusable directive-safe delta guard. Feed every raw model delta through
+ * `push()`; the safe visible prose comes out through `onDelta`. Call
+ * `end()` when the model finishes. Mirrors the semantics documented above.
+ */
+export class DirectiveGuard {
+  private fullContent = ''
+  private emitted = 0
+  private toolMode = false
+  private readonly guardLen: number
+
+  constructor(
+    private readonly onDelta: (delta: string) => void,
+    opts: { guardLen?: number } = {}
+  ) {
+    this.guardLen = opts.guardLen ?? 24
+  }
+
+  /** Feed one raw model delta. Visible prose is emitted as it becomes safe. */
+  push(deltaText: string): void {
+    if (!deltaText) return
+    this.fullContent += deltaText
+
+    if (this.toolMode) return // silently accumulate
+
+    // A complete directive token appeared anywhere → flush the prose
+    // before it and switch to silent accumulation.
+    const dirIdx = findDirective(this.fullContent)
+    if (dirIdx >= 0) {
+      this.emitUpTo(dirIdx)
+      this.toolMode = true
+      return
+    }
+
+    // Hold back the trailing guard window so a directive that is still
+    // forming at the tail can be caught before it becomes visible.
+    this.emitUpTo(Math.max(0, this.fullContent.length - this.guardLen))
+  }
+
+  /**
+   * End of stream: flush any held-back tail — unless a directive formed
+   * inside the guard window (then leave it hidden; parseToolCall handles
+   * it downstream).
+   */
+  end(): void {
+    if (!this.toolMode) {
+      const dirIdx = findDirective(this.fullContent)
+      this.emitUpTo(dirIdx >= 0 ? dirIdx : this.fullContent.length)
+    }
+  }
+
+  /** The full accumulated raw content (directives included). */
+  content(): string {
+    return this.fullContent
+  }
+
+  private emitUpTo(upto: number): void {
+    if (upto > this.emitted) {
+      const chunk = this.fullContent.slice(this.emitted, upto)
+      if (chunk) this.onDelta(chunk)
+      this.emitted = upto
+    }
+  }
+}
+
 export async function consumeSSEWithPeek(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   onDelta: (delta: string) => void,
   opts: SseConsumeOptions = {}
 ): Promise<string> {
   const decoder = new TextDecoder()
-  const GUARD_LEN = opts.guardLen ?? 24
+  const guard = new DirectiveGuard(onDelta, opts)
 
   let buf = ''
-  let fullContent = ''
-  let emitted = 0
-  let toolMode = false
-
-  /** Emit the slice [emitted, upto) as a visible delta. */
-  const emitUpTo = (upto: number) => {
-    if (upto > emitted) {
-      const chunk = fullContent.slice(emitted, upto)
-      if (chunk) onDelta(chunk)
-      emitted = upto
-    }
-  }
 
   while (true) {
     const { done, value } = await reader.read()
@@ -83,31 +137,10 @@ export async function consumeSSEWithPeek(
         if (data && !data.startsWith('{')) deltaText = data
       }
       if (!deltaText) continue
-      fullContent += deltaText
-
-      if (toolMode) continue // silently accumulate
-
-      // A complete directive token appeared anywhere → flush the prose
-      // before it and switch to silent accumulation.
-      const dirIdx = findDirective(fullContent)
-      if (dirIdx >= 0) {
-        emitUpTo(dirIdx)
-        toolMode = true
-        continue
-      }
-
-      // Hold back the trailing guard window so a directive that is still
-      // forming at the tail can be caught before it becomes visible.
-      emitUpTo(Math.max(0, fullContent.length - GUARD_LEN))
+      guard.push(deltaText)
     }
   }
 
-  // END-OF-STREAM: flush any held-back tail — unless a directive formed
-  // inside the guard window (then leave it hidden; parseToolCall handles it).
-  if (!toolMode) {
-    const dirIdx = findDirective(fullContent)
-    emitUpTo(dirIdx >= 0 ? dirIdx : fullContent.length)
-  }
-
-  return fullContent
+  guard.end()
+  return guard.content()
 }

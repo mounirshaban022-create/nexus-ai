@@ -1,0 +1,1071 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * NEXUS One — THE unified chat.
+     5→ *
+     6→ * One ChatGPT-style conversation where 255 specialist agents auto-take-over
+     7→ * (agent_assign handoff pills), with every superpower inline: images, live
+     8→ * video jobs, documents (Word/Excel/PDF), code, real browser, email and
+     9→ * WhatsApp. NDJSON streaming client modeled on the battle-tested
+    10→ * agency-chat implementation (deltas buffered + flushed every 80ms).
+    11→ */
+    12→
+    13→import { useCallback, useEffect, useRef, useState } from 'react'
+    14→import { motion, type Variants } from 'framer-motion'
+    15→import {
+    16→  ArrowUp,
+    17→  Clapperboard,
+    18→  FileText,
+    19→  Image as ImageIcon,
+    20→  Mail,
+    21→  Mic,
+    22→  MousePointerClick,
+    23→  Paperclip,
+    24→  Pin,
+    25→  Square,
+    26→  Users,
+    27→  X,
+    28→} from 'lucide-react'
+    29→import { Markdown } from '@/components/omni/markdown'
+    30→import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent } from './shared'
+    31→import { BrandMark, DIVISION_MAP, agentOrNexus } from './shared'
+    32→import { AgentAvatar, AttachmentList, HandoffPill, ToolCard, type ToolCardInfo } from './chat-parts'
+    33→import { PersonalityRail } from './personality-rail'
+    34→
+    35→export interface NexusChatProps {
+    36→  sessionId?: string
+    37→  prefill?: string
+    38→  pinnedAgent: string | null
+    39→  onPinnedAgentChange: (slug: string | null) => void
+    40→  /** call when the stream creates/uses a session so the sidebar refreshes */
+    41→  onSessionCreated: (id: string) => void
+    42→  onOpenAgents: () => void
+    43→  onOpenVoice: () => void
+    44→  onOpenWhatsApp: () => void
+    45→}
+    46→
+    47→/* ------------------------------------------------------------------ */
+    48→/* Local message model (extends the shared view with routing extras)   */
+    49→/* ------------------------------------------------------------------ */
+    50→
+    51→interface NxMsg extends Omit<ChatMessageView, 'role'> {
+    52→  role: 'user' | 'assistant' | 'tool' | 'agent'
+    53→  isError?: boolean
+    54→  /** filename the user attached with this message */
+    55→  attachName?: string
+    56→  /** role:'agent' → the routing handoff pill */
+    57→  assign?: AgentAssignEvent
+    58→  /** live tool chip state for role:'tool' rows */
+    59→  toolStatus?: 'running' | 'done' | 'error'
+    60→  toolMessage?: string
+    61→  toolIndex?: number
+    62→  toolArgs?: Record<string, unknown> | null
+    63→}
+    64→
+    65→const SUGGESTIONS = [
+    66→  'Design a logo for my coffee shop',
+    67→  'Make a 4-scene video about AI',
+    68→  'Build an Excel budget tracker',
+    69→  "What's the latest AI news?",
+    70→]
+    71→
+    72→interface Capability {
+    73→  icon: typeof ImageIcon
+    74→  title: string
+    75→  desc: string
+    76→  prompt?: string
+    77→  voice?: boolean
+    78→  whatsapp?: boolean
+    79→}
+    80→
+    81→const CAPABILITIES: Capability[] = [
+    82→  {
+    83→    icon: ImageIcon,
+    84→    title: 'Create images',
+    85→    desc: 'Logos, art and photo edits in seconds',
+    86→    prompt: 'Generate an image of ',
+    87→  },
+    88→  {
+    89→    icon: Clapperboard,
+    90→    title: 'Produce videos',
+    91→    desc: 'AI scenes with narration and captions',
+    92→    prompt: 'Make a 4-scene video about ',
+    93→  },
+    94→  {
+    95→    icon: FileText,
+    96→    title: 'Documents',
+    97→    desc: 'Word, Excel, PowerPoint and PDF files',
+    98→    prompt: 'Create a Word document that ',
+    99→  },
+   100→  {
+   101→    icon: MousePointerClick,
+   102→    title: 'Browse the real web',
+   103→    desc: 'Opens, clicks and reads live pages',
+   104→    prompt: 'Open https://en.wikipedia.org/wiki/Artificial_intelligence and summarize it',
+   105→  },
+   106→  { icon: Mic, title: 'Voice chat', desc: 'Talk hands-free with live captions', voice: true },
+   107→  { icon: Mail, title: 'Email & WhatsApp', desc: 'Drafts and sends real messages', whatsapp: true },
+   108→]
+   109→
+   110→const stagger: Variants = {
+   111→  hidden: {},
+   112→  show: { transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
+   113→}
+   114→
+   115→const fadeUp: Variants = {
+   116→  hidden: { opacity: 0, y: 14 },
+   117→  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
+   118→}
+   119→
+   120→/* ------------------------------------------------------------------ */
+   121→/* The chat                                                            */
+   122→/* ------------------------------------------------------------------ */
+   123→
+   124→export function NexusChat(props: NexusChatProps) {
+   125→  const { pinnedAgent, onPinnedAgentChange, onSessionCreated } = props
+   126→
+   127→  const [messages, setMessages] = useState<NxMsg[]>([])
+   128→  /** Mirror of `messages` for read-inside-callback checks (burst detection
+   129→   *  reads the CURRENT bubble content inside the stream loop without
+   130→   *  re-creating the send callback on every delta). */
+   131→  const messagesRef = useRef<NxMsg[]>([])
+   132→  useEffect(() => {
+   133→    messagesRef.current = messages
+   134→  }, [messages])
+   135→  const [streaming, setStreaming] = useState(false)
+   136→  const [sessionId, setSessionId] = useState<string | undefined>(props.sessionId)
+   137→  const [input, setInput] = useState(props.prefill ?? '')
+   138→  const [attach, setAttach] = useState<{ filename: string; dataUrl: string } | null>(null)
+   139→  const [attachError, setAttachError] = useState('')
+   140→  const [assign, setAssign] = useState<AgentAssignEvent | null>(null)
+   141→
+   142→  const scrollRef = useRef<HTMLDivElement>(null)
+   143→  const textareaRef = useRef<HTMLTextAreaElement>(null)
+   144→  const fileRef = useRef<HTMLInputElement>(null)
+   145→  const stickToBottomRef = useRef(true)
+   146→  const streamIdRef = useRef<string | null>(null)
+   147→  const pendingDeltaRef = useRef('')
+   148→  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+   149→  const abortRef = useRef<AbortController | null>(null)
+   150→  const assignRef = useRef<AgentAssignEvent | null>(null)
+   151→  const seqRef = useRef(0)
+   152→  /** Live status line from the server ("Picking the right specialist…") —
+   153→   *  shown next to the typing dots so waiting never feels dead. */
+   154→  const [statusText, setStatusText] = useState('')
+   155→  /** Typewriter reveal state — animates one-shot bursts word-by-word. */
+   156→  const typewriterRef = useRef<{ timer: ReturnType<typeof setInterval> | null }>({ timer: null })
+   157→  const scrollFrameRef = useRef<number | null>(null)
+   158→
+   159→  const nextId = (prefix: string) => `${prefix}-${Date.now()}-${seqRef.current++}`
+   160→
+   161→  /* ---------- session resume + one-time pin sync ---------- */
+   162→  // The session to resume is captured at MOUNT: page.tsx remounts the chat
+   163→  // (chatEpoch key) whenever the user switches sessions, and later
+   164→  // props.sessionId changes (e.g. when THIS chat creates its own session)
+   165→  // must NOT re-trigger a refetch that would clobber the live transcript
+   166→  // (handoff pills, tool cards and attachments are stream-only state).
+   167→  const [resumeId] = useState(props.sessionId)
+   168→  useEffect(() => {
+   169→    if (!resumeId) return
+   170→    let cancelled = false
+   171→    ;(async () => {
+   172→      try {
+   173→        const res = await fetch(`/api/chat/sessions/${encodeURIComponent(resumeId)}`)
+   174→        if (!res.ok) return
+   175→        const data = (await res.json().catch(() => null)) as { session?: unknown } | null
+   176→        const s =
+   177→          data && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
+   178→        if (cancelled || !s) return
+   179→        const rowsRaw = Array.isArray(s.messages) ? s.messages : []
+   180→        const sessionAgentSlug = typeof s.agentSlug === 'string' ? s.agentSlug : null
+   181→        const rows: NxMsg[] = rowsRaw
+   182→          .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+   183→          .map((m, i): NxMsg => {
+   184→            const role = m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool' : 'assistant'
+   185→            return {
+   186→              id: typeof m.id === 'string' ? m.id : `m-${i}`,
+   187→              role,
+   188→              content: typeof m.content === 'string' ? m.content : '',
+   189→              toolName: typeof m.toolName === 'string' ? m.toolName : null,
+   190→              toolData: typeof m.toolData === 'string' ? m.toolData : null,
+   191→              toolStatus: role === 'tool' ? 'done' : undefined,
+   192→              agentSlug: role === 'assistant' ? sessionAgentSlug : undefined,
+   193→              // NEXUS One: attachments persisted server-side (image/video/
+   194→              // document/code cards) survive resume.
+   195→              attachments: Array.isArray(m.attachments) ? m.attachments : undefined,
+   196→            }
+   197→          })
+   198→        setMessages(rows)
+   199→        setSessionId(typeof s.id === 'string' ? s.id : resumeId)
+   200→        // Sync page-level pin state ONCE after the session loads.
+   201→        onPinnedAgentChange(s.agentPinned === true && sessionAgentSlug ? sessionAgentSlug : null)
+   202→      } catch {
+   203→        /* failed to load — fall back to an empty transcript */
+   204→      }
+   205→    })()
+   206→    return () => {
+   207→      cancelled = true
+   208→    }
+   209→    // Mount-per-session resume (page.tsx remounts via chatEpoch); the pin
+   210→    // sync must fire exactly once per loaded session.
+   211→  }, [resumeId])
+   212→
+   213→  /* ---------- abort any live stream on unmount ---------- */
+   214→  useEffect(() => {
+   215→    return () => {
+   216→      abortRef.current?.abort()
+   217→      if (flushTimerRef.current) clearInterval(flushTimerRef.current)
+   218→      if (typewriterRef.current.timer) clearInterval(typewriterRef.current.timer)
+   219→      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
+   220→    }
+   221→  }, [])
+   222→
+   223→  /* ---------- smart auto-scroll (sticks while near the bottom) ----------
+   224→   * SCROLL-GLITCH FIX — three hardening measures:
+   225→   *   1. rAF throttling: the DOM height settles within one animation frame
+   226→   *      before we pin to the bottom (no fighting mid-layout writes).
+   227→   *   2. Hysteresis: stick again at ≤140px from the bottom, but only
+   228→   *      un-stick beyond 260px — mobile rubber-banding at the bottom edge
+   229→   *      no longer randomly detaches the auto-scroll.
+   230→   *   3. `overflow-anchor:none` on .nx-scroll (globals.css) stops the
+   231→   *      browser's own scroll-anchoring from fighting our scrollTop writes.
+   232→   */
+   233→  const scrollToEnd = useCallback(() => {
+   234→    if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
+   235→    scrollFrameRef.current = requestAnimationFrame(() => {
+   236→      scrollFrameRef.current = null
+   237→      const el = scrollRef.current
+   238→      if (!el || !stickToBottomRef.current) return
+   239→      el.scrollTop = el.scrollHeight
+   240→    })
+   241→  }, [])
+   242→
+   243→  useEffect(() => {
+   244→    if (!stickToBottomRef.current) return
+   245→    scrollToEnd()
+   246→  }, [messages, streaming, scrollToEnd])
+   247→
+   248→  /* Mobile keyboards + viewport resizes change the container height without
+   249→   * a messages update — re-stick to the bottom so the newest content stays
+   250→   * visible instead of being cut off under the composer. */
+   251→  useEffect(() => {
+   252→    const onResize = () => {
+   253→      if (stickToBottomRef.current) scrollToEnd()
+   254→    }
+   255→    window.addEventListener('resize', onResize)
+   256→    return () => window.removeEventListener('resize', onResize)
+   257→  }, [scrollToEnd])
+   258→
+   259→  const onScroll = () => {
+   260→    const el = scrollRef.current
+   261→    if (!el) return
+   262→    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+   263→    // Hysteresis band: easily re-stick near the bottom, hard to un-stick.
+   264→    if (distFromBottom <= 140) stickToBottomRef.current = true
+   265→    else if (distFromBottom > 260) stickToBottomRef.current = false
+   266→  }
+   267→
+   268→  /* ---------- textarea auto-resize (rows 1 → 6) ---------- */
+   269→  useEffect(() => {
+   270→    const el = textareaRef.current
+   271→    if (!el) return
+   272→    el.style.height = 'auto'
+   273→    el.style.height = `${Math.min(el.scrollHeight, 144)}px`
+   274→  }, [input])
+   275→
+   276→  /* ---------- streaming helpers ---------- */
+   277→
+   278→  const appendDelta = useCallback((delta: string) => {
+   279→    const id = streamIdRef.current
+   280→    if (!id || !delta) return
+   281→    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: m.content + delta } : m)))
+   282→  }, [])
+   283→
+   284→  /** Deltas are buffered and flushed every 80ms so react-markdown is not
+   285→   * re-parsed on every single token — keeps long streams silky. */
+   286→  const startDeltaFlusher = useCallback(() => {
+   287→    if (flushTimerRef.current) return
+   288→    flushTimerRef.current = setInterval(() => {
+   289→      if (!pendingDeltaRef.current) return
+   290→      const chunk = pendingDeltaRef.current
+   291→      pendingDeltaRef.current = ''
+   292→      appendDelta(chunk)
+   293→    }, 80)
+   294→  }, [appendDelta])
+   295→
+   296→  const stopDeltaFlusher = useCallback(() => {
+   297→    if (flushTimerRef.current) {
+   298→      clearInterval(flushTimerRef.current)
+   299→      flushTimerRef.current = null
+   300→    }
+   301→    if (pendingDeltaRef.current) {
+   302→      const chunk = pendingDeltaRef.current
+   303→      pendingDeltaRef.current = ''
+   304→      appendDelta(chunk)
+   305→    }
+   306→  }, [appendDelta])
+   307→
+   308→  /* ---------- typewriter reveal (the "alive" effect) ----------
+   309→   * When the backend hands us a finished text in ONE burst (non-streaming
+   310→   * fallback path, or a coalesced mega-delta), animating it word-by-word
+   311→   * keeps the ChatGPT feel instead of a jarring wall of text. Reveal is
+   312→   * chunked so even long answers finish in ~1.2s. */
+   313→  const revealTypewriter = useCallback((id: string, fullText: string) => {
+   314→    if (typewriterRef.current.timer) {
+   315→      clearInterval(typewriterRef.current.timer)
+   316→      typewriterRef.current.timer = null
+   317→    }
+   318→    if (!fullText) return
+   319→    const total = fullText.length
+   320→    // ~70 ticks × 16ms ≈ 1.1s regardless of length; min 2 chars/tick.
+   321→    const chunk = Math.max(2, Math.ceil(total / 70))
+   322→    let pos = 0
+   323→    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: '' } : m)))
+   324→    typewriterRef.current.timer = setInterval(() => {
+   325→      pos = Math.min(total, pos + chunk)
+   326→      const slice = fullText.slice(0, pos)
+   327→      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: slice } : m)))
+   328→      if (pos >= total) {
+   329→        if (typewriterRef.current.timer) clearInterval(typewriterRef.current.timer)
+   330→        typewriterRef.current.timer = null
+   331→      }
+   332→    }, 16)
+   333→  }, [])
+   334→
+   335→  /** Patch the live tool chip that matches (toolName, index). */
+   336→  const updateTool = useCallback(
+   337→    (tool: string, index: number, patch: Partial<NxMsg>) => {
+   338→      setMessages((prev) => {
+   339→        let target = -1
+   340→        for (let i = prev.length - 1; i >= 0; i--) {
+   341→          const m = prev[i]
+   342→          if (m.role === 'tool' && m.toolName === tool && m.toolIndex === index) {
+   343→            target = i
+   344→            break
+   345→          }
+   346→        }
+   347→        if (target === -1) {
+   348→          for (let i = prev.length - 1; i >= 0; i--) {
+   349→            const m = prev[i]
+   350→            if (m.role === 'tool' && m.toolName === tool && m.toolStatus === 'running') {
+   351→              target = i
+   352→              break
+   353→            }
+   354→          }
+   355→        }
+   356→        if (target === -1) return prev
+   357→        const copy = [...prev]
+   358→        copy[target] = { ...copy[target], ...patch }
+   359→        return copy
+   360→      })
+   361→    },
+   362→    []
+   363→  )
+   364→
+   365→  /* ---------- send ---------- */
+   366→
+   367→  const send = useCallback(
+   368→    async (text: string) => {
+   369→      const trimmed = text.trim()
+   370→      const hasAttach = attach != null
+   371→      if (streaming) return
+   372→      if (!trimmed && !hasAttach) return
+   373→
+   374→      const userMsg: NxMsg = {
+   375→        id: nextId('local'),
+   376→        role: 'user',
+   377→        content: trimmed,
+   378→        ...(hasAttach ? { attachName: attach!.filename } : {}),
+   379→      }
+   380→      setMessages((prev) => [...prev, userMsg])
+   381→      setInput('')
+   382→      setAttach(null)
+   383→      setAttachError('')
+   384→      setStreaming(true)
+   385→      stickToBottomRef.current = true
+   386→      setStatusText('')
+   387→
+   388→      abortRef.current = new AbortController()
+   389→
+   390→      // STREAM WATCHDOG (defense-in-depth): if the server ever fails to
+   391→      // close the NDJSON stream, reader.read() hangs forever and the
+   392→      // composer stays locked in "generating". This timer aborts the fetch
+   393→      // after 90s of total silence and frees the UI. Declared OUTSIDE the
+   394→      // try so the finally block can always disarm it.
+   395→      let watchdog: ReturnType<typeof setTimeout> | null = null
+   396→      const armWatchdog = () => {
+   397→        if (watchdog) clearTimeout(watchdog)
+   398→        watchdog = setTimeout(() => {
+   399→          abortRef.current?.abort()
+   400→        }, 90_000)
+   401→      }
+   402→      const disarmWatchdog = () => {
+   403→        if (watchdog) clearTimeout(watchdog)
+   404→        watchdog = null
+   405→      }
+   406→
+   407→      try {
+   408→        const res = await fetch('/api/chat', {
+   409→          method: 'POST',
+   410→          headers: { 'Content-Type': 'application/json' },
+   411→          body: JSON.stringify({
+   412→            message: trimmed,
+   413→            ...(sessionId ? { sessionId } : {}),
+   414→            // '' = auto-routing; a slug pins the session persona (idempotent).
+   415→            agentSlug: pinnedAgent ?? '',
+   416→            ...(hasAttach
+   417→              ? { attachment: { filename: attach!.filename, dataUrl: attach!.dataUrl } }
+   418→              : {}),
+   419→          }),
+   420→          signal: abortRef.current.signal,
+   421→        })
+   422→
+   423→        if (!res.ok || !res.body) {
+   424→          const data = (await res.json().catch(() => null)) as { error?: string } | null
+   425→          throw new Error(data?.error || 'Chat request failed.')
+   426→        }
+   427→
+   428→        // Consume the NDJSON stream.
+   429→        const reader = res.body.getReader()
+   430→        const decoder = new TextDecoder()
+   431→        let buffer = ''
+   432→        armWatchdog()
+   433→
+   434→        for (;;) {
+   435→          const { done, value } = await reader.read()
+   436→          if (done) break
+   437→          armWatchdog()
+   438→          buffer += decoder.decode(value, { stream: true })
+   439→          const lines = buffer.split('\n')
+   440→          buffer = lines.pop() ?? ''
+   441→          for (const line of lines) {
+   442→            const text = line.trim()
+   443→            if (!text) continue
+   444→            let event: ChatStreamEvent
+   445→            try {
+   446→              event = JSON.parse(text) as ChatStreamEvent
+   447→            } catch {
+   448→              continue // partial / malformed line — skip
+   449→            }
+   450→
+   451→            switch (event.type) {
+   452→              case 'user': {
+   453→                setMessages((prev) =>
+   454→                  prev.map((m) =>
+   455→                    m.id === userMsg.id ? { ...m, id: event.id, content: event.content } : m
+   456→                  )
+   457→                )
+   458→                break
+   459→              }
+   460→              case 'agent_assign': {
+   461→                assignRef.current = event
+   462→                setAssign(event)
+   463→                setMessages((prev) => [
+   464→                  ...prev,
+   465→                  { id: nextId('assign'), role: 'agent', content: '', assign: event },
+   466→                ])
+   467→                break
+   468→              }
+   469→              case 'status': {
+   470→                // Live server status line — displayed with the typing dots
+   471→                // until the first delta lands.
+   472→                setStatusText(event.message)
+   473→                break
+   474→              }
+   475→              case 'assistant_start': {
+   476→                streamIdRef.current = event.id
+   477→                const slug = pinnedAgent ?? assignRef.current?.agentSlug ?? null
+   478→                setMessages((prev) => [
+   479→                  ...prev,
+   480→                  { id: event.id, role: 'assistant', content: '', streaming: true, agentSlug: slug },
+   481→                ])
+   482→                break
+   483→              }
+   484→              case 'assistant_delta': {
+   485→                setStatusText('')
+   486→                const id = streamIdRef.current
+   487→                // BURST DETECTION: a huge first delta means the backend
+   488→                // handed us a finished text in one shot (non-streaming
+   489→                // fallback) — reveal it with the typewriter instead of
+   490→                // slamming a wall of text on screen.
+   491→                if (id && event.delta.length > 160) {
+   492→                  const bubbleEmpty = !messagesRef.current.find((m) => m.id === id)?.content
+   493→                  if (bubbleEmpty && !typewriterRef.current.timer) {
+   494→                    revealTypewriter(id, event.delta)
+   495→                    break
+   496→                  }
+   497→                }
+   498→                pendingDeltaRef.current += event.delta
+   499→                startDeltaFlusher()
+   500→                break
+   501→              }
+   502→              case 'assistant_end': {
+   503→                stopDeltaFlusher()
+   504→                const id = streamIdRef.current
+   505→                streamIdRef.current = null
+   506→                if (id) {
+   507→                  const attachments = Array.isArray(event.attachments) ? event.attachments : []
+   508→                  setMessages((prev) =>
+   509→                    prev.map((m) =>
+   510→                      m.id === id
+   511→                        ? {
+   512→                            ...m,
+   513→                            streaming: false,
+   514→                            ...(attachments.length > 0 ? { attachments } : {}),
+   515→                          }
+   516→                        : m
+   517→                    )
+   518→                  )
+   519→                }
+   520→                break
+   521→              }
+   522→              case 'assistant': {
+   523→                // Full-message fallback (non-streaming providers).
+   524→                stopDeltaFlusher()
+   525→                const id = streamIdRef.current
+   526→                streamIdRef.current = null
+   527→                const attachments = Array.isArray(event.attachments) ? event.attachments : []
+   528→                if (id) {
+   529→                  // Typewriter reveal — the full text arrived in one shot;
+   530→                  // animate it word-by-word so it feels alive.
+   531→                  setMessages((prev) =>
+   532→                    prev.map((m) =>
+   533→                      m.id === id
+   534→                        ? {
+   535→                            ...m,
+   536→                            streaming: false,
+   537→                            ...(attachments.length > 0 ? { attachments } : {}),
+   538→                          }
+   539→                        : m
+   540→                    )
+   541→                  )
+   542→                  revealTypewriter(id, event.content)
+   543→                } else {
+   544→                  const freshId = nextId('a')
+   545→                  setMessages((prev) => [
+   546→                    ...prev,
+   547→                    {
+   548→                      id: freshId,
+   549→                      role: 'assistant',
+   550→                      content: '',
+   551→                      agentSlug: pinnedAgent ?? assignRef.current?.agentSlug ?? null,
+   552→                      ...(attachments.length > 0 ? { attachments } : {}),
+   553→                    },
+   554→                  ])
+   555→                  revealTypewriter(freshId, event.content)
+   556→                }
+   557→                break
+   558→              }
+   559→              case 'tool_start': {
+   560→                setMessages((prev) => [
+   561→                  ...prev,
+   562→                  {
+   563→                    id: nextId(`tool-${event.index}`),
+   564→                    role: 'tool',
+   565→                    content: '',
+   566→                    toolName: event.tool,
+   567→                    toolIndex: event.index,
+   568→                    toolStatus: 'running',
+   569→                    toolArgs: event.args,
+   570→                  },
+   571→                ])
+   572→                break
+   573→              }
+   574→              case 'tool_progress': {
+   575→                updateTool(event.tool, event.index, { toolMessage: event.message })
+   576→                break
+   577→              }
+   578→              case 'tool_result': {
+   579→                let data: string | null = null
+   580→                try {
+   581→                  data = JSON.stringify(event.result)
+   582→                } catch {
+   583→                  data = null
+   584→                }
+   585→                updateTool(event.tool, event.index, {
+   586→                  toolStatus: event.ok ? 'done' : 'error',
+   587→                  toolData: data,
+   588→                })
+   589→                break
+   590→              }
+   591→              case 'done': {
+   592→                setSessionId(event.sessionId)
+   593→                onSessionCreated(event.sessionId)
+   594→                break
+   595→              }
+   596→              case 'error': {
+   597→                throw new Error(event.message)
+   598→              }
+   599→            }
+   600→          }
+   601→        }
+   602→      } catch (error) {
+   603→        if (error instanceof DOMException && error.name === 'AbortError') return
+   604→        setMessages((prev) => [
+   605→          ...prev,
+   606→          {
+   607→            id: nextId('err'),
+   608→            role: 'assistant',
+   609→            content:
+   610→              error instanceof Error
+   611→                ? `Something went wrong: ${error.message}`
+   612→                : 'Something went wrong. Please try again.',
+   613→            isError: true,
+   614→            agentSlug: pinnedAgent ?? assignRef.current?.agentSlug ?? null,
+   615→          },
+   616→        ])
+   617→      } finally {
+   618→        disarmWatchdog()
+   619→        stopDeltaFlusher()
+   620→        streamIdRef.current = null
+   621→        setStreaming(false)
+   622→        setStatusText('')
+   623→        setMessages((prev) =>
+   624→          prev.map((m) =>
+   625→            m.streaming ? { ...m, streaming: false } : m.toolStatus === 'running' ? { ...m, toolStatus: 'done' } : m
+   626→          )
+   627→        )
+   628→      }
+   629→    },
+   630→    [attach, sessionId, streaming, pinnedAgent, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated, revealTypewriter]
+   631→  )
+   632→
+   633→  /* ---------- attachments (composer) ---------- */
+   634→
+   635→  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+   636→    const file = e.target.files?.[0]
+   637→    e.target.value = '' // allow re-picking the same file
+   638→    if (!file) return
+   639→    if (file.size > 14 * 1024 * 1024) {
+   640→      setAttachError('That file is too large (max 14 MB).')
+   641→      return
+   642→    }
+   643→    const reader = new FileReader()
+   644→    reader.onload = () => {
+   645→      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+   646→      if (!dataUrl) {
+   647→        setAttachError('Could not read that file.')
+   648→        return
+   649→      }
+   650→      setAttach({ filename: file.name, dataUrl })
+   651→      setAttachError('')
+   652→    }
+   653→    reader.onerror = () => setAttachError('Could not read that file.')
+   654→    reader.readAsDataURL(file)
+   655→  }
+   656→
+   657→  /* ---------- keyboard ---------- */
+   658→
+   659→  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   660→    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+   661→      e.preventDefault()
+   662→      void send(input)
+   663→    }
+   664→  }
+   665→
+   666→  const stop = () => abortRef.current?.abort()
+   667→
+   668→  /* ---------- derived ---------- */
+   669→
+   670→  const headerAgent = agentOrNexus(pinnedAgent ?? assign?.agentSlug)
+   671→  const headerDivision = DIVISION_MAP[headerAgent.division]
+   672→  const isPinned = pinnedAgent != null
+   673→  const showWelcome = messages.length === 0 && !streaming
+   674→  const canSend = (input.trim().length > 0 || attach != null) && !streaming
+   675→  const placeholder = `Message ${headerAgent.name}…`
+   676→
+   677→  const applyCapability = (c: Capability) => {
+   678→    if (c.voice) {
+   679→      props.onOpenVoice()
+   680→      return
+   681→    }
+   682→    if (c.whatsapp) {
+   683→      props.onOpenWhatsApp()
+   684→      return
+   685→    }
+   686→    if (c.prompt) {
+   687→      setInput(c.prompt)
+   688→      textareaRef.current?.focus()
+   689→    }
+   690→  }
+   691→
+   692→  /* Index of the newest handoff pill — it shimmers while its reply streams. */
+   693→  let lastAssignIdx = -1
+   694→  for (let i = messages.length - 1; i >= 0; i--) {
+   695→    if (messages[i].role === 'agent') {
+   696→      lastAssignIdx = i
+   697→      break
+   698→    }
+   699→  }
+   700→
+   701→  return (
+   702→    <div className="flex h-[calc(100dvh-56px)] flex-col md:h-screen">
+   703→      {/* ---------- Header: current agent identity ---------- */}
+   704→      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/8 px-3 sm:px-4">
+   705→        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+   706→          {isPinned ? (
+   707→            <>
+   708→              <AgentAvatar agent={headerAgent} size={34} />
+   709→              <div className="min-w-0">
+   710→                <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+   711→                  <span className="truncate">{headerAgent.name}</span>
+   712→                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+   713→                    <Pin className="h-2.5 w-2.5" aria-hidden />
+   714→                    pinned
+   715→                  </span>
+   716→                </p>
+   717→                {headerDivision ? (
+   718→                  <p className="truncate text-[11px]" style={{ color: headerDivision.color }}>
+   719→                    {headerDivision.label}
+   720→                  </p>
+   721→                ) : null}
+   722→              </div>
+   723→              <button
+   724→                type="button"
+   725→                onClick={() => onPinnedAgentChange(null)}
+   726→                aria-label={`Unpin ${headerAgent.name} and return to auto-routing`}
+   727→                title="Unpin — return to auto-routing"
+   728→                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200"
+   729→              >
+   730→                <X className="h-4 w-4" aria-hidden />
+   731→              </button>
+   732→            </>
+   733→          ) : assign ? (
+   734→            <>
+   735→              <AgentAvatar agent={headerAgent} size={34} />
+   736→              <div className="min-w-0">
+   737→                <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+   738→                  <span className="truncate">{headerAgent.name}</span>
+   739→                  <span className="shrink-0 rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+   740→                    auto
+   741→                  </span>
+   742→                </p>
+   743→                <p className="truncate text-[11px] text-zinc-500">
+   744→                  {assign.divisionLabel ?? headerDivision?.label ?? 'NEXUS core'}
+   745→                </p>
+   746→              </div>
+   747→            </>
+   748→          ) : (
+   749→            <>
+   750→              <BrandMark size={26} />
+   751→              <p className="text-sm font-semibold text-zinc-100">NEXUS</p>
+   752→            </>
+   753→          )}
+   754→        </div>
+   755→        <button
+   756→          type="button"
+   757→          onClick={props.onOpenAgents}
+   758→          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/5"
+   759→        >
+   760→          <Users className="h-3.5 w-3.5" aria-hidden />
+   761→          Agents
+   762→        </button>
+   763→      </header>
+   764→
+   765→      {/* ---------- Messages / welcome ---------- */}
+   766→      <div
+   767→        ref={scrollRef}
+   768→        onScroll={onScroll}
+   769→        className="nx-scroll flex-1 overflow-y-auto overscroll-contain"
+   770→        aria-label="Conversation"
+   771→      >
+   772→        {showWelcome ? (
+   773→          <div className="mx-auto flex w-full max-w-3xl flex-col items-center px-4 pb-10 pt-10 text-center sm:pt-16">
+   774→            <motion.div variants={stagger} initial="hidden" animate="show" className="w-full">
+   775→              <motion.div variants={fadeUp} className="flex justify-center">
+   776→                <span className="nx-aura relative grid place-items-center rounded-2xl p-2">
+   777→                  <BrandMark size={72} />
+   778→                </span>
+   779→              </motion.div>
+   780→              <motion.h1
+   781→                variants={fadeUp}
+   782→                className="font-display mt-5 text-3xl font-bold tracking-tight text-zinc-100 sm:text-4xl"
+   783→              >
+   784→                What can I do for <span className="nx-gradient-text">you?</span>
+   785→              </motion.h1>
+   786→              <motion.p variants={fadeUp} className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-500">
+   787→                One conversation, every superpower — the right specialist takes over automatically.
+   788→              </motion.p>
+   789→
+   790→              <motion.div
+   791→                variants={stagger}
+   792→                className="mt-9 grid grid-cols-1 gap-3 text-left sm:grid-cols-2 lg:grid-cols-3"
+   793→              >
+   794→                {CAPABILITIES.map((c) => (
+   795→                  <motion.button
+   796→                    key={c.title}
+   797→                    type="button"
+   798→                    variants={fadeUp}
+   799→                    onClick={() => applyCapability(c)}
+   800→                    className="nx-glow-card group p-4 text-left sm:p-5"
+   801→                  >
+   802→                    <span
+   803→                      className="mb-3 grid h-10 w-10 place-items-center rounded-xl"
+   804→                      style={{ backgroundColor: 'rgba(255,90,95,0.12)', color: '#ff8a8d' }}
+   805→                      aria-hidden
+   806→                    >
+   807→                      <c.icon className="h-5 w-5" />
+   808→                    </span>
+   809→                    <span className="block text-sm font-semibold text-zinc-100">{c.title}</span>
+   810→                    <span className="mt-1 block text-xs leading-relaxed text-zinc-500">{c.desc}</span>
+   811→                  </motion.button>
+   812→                ))}
+   813→              </motion.div>
+   814→
+   815→              <motion.div variants={fadeUp} className="mt-7 flex flex-wrap justify-center gap-2">
+   816→                {SUGGESTIONS.map((s) => (
+   817→                  <button
+   818→                    key={s}
+   819→                    type="button"
+   820→                    onClick={() => {
+   821→                      setInput(s)
+   822→                      textareaRef.current?.focus()
+   823→                    }}
+   824→                    className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-zinc-300 transition hover:border-[#ff5a5f]/40 hover:bg-white/[0.06] hover:text-zinc-100"
+   825→                  >
+   826→                    {s}
+   827→                  </button>
+   828→                ))}
+   829→              </motion.div>
+   830→            </motion.div>
+   831→          </div>
+   832→        ) : (
+   833→          <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
+   834→            {messages.map((m, i) => {
+   835→              if (m.role === 'user') {
+   836→                return (
+   837→                  <div key={m.id} className="flex justify-end">
+   838→                    <div className="nx-rise max-w-[85%] rounded-2xl rounded-br-md bg-white/8 px-4 py-2.5">
+   839→                      {m.attachName ? (
+   840→                        <p className="mb-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+   841→                          <FileText className="h-3 w-3 shrink-0" aria-hidden />
+   842→                          <span className="truncate">{m.attachName}</span>
+   843→                        </p>
+   844→                      ) : null}
+   845→                      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-100">
+   846→                        {m.content}
+   847→                      </p>
+   848→                    </div>
+   849→                  </div>
+   850→                )
+   851→              }
+   852→
+   853→              if (m.role === 'agent' && m.assign) {
+   854→                return (
+   855→                  <div key={m.id} className="flex pl-11">
+   856→                    <HandoffPill assign={m.assign} live={streaming && i === lastAssignIdx} />
+   857→                  </div>
+   858→                )
+   859→              }
+   860→
+   861→              if (m.role === 'tool') {
+   862→                const info: ToolCardInfo = {
+   863→                  tool: m.toolName ?? '',
+   864→                  status: m.toolStatus ?? 'done',
+   865→                  message: m.toolMessage,
+   866→                  args: m.toolArgs,
+   867→                  data: m.toolData,
+   868→                }
+   869→                return (
+   870→                  <div key={m.id} className="flex pl-11">
+   871→                    <ToolCard info={info} />
+   872→                  </div>
+   873→                )
+   874→              }
+   875→
+   876→              /* assistant */
+   877→              const agent = agentOrNexus(m.agentSlug)
+   878→              const division = DIVISION_MAP[agent.division]
+   879→              const color = division?.color ?? '#ff5a5f'
+   880→              return (
+   881→                <div key={m.id} className="nx-rise flex gap-3">
+   882→                  <AgentAvatar agent={agent} size={32} className="mt-0.5" />
+   883→                  <div className="min-w-0 flex-1">
+   884→                    {agent.slug !== '__nexus' ? (
+   885→                      <p className="mb-1 text-[11px] font-medium" style={{ color }}>
+   886→                        {agent.name}
+   887→                      </p>
+   888→                    ) : null}
+   889→                    {m.isError ? (
+   890→                      <p className="text-sm leading-relaxed text-red-300">{m.content}</p>
+   891→                    ) : m.streaming && !m.content ? (
+   892→                      <span
+   893→                        className="flex items-center gap-2 py-1.5"
+   894→                        role="status"
+   895→                        aria-label={statusText || 'Thinking'}
+   896→                      >
+   897→                        <span className="flex items-center gap-1" aria-hidden>
+   898→                          <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   899→                          <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   900→                          <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   901→                        </span>
+   902→                        {statusText ? (
+   903→                          <span className="nx-status-shimmer text-xs text-zinc-500">{statusText}</span>
+   904→                        ) : null}
+   905→                      </span>
+   906→                    ) : (
+   907→                      /* `dark` wrapper activates the existing .dark .omni-prose rules */
+   908→                      <div className="dark text-sm text-zinc-100">
+   909→                        <Markdown content={m.content} />
+   910→                        {m.streaming ? (
+   911→                          <span
+   912→                            className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-[#ff5a5f] align-text-bottom"
+   913→                            aria-hidden
+   914→                          />
+   915→                        ) : null}
+   916→                      </div>
+   917→                    )}
+   918→                    <AttachmentList items={m.attachments} />
+   919→                  </div>
+   920→                </div>
+   921→              )
+   922→            })}
+   923→
+   924→            {/* PENDING INDICATOR — the moment a message is sent, show the
+   925→                agent thinking row (avatar + dots + live status) even before
+   926→                the first stream event arrives. Never a blank pause. */}
+   927→            {streaming && (() => {
+   928→              const last = messages[messages.length - 1]
+   929→              const waitingForFirstEvent =
+   930→                !last || last.role === 'user' || (last.role === 'agent' && !streamIdRef.current)
+   931→              return waitingForFirstEvent ? (
+   932→                <div className="nx-rise flex gap-3">
+   933→                  <AgentAvatar agent={agentOrNexus(pinnedAgent ?? assign?.agentSlug)} size={32} className="mt-0.5" />
+   934→                  <div className="flex items-center gap-2 py-1.5" role="status" aria-label={statusText || 'Working'}>
+   935→                    <span className="flex items-center gap-1" aria-hidden>
+   936→                      <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   937→                      <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   938→                      <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   939→                    </span>
+   940→                    <span className="nx-status-shimmer text-xs text-zinc-500">
+   941→                      {statusText || 'Thinking…'}
+   942→                    </span>
+   943→                  </div>
+   944→                </div>
+   945→              ) : null
+   946→            })()}
+   947→
+   948→            {streaming && messages.length === 0 ? (
+   949→              <p className="flex items-center gap-2 pl-11 text-xs text-zinc-500">
+   950→                <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
+   951→                {statusText || 'NEXUS is routing your message…'}
+   952→              </p>
+   953→            ) : null}
+   954→          </div>
+   955→        )}
+   956→      </div>
+   957→
+   958→      {/* ---------- Composer ---------- */}
+   959→      <div className="shrink-0 px-3 pb-3 pt-2 md:px-4 md:pb-4">
+   960→        <div className="mx-auto w-full max-w-3xl">
+   961→          {attachError ? (
+   962→            <p role="alert" className="mb-2 px-1 text-xs text-red-400">
+   963→              {attachError}
+   964→            </p>
+   965→          ) : null}
+   966→          {attach ? (
+   967→            <div className="nx-rise mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-300">
+   968→              <FileText className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+   969→              <span className="min-w-0 flex-1 truncate">{attach.filename}</span>
+   970→              <button
+   971→                type="button"
+   972→                onClick={() => setAttach(null)}
+   973→                aria-label="Remove attachment"
+   974→                className="shrink-0 rounded-md p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+   975→              >
+   976→                <X className="h-3.5 w-3.5" aria-hidden />
+   977→              </button>
+   978→            </div>
+   979→          ) : null}
+   980→
+   981→          {/* ---------- Personality rail (ChatGPT-connector style) ----------
+   982→              Scrollable selector above the composer. Picking a personality
+   983→              pins it → the backend skips orchestrator routing entirely →
+   984→              replies start instantly (the speed fix). "Auto" restores the
+   985→              automatic specialist takeover. */}
+   986→          <PersonalityRail
+   987→            selected={pinnedAgent}
+   988→            onSelect={(slug) => onPinnedAgentChange(slug)}
+   989→            onOpenDirectory={props.onOpenAgents}
+   990→            disabled={streaming}
+   991→          />
+   992→
+   993→          <form
+   994→            onSubmit={(e) => {
+   995→              e.preventDefault()
+   996→              void send(input)
+   997→            }}
+   998→            className="nx-composer flex items-end gap-1 rounded-2xl p-1.5"
+   999→          >
+  1000→            <input
+  1001→              ref={fileRef}
+  1002→              type="file"
+  1003→              hidden
+  1004→              accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.png,.jpg"
+  1005→              onChange={onPickFile}
+  1006→              tabIndex={-1}
+  1007→              aria-hidden
+  1008→            />
+  1009→            <button
+  1010→              type="button"
+  1011→              onClick={() => fileRef.current?.click()}
+  1012→              disabled={streaming}
+  1013→              aria-label="Attach a file"
+  1014→              title="Attach a file"
+  1015→              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+  1016→            >
+  1017→              <Paperclip className="h-[18px] w-[18px]" aria-hidden />
+  1018→            </button>
+  1019→            <textarea
+  1020→              ref={textareaRef}
+  1021→              value={input}
+  1022→              onChange={(e) => setInput(e.target.value)}
+  1023→              onKeyDown={onKeyDown}
+  1024→              rows={1}
+  1025→              disabled={streaming}
+  1026→              placeholder={placeholder}
+  1027→              aria-label={placeholder}
+  1028→              className="max-h-[144px] min-h-[40px] flex-1 resize-none bg-transparent px-1.5 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+  1029→            />
+  1030→            <button
+  1031→              type="button"
+  1032→              onClick={props.onOpenVoice}
+  1033→              disabled={streaming}
+  1034→              aria-label="Voice mode"
+  1035→              title="Voice mode"
+  1036→              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+  1037→            >
+  1038→              <Mic className="h-[18px] w-[18px]" aria-hidden />
+  1039→            </button>
+  1040→            {streaming ? (
+  1041→              <button
+  1042→                type="button"
+  1043→                onClick={stop}
+  1044→                aria-label="Stop generating"
+  1045→                title="Stop generating"
+  1046→                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ff5a5f]/15 text-[#ff5a5f] transition hover:bg-[#ff5a5f]/25"
+  1047→              >
+  1048→                <Square className="h-4 w-4" fill="currentColor" aria-hidden />
+  1049→              </button>
+  1050→            ) : (
+  1051→              <button
+  1052→                type="submit"
+  1053→                disabled={!canSend}
+  1054→                aria-label="Send message"
+  1055→                className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-xl disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+  1056→              >
+  1057→                <ArrowUp className="h-[18px] w-[18px]" aria-hidden />
+  1058→              </button>
+  1059→            )}
+  1060→          </form>
+  1061→          <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
+  1062→            {pinnedAgent
+  1063→              ? `${headerAgent.name} is pinned — replies start instantly, no routing delay.`
+  1064→              : `${headerAgent.name} can create images & videos, build documents, run code, browse the web and send messages.`}
+  1065→          </p>
+  1066→        </div>
+  1067→      </div>
+  1068→    </div>
+  1069→  )
+  1070→}
+  1071→

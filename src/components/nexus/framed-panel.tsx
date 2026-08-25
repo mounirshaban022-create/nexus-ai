@@ -38,7 +38,9 @@ export function FramedPanel({
     <div
       className={
         fill
-          ? 'mx-auto flex h-[calc(100dvh-56px)] w-full max-w-6xl flex-col px-4 py-4 md:h-screen md:px-8 md:py-6'
+          ? // Mobile: viewport minus the 56px top bar AND the 55px bottom tab
+            // bar (+ any safe-area inset) so the panel never slides under it.
+            'mx-auto flex h-[calc(100dvh_-_111px_-_env(safe-area-inset-bottom))] w-full max-w-6xl flex-col px-4 py-4 md:h-screen md:px-8 md:py-6'
           : 'mx-auto w-full max-w-6xl px-4 py-8 md:px-8 md:py-10'
       }
     >

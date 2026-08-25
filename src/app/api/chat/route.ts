@@ -25,6 +25,7 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat, streamExternalChatCompletion } from '@/lib/ai-providers'
+import { zaiStreamChat, zaiOnCooldown, getZAI } from '@/lib/zai'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName } from '@/lib/cli-skills'
@@ -1336,15 +1337,74 @@ export async function POST(req: NextRequest) {
     let activeDoc: ActiveDoc | null = null
     let attachmentContextMessage = ''
     if (attachment) {
+      const ext = attachment.filename.split('.').pop()?.toLowerCase() ?? ''
+
+      /* ---------- IMAGE attachments: describe via Z.ai vision ----------
+       * Images previously fell into the document parser and failed with
+       * "could not be parsed" — now they are analyzed by the vision model
+       * and the description is injected so the AI can discuss the image. */
+      if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) {
+        try {
+          const zai = await getZAI()
+          const response = await zai.chat.completions.createVision({
+            model: 'glm-4.6v',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Describe this image in detail for a conversation context: what it shows, key text/objects/colors, and anything noteworthy. Be factual and concise (max 150 words).',
+                  },
+                  { type: 'image_url', image_url: { url: attachment.dataUrl } },
+                ],
+              },
+            ],
+            thinking: { type: 'disabled' },
+          })
+          const description = response.choices[0]?.message?.content ?? ''
+          if (description.trim()) {
+            attachmentContextMessage =
+              `[The user attached the image "${attachment.filename}". A vision model described it for you:\n\n` +
+              `${description.slice(0, 4000)}\n\n` +
+              'Answer questions about this image directly from the description. If they want it edited or transformed into something new, you can use generate_image to create a new version.]'
+            console.log(`[api/chat] image attachment described: ${attachment.filename} (${description.length} chars)`)
+          } else {
+            attachmentContextMessage = `[The user attached the image "${attachment.filename}" but it could not be analyzed. Ask them what they would like to do with it.]`
+          }
+        } catch (imgErr) {
+          console.error('[api/chat] image vision failed:', imgErr)
+          attachmentContextMessage = `[The user attached the image "${attachment.filename}" but it could not be analyzed. Ask them what they would like to do with it.]`
+        }
+      } else {
+      /* ---------- DOCUMENT attachments: parse (with legacy conversion) ---------- */
       try {
-        const ext = attachment.filename.split('.').pop()?.toLowerCase() ?? ''
-        const formatMap: Record<string, string> = { pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', md: 'md', csv: 'csv' }
-        const fmt = formatMap[ext] ?? 'txt'
+        // Legacy binary Office formats (.doc/.xls/.ppt) are converted to the
+        // modern zip-based equivalents with LibreOffice before parsing.
+        const legacyMap: Record<string, string> = { doc: 'docx', xls: 'xlsx', ppt: 'pptx' }
+        let parseFilename = attachment.filename
+        let parseDataUrl = attachment.dataUrl
+        if (legacyMap[ext]) {
+          try {
+            const { convertWithLibreOffice } = await import('@/lib/doc-convert')
+            const converted = await convertWithLibreOffice(attachment.dataUrl, attachment.filename, legacyMap[ext])
+            if (converted) {
+              parseDataUrl = converted.dataUrl
+              parseFilename = converted.filename
+              console.log(`[api/chat] converted legacy ${ext} → ${legacyMap[ext]} for parsing`)
+            }
+          } catch (convErr) {
+            console.warn('[api/chat] legacy conversion failed, parsing as-is:', convErr)
+          }
+        }
+        const parseExt = parseFilename.split('.').pop()?.toLowerCase() ?? ext
+        const formatMap: Record<string, string> = { pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', txt: 'txt', md: 'md', csv: 'csv', rtf: 'txt', json: 'txt', log: 'txt' }
+        const fmt = formatMap[parseExt] ?? 'txt'
         const origin = appOrigin(req)
         const res = await fetch(`${origin}/api/documents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file: attachment.dataUrl, filename: attachment.filename, format: fmt }),
+          body: JSON.stringify({ file: parseDataUrl, filename: parseFilename, format: fmt }),
         })
         const data = await res.json()
         if (res.ok && data.document) {
@@ -1383,6 +1443,7 @@ export async function POST(req: NextRequest) {
         console.error('[api/chat] attachment parse failed:', attErr)
         attachmentContextMessage = `[The user attached "${attachment.filename}" but it could not be parsed. Tell them politely and suggest checking the file.]`
       }
+      } // end document-attachment branch
     }
 
     // Phase 0 Bug 2: derive the verified user id ONCE (JWT verification is
@@ -1801,9 +1862,37 @@ export async function POST(req: NextRequest) {
               send({ type: 'assistant_delta', delta })
             }
 
+            // 0) Z.AI BUILT-IN ENGINE — the platform's millisecond-latency
+            //    gateway (GLM). Serves the request FIRST when healthy; the
+            //    circuit breaker skips it automatically after failures.
+            //    This is the root fix for "the AI is extremely slow": the
+            //    anonymous free pool (5-50s) only runs as a fallback now.
+            if (!zaiOnCooldown()) {
+              try {
+                content = await zaiStreamChat(
+                  llmMessages as Array<{ role: string; content: string }>,
+                  emitDelta,
+                  { maxTokens: 4000, timeoutMs: 60_000 }
+                )
+                didStream = true
+                console.log('[api/chat] served by Z.ai engine (primary)')
+              } catch (zaiErr) {
+                if (streamedSoFar.trim()) {
+                  // Partial Z.ai output already on screen — keep it.
+                  content = streamedSoFar
+                  didStream = true
+                } else {
+                  console.warn(
+                    '[api/chat] Z.ai engine failed, falling back:',
+                    zaiErr instanceof Error ? zaiErr.message : zaiErr
+                  )
+                }
+              }
+            }
+
             // 1) User's connected provider — streamed, with model rotation
             //    left to streamExternalChatCompletion's fallback chain.
-            if (userProvider) {
+            if (!didStream && userProvider) {
               try {
                 content = await streamExternalChatCompletion(
                   userProvider,
