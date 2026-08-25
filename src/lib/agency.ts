@@ -89,6 +89,13 @@ export function getAgentPrompt(slug: string): string | null {
  * Wraps a persona prompt with the framing the chat pipeline expects:
  * the agent stays itself, but knows it is chatting inside NEXUS with
  * the full NEXUS toolbox (images, documents, code, web search…).
+ *
+ * SKILLS FIX: the upstream persona files are long CV-style self
+ * descriptions ("I'm Quinn, 14 years of experience…"). Fed verbatim they
+ * drowned the TOOL_CALL protocol — models introduced themselves instead
+ * of calling web_search/use_skill. The persona body is therefore
+ * TRIMMED (voice & expertise essentials) and explicitly subordinated to
+ * the NEXUS tool rules, with an anti-introduction directive.
  */
 export function buildPersonaSystemPrompt(slug: string): string | null {
   const meta = AGENT_MAP.get(slug)
@@ -96,15 +103,23 @@ export function buildPersonaSystemPrompt(slug: string): string | null {
   if (!meta || !prompt) return null
 
   const division = DIVISION_MAP.get(meta.division)
+  // Keep the opening of the persona (identity, voice, expertise) — drop
+  // trailing process minutiae that added hundreds of prompt tokens.
+  const PERSONA_CHAR_CAP = 1600
+  const trimmed =
+    prompt.length > PERSONA_CHAR_CAP
+      ? prompt.slice(0, PERSONA_CHAR_CAP).replace(/\n[^.\n]*$/, '') + '…'
+      : prompt
+
   return [
-    `You are "${meta.name}"${division ? ` of the ${division.label} division` : ''} — a specialist agent in The Agency, NEXUS's team of ${AGENCY_STATS.agents} AI experts.`,
+    `PERSONA — you are "${meta.name}"${division ? ` of the ${division.label} division` : ''}, a specialist in NEXUS's Agency of ${AGENCY_STATS.agents} experts. Adopt this voice and expertise:`,
     ``,
-    prompt,
+    trimmed,
     ``,
-    `OPERATING NOTES:`,
-    `- Stay fully in character as ${meta.name}. Your personality, processes and deliverables above shape every answer.`,
-    `- You are chatting inside NEXUS, so you also have the NEXUS toolbox available (image generation, document creation, code execution, web search…). Use them when they serve the user.`,
-    `- Keep answers practical and deliverable-focused, as defined in your persona.`,
+    `PERSONA RULES (these override anything above):`,
+    `- NEVER introduce yourself, your years of experience, or your background unless the user explicitly asks. Your FIRST sentence must directly address the user's request.`,
+    `- The NEXUS TOOL PROTOCOL always takes precedence over persona habits: when a tool fits (search, image, document, code, browser, skill, email…), emit the TOOL_CALL line — do not merely describe what you would do.`,
+    `- Stay in character in tone and depth, and keep answers practical and deliverable-focused.`,
   ].join('\n')
 }
 

@@ -30,6 +30,7 @@ import { Markdown } from '@/components/omni/markdown'
 import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent } from './shared'
 import { BrandMark, DIVISION_MAP, agentOrNexus } from './shared'
 import { AgentAvatar, AttachmentList, HandoffPill, ToolCard, type ToolCardInfo } from './chat-parts'
+import { PersonalityRail } from './personality-rail'
 
 export interface NexusChatProps {
   sessionId?: string
@@ -124,6 +125,13 @@ export function NexusChat(props: NexusChatProps) {
   const { pinnedAgent, onPinnedAgentChange, onSessionCreated } = props
 
   const [messages, setMessages] = useState<NxMsg[]>([])
+  /** Mirror of `messages` for read-inside-callback checks (burst detection
+   *  reads the CURRENT bubble content inside the stream loop without
+   *  re-creating the send callback on every delta). */
+  const messagesRef = useRef<NxMsg[]>([])
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
   const [streaming, setStreaming] = useState(false)
   const [sessionId, setSessionId] = useState<string | undefined>(props.sessionId)
   const [input, setInput] = useState(props.prefill ?? '')
@@ -970,6 +978,18 @@ export function NexusChat(props: NexusChatProps) {
             </div>
           ) : null}
 
+          {/* ---------- Personality rail (ChatGPT-connector style) ----------
+              Scrollable selector above the composer. Picking a personality
+              pins it → the backend skips orchestrator routing entirely →
+              replies start instantly (the speed fix). "Auto" restores the
+              automatic specialist takeover. */}
+          <PersonalityRail
+            selected={pinnedAgent}
+            onSelect={(slug) => onPinnedAgentChange(slug)}
+            onOpenDirectory={props.onOpenAgents}
+            disabled={streaming}
+          />
+
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -1039,8 +1059,9 @@ export function NexusChat(props: NexusChatProps) {
             )}
           </form>
           <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
-            {headerAgent.name} can create images &amp; videos, build documents, run code, browse the web and send
-            messages.
+            {pinnedAgent
+              ? `${headerAgent.name} is pinned — replies start instantly, no routing delay.`
+              : `${headerAgent.name} can create images & videos, build documents, run code, browse the web and send messages.`}
           </p>
         </div>
       </div>

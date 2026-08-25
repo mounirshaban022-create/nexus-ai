@@ -1,0 +1,631 @@
+     1→  1250→        attachmentContextMessage = `[The user attached "${attachment.filename}" but it could not be parsed. Tell them politely and suggest checking the file.]`
+     2→  1251→      }
+     3→  1252→    }
+     4→  1253→
+     5→  1254→    // Phase 0 Bug 2: derive the verified user id ONCE (JWT verification is
+     6→  1255→    // not free) and reuse for both session ownership (Bug 3) and Supabase
+     7→  1256→    // cloud sync. null = guest.
+     8→  1257→    const verifiedUserId = await getUserIdFromRequest(req)
+     9→  1258→
+    10→  1259→    // Default enabled: abilities + key connectors
+    11→  1260→    // AGENT WORK: when the user has connected a real email account, the
+    12→  1261→    // inbox tools (list / search / read) become available to the agent so
+    13→  1262→    // it can manage the mailbox directly from chat (paired with the
+    14→  1263→    // email_organize + email_folders ability tools above).
+    15→  1264→    const emailAccount = await getPrimaryAccount().catch(() => null)
+    16→  1265→
+    17→  1266→    const enabledConnectors = [
+    18→  1267→      'web_search', 'read_page', 'wikipedia', 'weather', 'crypto', 'currency',
+    19→  1268→      'translate', 'dictionary', 'github', 'hacker_news', 'time', 'calculator',
+    20→  1269→      'recipes', 'nasa', 'news', 'trivia', 'pokemon', 'games', 'forecast',
+    21→  1270→      // Public-API additions (free, no API key, no rate limit — bypass Z.ai 429s):
+    22→  1271→      // - space_news: Spaceflight News API (dedicated aerospace news, distinct from BBC news + rocket launches)
+    23→  1272→      // - air_quality: Open-Meteo air pollution (PM2.5/PM10/CO/O3/NO2/SO2) — pairs with geocode + weather
+    24→  1273→      // - music: iTunes Search API (songs, podcasts, audiobooks, albums) — no equivalent existed before
+    25→  1274→      'space_news', 'air_quality', 'music',
+    26→  1275→      // Real-inbox connectors (only when an email account is connected):
+    27→  1276→      ...(emailAccount ? ['email_list', 'email_search', 'email_read'] : []),
+    28→  1277→    ]
+    29→  1278→
+    30→  1279→    // Phase 1 P3: verify ownership of the projectId when starting a NEW
+    31→  1280→    // session bound to a project. findFirst scoped to verifiedUserId means
+    32→  1281→    // a projectId owned by another user is silently dropped (the new
+    33→  1282→    // session is created without a project binding instead of erroring —
+    34→  1283→    // this preserves guest and cross-user fallbacks). Guests get null
+    35→  1284→    // (no projects for guests) — projectId is silently ignored.
+    36→  1285→    let verifiedProjectId: string | null = null
+    37→  1286→    if (projectId && verifiedUserId) {
+    38→  1287→      const ownedProject = await db.project.findFirst({
+    39→  1288→        where: { id: projectId, userId: verifiedUserId },
+    40→  1289→        select: { id: true },
+    41→  1290→      })
+    42→  1291→      if (ownedProject) verifiedProjectId = ownedProject.id
+    43→  1292→    }
+    44→  1293→
+    45→  1294→    // The Agency: validate the requested persona against the catalog.
+    46→  1295→    // Unknown slugs are silently dropped (plain NEXUS chat) — never a 500.
+    47→  1296→    let verifiedAgentSlug: string | null = null
+    48→  1297→    if (agentSlug && getAgentMeta(agentSlug)) verifiedAgentSlug = agentSlug
+    49→  1298→    // The user explicitly sent agentSlug: '' → UNPIN (back to auto mode)
+    50→  1299→    const wantsUnpin = agentSlug === ''
+    51→  1300→
+    52→  1301→    // Phase 0 Bug 3: ownership check.
+    53→  1302→    //   - Authenticated user (verifiedUserId = "abc"): may only resume
+    54→  1303→    //     sessions where userId = "abc".
+    55→  1304→    //   - Guest (verifiedUserId = null): may only resume sessions where
+    56→  1305→    //     userId is null (guest sessions). Any guest can resume any guest
+    57→  1306→    //     session by id — that is the documented guest behaviour.
+    58→  1307→    //   - If a client supplies an authenticated user's sessionId without a
+    59→  1308→    //     valid cookie for that user, the lookup returns null and a fresh
+    60→  1309→    //     session is created — preventing cross-user takeover.
+    61→  1310→    let session = sessionId
+    62→  1311→      ? await db.chatSession.findFirst({
+    63→  1312→          where: { id: sessionId, kind: 'chat', userId: verifiedUserId },
+    64→  1313→        })
+    65→  1314→      : null
+    66→  1315→    if (!session) {
+    67→  1316→      session = await db.chatSession.create({
+    68→  1317→        data: {
+    69→  1318→          kind: 'chat',
+    70→  1319→          title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
+    71→  1320→          // Phase 0 Bug 3: stamp ownership on creation.
+    72→  1321→          userId: verifiedUserId,
+    73→  1322→          // The Agency: stamp the specialist persona on creation. A persona
+    74→  1323→          // provided up-front is PINNED (sticky); otherwise auto mode runs.
+    75→  1324→          agentSlug: verifiedAgentSlug,
+    76→  1325→          agentPinned: Boolean(verifiedAgentSlug),
+    77→  1326→          // Phase 1 P3: stamp the verified project binding on creation.
+    78→  1327→          // null when: guest, no projectId provided, or projectId not owned
+    79→  1328→          // by this user (verifiedProjectId is null in all three cases).
+    80→  1329→          projectId: verifiedProjectId,
+    81→  1330→        },
+    82→  1331→      })
+    83→  1332→      // Mirror to Supabase (cloud) if user is authenticated
+    84→  1333→      if (verifiedUserId) {
+    85→  1334→        await supabaseUpsert('chat_sessions', {
+    86→  1335→          id: session.id,
+    87→  1336→          user_id: verifiedUserId,
+    88→  1337→          title: session.title,
+    89→  1338→          kind: 'chat',
+    90→  1339→        }, { onConflict: 'id' })
+    91→  1340→      }
+    92→  1341→    }
+    93→  1342→
+    94→  1343→    // Phase 1 P1: fetch the verified user's durable memories (top 25 by
+    95→  1344→    // recency) and inject them into the system prompt. Guests and users
+    96→  1345→    // with no memories get the unmodified prompt.
+    97→  1346→    const userMemories = verifiedUserId
+    98→  1347→      ? await db.userMemory.findMany({
+    99→  1348→          where: { userId: verifiedUserId },
+   100→  1349→          orderBy: { createdAt: 'desc' },
+   101→  1350→          take: 25,
+   102→  1351→          select: { content: true },
+   103→  1352→        })
+   104→  1353→      : []
+   105→  1354→    // Phase 1 P3: if the resolved session has a projectId, fetch the
+   106→  1355→    // project's customInstructions + the text content of its reference
+   107→  1356→    // files (capped at 50 per project via the API layer). The session is
+   108→  1357→    // already ownership-scoped (verifiedUserId match at lookup time), so
+   109→  1358→    // the project fetch is safe by construction — but we still scope by
+   110→  1359→    // userId for defence-in-depth. Files are included via Prisma include;
+   111→  1360→    // we filter their content into the system prompt as background context.
+   112→  1361→    let projectContext: {
+   113→  1362→      name: string
+   114→  1363→      description: string
+   115→  1364→      customInstructions: string
+   116→  1365→      files: Array<{ filename: string; content: string }>
+   117→  1366→    } | null = null
+   118→  1367→    if (session.projectId && verifiedUserId) {
+   119→  1368→      const project = await db.project.findFirst({
+   120→  1369→        where: { id: session.projectId, userId: verifiedUserId },
+   121→  1370→        select: {
+   122→  1371→          name: true,
+   123→  1372→          description: true,
+   124→  1373→          customInstructions: true,
+   125→  1374→          files: {
+   126→  1375→            orderBy: { createdAt: 'asc' },
+   127→  1376→            take: 50,
+   128→  1377→            select: { filename: true, content: true },
+   129→  1378→          },
+   130→  1379→        },
+   131→  1380→      })
+   132→  1381→      if (project) {
+   133→  1382→        projectContext = {
+   134→  1383→          name: project.name,
+   135→  1384→          description: project.description,
+   136→  1385→          customInstructions: project.customInstructions,
+   137→  1386→          files: project.files,
+   138→  1387→        }
+   139→  1388→      }
+   140→  1389→    }
+   141→  1390→    // The Agency / NEXUS One: persona resolution.
+   142→  1391→    //   PINNED  (agentPinned=true): the session's specialist is sticky —
+   143→  1392→    //           every message runs with that persona.
+   144→  1393→    //   AUTO    (default): the NEXUS Orchestrator classifies THIS message
+   145→  1394→    //           against the 255-agent catalog and the best specialist
+   146→  1395→    //           takes over. The session's agentSlug is updated (not
+   147→  1396→    //           pinned) to reflect the latest active specialist.
+   148→  1397→    // Pin/unpin requests from the client are applied first.
+   149→  1398→    if (wantsUnpin || verifiedAgentSlug) {
+   150→  1399→      const nextPinned = Boolean(verifiedAgentSlug)
+   151→  1400→      const nextSlug = verifiedAgentSlug
+   152→  1401→      if (session.agentPinned !== nextPinned || session.agentSlug !== nextSlug) {
+   153→  1402→        await db.chatSession.update({
+   154→  1403→          where: { id: session.id },
+   155→  1404→          data: { agentSlug: nextSlug, agentPinned: nextPinned },
+   156→  1405→        }).catch(() => {})
+   157→  1406→        session = { ...session, agentSlug: nextSlug, agentPinned: nextPinned }
+   158→  1407→      }
+   159→  1408→    }
+   160→  1409→
+   161→  1410→    // Build message history (needed for routing context + LLM messages)
+   162→  1411→    const history = await db.chatMessage.findMany({
+   163→  1412→      where: { sessionId: session.id },
+   164→  1413→      orderBy: { createdAt: 'asc' },
+   165→  1414→    })
+   166→  1415→
+   167→  1416→    const routingHistory = history
+   168→  1417→      .filter((m) => m.role === 'user' || m.role === 'assistant')
+   169→  1418→      .slice(-6)
+   170→  1419→      .map((m) => ({ role: m.role, content: m.content }))
+   171→  1420→
+   172→  1421→    // NOTE: agent routing + system-prompt build now happen INSIDE the stream
+   173→  1422→    // (see start()) so the client receives the `user` + live `status` events
+   174→  1423→    // immediately — the old flow held the whole response hostage behind the
+   175→  1424→    // routing LLM call, which made the chat feel dead for seconds.
+   176→  1425→
+   177→  1426→    // Phase 1 P1: detect a "remember: ..." directive from the user. This is
+   178→  1427→    // the opt-in extraction path — we never silently extract. When the user
+   179→  1428→    // types "remember: I'm a morning person" the durable fact is saved to
+   180→  1429→    // the UserMemory table for future sessions, scoped to this user only.
+   181→  1430→    // The assistant still answers the message normally afterward.
+   182→  1431→    const rememberFact = verifiedUserId ? parseRememberDirective(trimmed) : null
+   183→  1432→    if (rememberFact && verifiedUserId) {
+   184→  1433→      // Cap total memories per user (matches the /api/memory POST guard).
+   185→  1434→      const memCount = await db.userMemory.count({ where: { userId: verifiedUserId } })
+   186→  1435→      if (memCount < 500) {
+   187→  1436→        await db.userMemory.create({
+   188→  1437→          data: {
+   189→  1438→            userId: verifiedUserId,
+   190→  1439→            content: rememberFact,
+   191→  1440→            sourceSessionId: session.id,
+   192→  1441→          },
+   193→  1442→        }).catch((e) => console.error('[memory] save failed:', e))
+   194→  1443→      }
+   195→  1444→    }
+   196→  1445→
+   197→  1446→    const encoder = new TextEncoder()
+   198→  1447→    const stream = new ReadableStream<Uint8Array>({
+   199→  1448→      async start(controller) {
+   200→  1449→        const send = (event: Record<string, unknown>) => {
+   201→  1450→          controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'))
+   202→  1451→        }
+   203→  1452→
+   204→  1453→        // DIRECT ANSWER: creator identity (bypass LLM to prevent wrong answers)
+   205→  1454→        if (/who (created|made|built|developed|owns) (you|this|nexus)|your (creator|maker|developer|owner)|who.s mounir|where.*(creator|maker|from)|mounir|mansoura|who made this app|who built this/i.test(trimmed)) {
+   206→  1455→          const answer =
+   207→  1456→            'I was created by **Mounir Shaaban** — the creator and owner of NEXUS AI. ' +
+   208→  1457→            "He's from **Mansoura, Egypt**. 🇪🇬🚀 If you'd like, tell me what you want to build today!" 
+   209→  1458→          const userMsg = await db.chatMessage.create({
+   210→  1459→            data: { sessionId: session!.id, role: 'user', content: trimmed || '[attached file]' },
+   211→  1460→          })
+   212→  1461→          const saved = await db.chatMessage.create({
+   213→  1462→            data: { sessionId: session!.id, role: 'assistant', content: answer },
+   214→  1463→          })
+   215→  1464→          send({ type: 'user', id: userMsg.id, content: trimmed })
+   216→  1465→          send({ type: 'assistant', content: answer, attachments: [] })
+   217→  1466→          send({ type: 'done', sessionId: session!.id })
+   218→  1467→          // CRITICAL: close the controller — without this the browser's
+   219→  1468→          // reader never sees the stream end, the frontend loop hangs and
+   220→  1469→          // the chat stays stuck in "generating" forever (the bug that made
+   221→  1470→          // the composer lock up after identity questions).
+   222→  1471→          controller.close()
+   223→  1472→          return
+   224→  1473→        }
+   225→  1474→
+   226→  1475→        try {
+   227→  1476→          // Persist user message
+   228→  1477→          const userMessage = await db.chatMessage.create({
+   229→  1478→            data: { sessionId: session!.id, role: 'user', content: trimmed || '[attached file]' },
+   230→  1479→          })
+   231→  1480→          // Mirror to Supabase (Phase 0 Bug 2: verifiedUserId replaces the
+   232→  1481→          // forged-header path; the cloud row is only written for an
+   233→  1482→          // authenticated user, with their verified id)
+   234→  1483→          if (verifiedUserId) {
+   235→  1484→            void supabaseUpsert('chat_messages', {
+   236→  1485→              id: userMessage.id,
+   237→  1486→              session_id: session!.id,
+   238→  1487→              role: 'user',
+   239→  1488→              content: trimmed,
+   240→  1489→            }, { onConflict: 'id' })
+   241→  1490→          }
+   242→  1491→          send({ type: 'user', id: userMessage.id, content: trimmed })
+   243→  1492→
+   244→  1493→          /* ---------- LIVE ROUTING (inside the stream — see note above) ---------- */
+   245→  1494→          // The user event is already on screen; now show a live status while
+   246→  1495→          // the orchestrator picks the specialist, then announce the takeover.
+   247→  1496→          let effectiveAgentSlug: string | null
+   248→  1497→          let routingDecision: RoutingDecision | null = null
+   249→  1498→          if (session.agentPinned && session.agentSlug) {
+   250→  1499→            effectiveAgentSlug = session.agentSlug
+   251→  1500→          } else {
+   252→  1501→            // AUTO-ROUTE: pick the best specialist for THIS message.
+   253→  1502→            // Status event keeps the UI visibly alive during the routing call.
+   254→  1503→            send({ type: 'status', message: 'Picking the right specialist…' })
+   255→  1504→            routingDecision = await routeMessage(effectiveMessage, routingHistory)
+   256→  1505→            effectiveAgentSlug = routingDecision.agentSlug
+   257→  1506→            // Reflect the active specialist on the session (never pins)
+   258→  1507→            if (session.agentSlug !== effectiveAgentSlug) {
+   259→  1508→              await db.chatSession.update({
+   260→  1509→                where: { id: session!.id },
+   261→  1510→                data: { agentSlug: effectiveAgentSlug },
+   262→  1511→              }).catch(() => {})
+   263→  1512→            }
+   264→  1513→          }
+   265→  1514→
+   266→  1515→          const personaPrompt = effectiveAgentSlug ? buildPersonaSystemPrompt(effectiveAgentSlug) : null
+   267→  1516→          const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext, personaPrompt)
+   268→  1517→
+   269→  1518→          // NEXUS One: announce the agent takeover (or hand-back to NEXUS)
+   270→  1519→          // so the UI can render the live routing chip. Only emitted for
+   271→  1520→          // AUTO-routed sessions — pinned sessions already show their agent.
+   272→  1521→          if (routingDecision) {
+   273→  1522→            const decisionMeta = routingDecision.agentSlug ? getAgentMeta(routingDecision.agentSlug) : null
+   274→  1523→            send({
+   275→  1524→              type: 'agent_assign',
+   276→  1525→              agentSlug: routingDecision.agentSlug,
+   277→  1526→              name: routingDecision.agentName,
+   278→  1527→              division: routingDecision.division,
+   279→  1528→              emoji: routingDecision.emoji,
+   280→  1529→              color: routingDecision.color,
+   281→  1530→              reason: routingDecision.reason,
+   282→  1531→              elapsedMs: routingDecision.elapsedMs,
+   283→  1532→              pinned: false,
+   284→  1533→              divisionLabel: decisionMeta ? getDivision(decisionMeta.division)?.label ?? null : null,
+   285→  1534→            })
+   286→  1535→          }
+   287→  1536→
+   288→  1537→          // LLM conversation: system + history + tool exchanges
+   289→  1538→          const llmMessages: Array<{ role: string; content: string }> = [
+   290→  1539→            { role: 'assistant', content: systemPrompt },
+   291→  1540→            ...history.slice(-MAX_HISTORY).map((m) => ({ role: m.role, content: m.content })),
+   292→  1541→          ]
+   293→  1542→          // Include the new user message (history was fetched before insert)
+   294→  1543→          llmMessages.push({ role: 'user', content: effectiveMessage })
+   295→  1544→
+   296→  1545→          // SESSION DOCUMENT MEMORY: persist the attachment context as a
+   297→  1546→          // DATABASE chat message when first attached, so it survives
+   298→  1547→          // server restarts AND appears in history for follow-ups. For
+   299→  1548→          // follow-ups with no new attachment, restore from the DB history
+   300→  1549→          // (search for the attachment marker) or the in-memory cache.
+   301→  1550→          if (!attachment && session?.id) {
+   302→  1551→            // Try in-memory first (fast path)
+   303→  1552→            let stored = sessionDocs.get(session.id) ?? null
+   304→  1553→            if (!stored) {
+   305→  1554→              // Fall back to the DB: look for the attachment marker message
+   306→  1555→              const marker = history.find(
+   307→  1556→                (m) => m.role === 'user' && m.content.startsWith('[The user attached the document "')
+   308→  1557→              )
+   309→  1558→              if (marker) {
+   310→  1559→                const filenameMatch = marker.content.match(/"([^"]+)"/)
+   311→  1560→                const textMatch = marker.content.match(/DOCUMENT "[^"]+":\n([\s\S]*?)\n(You can answer|$)/)
+   312→  1561→                stored = {
+   313→  1562→                  title: filenameMatch?.[1] ?? 'document',
+   314→  1563→                  text: (textMatch?.[1] ?? marker.content).slice(0, 40000),
+   315→  1564→                  format: marker.content.includes('pdf_operation') ? 'pdf' : 'doc',
+   316→  1565→                  filename: filenameMatch?.[1] ?? 'document',
+   317→  1566→                  dataUrl: '', // not available from history — tools will ask to re-attach for binary ops
+   318→  1567→                }
+   319→  1568→                // Cache for future requests
+   320→  1569→                sessionDocs.set(session.id, stored)
+   321→  1570→              }
+   322→  1571→            }
+   323→  1572→            if (stored) {
+   324→  1573→              activeDoc = stored
+   325→  1574→              attachmentContextMessage =
+   326→  1575→                `[CONTEXT — the user attached the document "${stored.filename}" earlier in this conversation. Its full content remains available below.\n\n` +
+   327→  1576→                `DOCUMENT "${stored.title}":\n${stored.text.slice(0, 24000)}\n` +
+   328→  1577→                `Continue answering follow-up questions about this document from its content. The edit_document and ${stored.format === 'pdf' ? 'pdf_operation' : 'file'} tools can still operate on it.]`
+   329→  1578→            }
+   330→  1579→          } else if (attachment && session?.id && activeDoc) {
+   331→  1580→            // Remember the newly-attached document for the rest of the session
+   332→  1581→            sessionDocs.set(session.id, activeDoc)
+   333→  1582→            // ALSO persist as a DB message so it survives restarts
+   334→  1583→            try {
+   335→  1584→              await db.chatMessage.create({
+   336→  1585→                data: {
+   337→  1586→                  sessionId: session.id,
+   338→  1587→                  role: 'user',
+   339→  1588→                  content: attachmentContextMessage.slice(0, 30000),
+   340→  1589→                },
+   341→  1590→              })
+   342→  1591→            } catch {
+   343→  1592→              /* best-effort persistence */
+   344→  1593→            }
+   345→  1594→          }
+   346→  1595→
+   347→  1596→          // Document attachment context: inject the parsed document content
+   348→  1597→          // BEFORE the user's message so the AI sees it as context.
+   349→  1598→          if (attachmentContextMessage) {
+   350→  1599→            llmMessages.splice(llmMessages.length - 1, 0, {
+   351→  1600→              role: 'user',
+   352→  1601→              content: attachmentContextMessage,
+   353→  1602→            })
+   354→  1603→          }
+   355→  1604→
+   356→  1605→          // Optional thinking phase
+   357→  1606→          if (thinkingEnabled) {
+   358→  1607→            try {
+   359→  1608→              const thinking = (await smartChat([
+   360→  1609→                {
+   361→  1610→                  role: 'assistant',
+   362→  1611→                  content:
+   363→  1612→                    'You are the reasoning engine of NEXUS AI. Given a question, produce a SHORT internal analysis (max 80 words, telegraphic) covering: what the user needs, which tools to use (if any), and the answer structure. Output ONLY the analysis.',
+   364→  1613→                },
+   365→  1614→                { role: 'user', content: trimmed },
+   366→  1615→              ], { maxTokens: 300, task: 'reasoning' })).trim().slice(0, 900)
+   367→  1616→              if (thinking) {
+   368→  1617→                llmMessages.push({
+   369→  1618→                  role: 'user',
+   370→  1619→                  content: `[internal analysis: ${thinking}]`,
+   371→  1620→                })
+   372→  1621→              }
+   373→  1622→            } catch {
+   374→  1623→              /* best-effort */
+   375→  1624→            }
+   376→  1625→          }
+   377→  1626→
+   378→  1627→          const attachments: Array<Record<string, unknown>> = []
+   379→  1628→          let toolCallsUsed = 0
+   380→  1629→
+   381→  1630→          // USER PROVIDER: resolved once (their key, their quota). When
+   382→  1631→          // present it streams FIRST (word-by-word like everything else);
+   383→  1632→          // on failure we race the free pool.
+   384→  1633→          const userProvider = await getActiveAiProvider()
+   385→  1634→
+   386→  1635→          for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
+   387→  1636→            const isLast = step === MAX_TOOL_CALLS
+   388→  1637→
+   389→  1638→            // STREAMING PATH — emit assistant_start + assistant_delta chunks
+   390→  1639→            // as tokens arrive on EVERY path (user provider AND free pool).
+   391→  1640→            // Open a new assistant bubble + live status right away.
+   392→  1641→            let content = ''
+   393→  1642→            let didStream = false
+   394→  1643→            send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
+   395→  1644→            send({ type: 'status', message: step === 0 ? 'Thinking…' : 'Continuing…' })
+   396→  1645→
+   397→  1646→            /** Deltas funnel: tracks what is already on screen so a failed
+   398→  1647→             *  stream can keep its partial text instead of duplicating. */
+   399→  1648→            let streamedSoFar = ''
+   400→  1649→            const emitDelta = (delta: string) => {
+   401→  1650→              streamedSoFar += delta
+   402→  1651→              send({ type: 'assistant_delta', delta })
+   403→  1652→            }
+   404→  1653→
+   405→  1654→            // 1) User's connected provider — streamed, with model rotation
+   406→  1655→            //    left to streamExternalChatCompletion's fallback chain.
+   407→  1656→            if (userProvider) {
+   408→  1657→              try {
+   409→  1658→                content = await streamExternalChatCompletion(
+   410→  1659→                  userProvider,
+   411→  1660→                  llmMessages as Parameters<typeof streamExternalChatCompletion>[1],
+   412→  1661→                  emitDelta,
+   413→  1662→                  { maxTokens: 4000, timeoutMs: 60_000 }
+   414→  1663→                )
+   415→  1664→                didStream = true
+   416→  1665→                console.log(`[api/chat] served by user provider: ${userProvider.providerId}/${userProvider.defaultModel}`)
+   417→  1666→              } catch (provErr) {
+   418→  1667→                // Partial text already visible → keep it, no retry (would
+   419→  1668→                // duplicate on screen).
+   420→  1669→                if (streamedSoFar.trim()) {
+   421→  1670→                  content = streamedSoFar
+   422→  1671→                  didStream = true
+   423→  1672→                } else {
+   424→  1673→                  console.error(
+   425→  1674→                    '[api/chat] user provider failed, racing the free AI pool:',
+   426→  1675→                    provErr instanceof Error ? provErr.message : provErr
+   427→  1676→                  )
+   428→  1677→                }
+   429→  1678→              }
+   430→  1679→            }
+   431→  1680→
+   432→  1681→            // 2) FREE MULTI-AI POOL — raced in parallel (kilo ∥ llm7 ∥ ovh),
+   433→  1682→            //    first token wins. Also the fallback when no user provider
+   434→  1683→            //    or the user provider failed before emitting anything.
+   435→  1684→            if (!didStream) {
+   436→  1685→              try {
+   437→  1686→                const r = await streamAnonymousFallbackChat(
+   438→  1687→                  llmMessages as Parameters<typeof streamAnonymousFallbackChat>[0],
+   439→  1688→                  emitDelta,
+   440→  1689→                  {
+   441→  1690→                    maxTokens: 4000,
+   442→  1691→                    timeoutMs: 60_000,
+   443→  1692→                    task: 'chat',
+   444→  1693→                  }
+   445→  1694→                )
+   446→  1695→                content = r.content
+   447→  1696→                didStream = true
+   448→  1697→                console.log(`[api/chat] served by free AI pool: ${r.providerId}/${r.model}`)
+   449→  1698→              } catch (poolErr) {
+   450→  1699→                // Mid-race partial output is already visible → keep it.
+   451→  1700→                if (streamedSoFar.trim()) {
+   452→  1701→                  content = streamedSoFar
+   453→  1702→                  didStream = true
+   454→  1703→                } else {
+   455→  1704→                  console.error(
+   456→  1705→                    '[api/chat] free AI pool failed, trying non-streamed smartChat:',
+   457→  1706→                    poolErr instanceof Error ? poolErr.message : poolErr
+   458→  1707→                  )
+   459→  1708→                  // Last resort: non-streamed smartChat (user provider →
+   460→  1709→                  // free pool chain) and emit the visible prelude as one chunk.
+   461→  1710→                  content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
+   462→  1711→                  // Emit only the visible prelude (text before any
+   463→  1712→                  // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
+   464→  1713→                  // peek-buffer behaviour of the normal streaming path.
+   465→  1714→                  const prelude = stripToolCall(content)
+   466→  1715→                  if (prelude) send({ type: 'assistant_delta', delta: prelude })
+   467→  1716→                }
+   468→  1717→              }
+   469→  1718→            }
+   470→  1719→            if (!content.trim()) throw new Error('Empty model response.')
+   471→  1720→
+   472→  1721→            const toolCall = isLast ? null : parseToolCall(content)
+   473→  1722→
+   474→  1723→            if (toolCall && toolCallsUsed < MAX_TOOL_CALLS) {
+   475→  1724→              toolCallsUsed += 1
+   476→  1725→
+   477→  1726→              // If we streamed, the prelude (text before TOOL_CALL) is
+   478→  1727→              // already visible to the user — that's the desired UX
+   479→  1728→              // ("Let me search for that..." → tool runs → final answer).
+   480→  1729→              // If we didn't stream (external provider), emit the prelude now.
+   481→  1730→              if (!didStream) {
+   482→  1731→                const prelude = stripToolCall(content)
+   483→  1732→                send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
+   484→  1733→                if (prelude) send({ type: 'assistant_delta', delta: prelude })
+   485→  1734→                send({ type: 'assistant_end', attachments: [] })
+   486→  1735→              } else {
+   487→  1736→                // Close the streamed bubble (may contain a prelude, may be empty)
+   488→  1737→                send({ type: 'assistant_end', attachments: [] })
+   489→  1738→              }
+   490→  1739→
+   491→  1740→              send({ type: 'tool_start', tool: toolCall.tool, args: toolCall.args, index: toolCallsUsed })
+   492→  1741→
+   493→  1742→              // Heartbeat: image generation can take 60s+ on the upstream
+   494→  1743→              // provider. Without intermediate events the user perceives a
+   495→  1744→              // freeze ("the app freezes with every action"). Emit a
+   496→  1745→              // tool_progress ping every 5s while the tool is running so the
+   497→  1746→              // client knows the stream is alive and can show "still working".
+   498→  1747→              const toolStartedAt = Date.now()
+   499→  1748→              const heartbeat = setInterval(() => {
+   500→  1749→                const elapsedMs = Date.now() - toolStartedAt
+   501→  1750→                send({
+   502→  1751→                  type: 'tool_progress',
+   503→  1752→                  tool: toolCall.tool,
+   504→  1753→                  index: toolCallsUsed,
+   505→  1754→                  elapsedMs,
+   506→  1755→                  message: `Still working on ${toolCall.tool}… ${Math.round(elapsedMs / 1000)}s`,
+   507→  1756→                })
+   508→  1757→              }, 5000)
+   509→  1758→
+   510→  1759→              let ok = true
+   511→  1760→              let result: unknown
+   512→  1761→              let attachment: Record<string, unknown> | undefined
+   513→  1762→              try {
+   514→  1763→                const executed = await executeChatTool(req, toolCall.tool, toolCall.args, activeDoc)
+   515→  1764→                result = executed.result
+   516→  1765→                attachment = executed.attachment
+   517→  1766→              } catch (error) {
+   518→  1767→                ok = false
+   519→  1768→                result = { error: error instanceof Error ? error.message : 'Tool failed.' }
+   520→  1769→              } finally {
+   521→  1770→                clearInterval(heartbeat)
+   522→  1771→              }
+   523→  1772→
+   524→  1773→              if (attachment) attachments.push(attachment)
+   525→  1774→              send({ type: 'tool_result', tool: toolCall.tool, ok, result, index: toolCallsUsed })
+   526→  1775→
+   527→  1776→              const resultJson = JSON.stringify(result).slice(0, 4000)
+   528→  1777→              llmMessages.push({ role: 'assistant', content })
+   529→  1778→              llmMessages.push({
+   530→  1779→                role: 'user',
+   531→  1780→                content: `TOOL_RESULT (${toolCall.tool}):\n${resultJson}\n\nContinue: use another TOOL_CALL if needed, or give your final answer.`,
+   532→  1781→              })
+   533→  1782→            } else {
+   534→  1783→              // Phase 1 P2: parse any ARTIFACT_PATCH directives from the
+   535→  1784→              // response BEFORE computing the visible final answer. Each
+   536→  1785→              // patch is emitted as an `artifact_patch` event for the client
+   537→  1786→              // to apply to the open artifact (ChatGPT-Canvas style targeted
+   538→  1787→              // edit, instead of regenerating the whole artifact). Only
+   539→  1788→              // patches targeting the currently-open artifact id are emitted
+   540→  1789→              // — guards against the model addressing a stale or fabricated id.
+   541→  1790→              if (openArtifact) {
+   542→  1791→                const patches = parseArtifactPatches(content)
+   543→  1792→                for (const patch of patches) {
+   544→  1793→                  if (patch.artifactId === openArtifact.artifactId) {
+   545→  1794→                    send({
+   546→  1795→                      type: 'artifact_patch',
+   547→  1796→                      artifactId: patch.artifactId,
+   548→  1797→                      find: patch.find,
+   549→  1798→                      replace: patch.replace,
+   550→  1799→                      note: patch.note,
+   551→  1800→                    })
+   552→  1801→                  }
+   553→  1802→                }
+   554→  1803→              }
+   555→  1804→
+   556→  1805→              // Final answer: strip both TOOL_CALL and ARTIFACT_PATCH
+   557→  1806→              // directives from the visible prose (leaving the model's
+   558→  1807→              // one-line acknowledgement like "Done — shortened the intro.").
+   559→  1808→              const finalAnswer = stripToolCall(content) || 'I could not complete that. Try rephrasing.'
+   560→  1809→              const assistantMessage = await db.chatMessage.create({
+   561→  1810→                data: {
+   562→  1811→                  sessionId: session!.id,
+   563→  1812→                  role: 'assistant',
+   564→  1813→                  content: finalAnswer,
+   565→  1814→                  // NEXUS One: persist attachments so image/video/document
+   566→  1815→                  // cards survive session resume.
+   567→  1816→                  attachments: attachments.length ? JSON.stringify(attachments) : null,
+   568→  1817→                },
+   569→  1818→              })
+   570→  1819→              await db.chatSession.update({
+   571→  1820→                where: { id: session!.id },
+   572→  1821→                data: { updatedAt: new Date() },
+   573→  1822→              })
+   574→  1823→              // Mirror the assistant message + session timestamp to Supabase
+   575→  1824→              if (verifiedUserId) {
+   576→  1825→                void supabaseUpsert('chat_messages', {
+   577→  1826→                  id: assistantMessage.id,
+   578→  1827→                  session_id: session!.id,
+   579→  1828→                  role: 'assistant',
+   580→  1829→                  content: finalAnswer,
+   581→  1830→                }, { onConflict: 'id' })
+   582→  1831→                void supabaseUpsert('chat_sessions', {
+   583→  1832→                  id: session!.id,
+   584→  1833→                  user_id: verifiedUserId,
+   585→  1834→                  title: session!.title,
+   586→  1835→                  kind: 'chat',
+   587→  1836→                  updated_at: new Date().toISOString(),
+   588→  1837→                }, { onConflict: 'id' })
+   589→  1838→              }
+   590→  1839→
+   591→  1840→              if (didStream) {
+   592→  1841→                // The streamed content IS the final answer. Just close the
+   593→  1842→                // bubble with attachments + emit done.
+   594→  1843→                send({ type: 'assistant_end', attachments })
+   595→  1844→              } else {
+   596→  1845→                // External provider path — emit the full content as one delta.
+   597→  1846→                send({ type: 'assistant_start', id: `as-${Date.now()}-${step}` })
+   598→  1847→                send({ type: 'assistant_delta', delta: finalAnswer })
+   599→  1848→                send({ type: 'assistant_end', attachments })
+   600→  1849→              }
+   601→  1850→              send({ type: 'done', sessionId: session!.id })
+   602→  1851→              break
+   603→  1852→            }
+   604→  1853→          }
+   605→  1854→        } catch (error) {
+   606→  1855→          console.error('[api/chat] stream error:', error)
+   607→  1856→          send({
+   608→  1857→            type: 'error',
+   609→  1858→            message: error instanceof Error ? error.message : 'Chat failed.',
+   610→  1859→          })
+   611→  1860→        } finally {
+   612→  1861→          controller.close()
+   613→  1862→        }
+   614→  1863→      },
+   615→  1864→    })
+   616→  1865→
+   617→  1866→    return new NextResponse(stream, {
+   618→  1867→      status: 200,
+   619→  1868→      headers: {
+   620→  1869→        'Content-Type': 'application/x-ndjson; charset=utf-8',
+   621→  1870→        'Cache-Control': 'no-cache, no-transform',
+   622→  1871→        'X-Accel-Buffering': 'no',
+   623→  1872→      },
+   624→  1873→    })
+   625→  1874→  } catch (error) {
+   626→  1875→    console.error('[api/chat] POST error:', error)
+   627→  1876→    const message = error instanceof Error ? error.message : 'Chat failed.'
+   628→  1877→    return NextResponse.json({ error: message }, { status: 500 })
+   629→  1878→  }
+   630→  1879→}
+   631→  1880→

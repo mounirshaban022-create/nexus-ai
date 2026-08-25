@@ -602,6 +602,20 @@ nav[aria-label="Primary"] {
   background-clip: padding-box;
 }
 
+/* Personality rail — horizontally scrollable chip row above the composer.
+   Scrollbar fully hidden (the rail is touch/wheel-scrollable and the chips
+   telegraph the overflow), with a subtle right-edge fade so it reads as a
+   continuation rather than a clipped row. */
+.nx-rail {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+.nx-rail::-webkit-scrollbar {
+  display: none;
+}
+
 /* Live status line shown next to the typing dots while the agent works
    ("Picking the right specialist…", "Thinking…") — a soft breathing shimmer
    so the wait feels alive, never dead. */

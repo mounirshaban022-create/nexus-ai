@@ -111,6 +111,12 @@ async function resolveSkill(name: string): Promise<CliSkill | null> {
   )
 }
 
+/** Public skill lookup (used by run_command to rewrite short-name installs). */
+export async function findCliSkillByName(name: string): Promise<CliSkill | null> {
+  if (!name || name.length > 100) return null
+  return resolveSkill(name)
+}
+
 /** Reads the SKILL.md manual for a skill (cached, capped). */
 export async function getCliSkillDoc(name: string): Promise<{ skill: CliSkill; doc: string } | null> {
   const skill = await resolveSkill(name)

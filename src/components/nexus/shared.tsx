@@ -226,6 +226,12 @@ export const TOOL_META: Record<string, { label: string }> = {
   browser_action: { label: 'Driving browser' },
   send_email: { label: 'Sending email' },
   send_whatsapp: { label: 'Sending WhatsApp' },
+  use_skill: { label: 'Loading skill' },
+  email_organize: { label: 'Organizing inbox' },
+  email_folders: { label: 'Listing folders' },
+  email_list: { label: 'Checking inbox' },
+  email_search: { label: 'Searching inbox' },
+  email_read: { label: 'Reading email' },
 }
 
 export function toolLabel(name: string): string {
