@@ -1,0 +1,178 @@
+# NEXUS AI — Vercel Deployment Guide
+
+Everything you need to ship NEXUS AI to Vercel: keys, database, build settings, and verification. This guide assumes you already have the accounts (GitHub, Vercel, Supabase, OpenRouter, Agnes AI).
+
+---
+
+## 0. What changed in this revision
+
+- **OpenRouter is now the primary LLM** (replaces Z.ai, which only works in the sandbox). Set `OPENROUTER_API_KEY` and chat works on Vercel.
+- **Agnes AI is the video backend** when `AGNES_API_KEY` is set.
+- **Z.ai SDK is optional** — the app builds and runs on Vercel without `z-ai-web-dev-sdk`.
+- **Email connector fixed** — a missing `export` on `getZAI()` broke 9 API routes (including `/api/email/accounts`); the connector now works with correct Gmail/Outlook/Yahoo App Passwords.
+- **Light mode toggle** — sun/moon icon in the sidebar + Appearance picker in Settings.
+- **Supabase sync** activates automatically when the three `SUPABASE_*` env vars are set (chat messages, sessions, generated docs, AI providers all mirror to the cloud).
+
+---
+
+## 1. Push the code to GitHub
+
+Your repo is already initialized at `github.com/mounirshaban022-create/nexus-ai.git` with a full commit history. The latest commit (`feat: OpenRouter LLM + Agnes video + email fix + light mode toggle`) contains all the work.
+
+**Note:** the GitHub token you shared returned `401 Bad credentials` — it's expired, revoked, or was mistyped. Refresh it:
+
+1. Go to <https://github.com/settings/tokens> → **Generate new token (classic)**
+2. Scope: tick **`repo`** (full repo access for private) — nothing else needed
+3. Copy the new `ghp_...` token
+4. Push from your machine:
+   ```bash
+   cd /home/z/my-project
+   git push https://<NEW_TOKEN>@github.com/mounirshaban022-create/nexus-ai.git main
+   ```
+   Or set the remote once (token stored in `.git/config`, not committed):
+   ```bash
+   git remote set-url origin https://<NEW_TOKEN>@github.com/mounirshaban022-create/nexus-ai.git
+   git push origin main
+   ```
+
+**Secrets safety:** `.env.local` (your real keys) is gitignored — it will NEVER be pushed. Only `.env.example` (placeholder template) is committed.
+
+---
+
+## 2. Set up Supabase Postgres (the Vercel database)
+
+The sandbox uses SQLite; Vercel needs a real Postgres. Supabase gives you one free.
+
+1. **Supabase Dashboard → your project** (`wopzantzdnobajjlzwpl`)
+2. **Settings → Database → Connection string → "URI" → Transaction pooler**
+   - Format: `postgresql://postgres.wopzantzdnobajjlzwpl:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres`
+   - Copy this — it's your Vercel `DATABASE_URL`
+3. **SQL Editor → New Query** → paste the entire contents of [`supabase-schema.sql`](./supabase-schema.sql) → **Run**
+   - Creates all tables: `profiles`, `chat_sessions`, `chat_messages`, `generated_images`, `generated_videos`, `generated_documents`, `user_ai_providers`, etc.
+4. **Settings → API** → confirm:
+   - Project URL: `https://wopzantzdnobajjlzwpl.supabase.co`
+   - `anon` public key + `service_role` key (both already in your `.env.local`)
+
+The build script (`package.json` → `build`) auto-switches Prisma from `sqlite` to `postgresql` when `DATABASE_URL` starts with `postgres`, then runs `prisma generate`. Nothing to change.
+
+---
+
+## 3. Import to Vercel
+
+1. <https://vercel.com/new> → **Import Git Repository** → pick `mounirshaban022-create/nexus-ai`
+2. Framework preset: **Next.js** (auto-detected)
+3. Build settings (leave defaults):
+   - Build Command: `bun run build` (or the default `next build` — the `build` script handles the Prisma provider switch)
+   - Output: `.next` (auto)
+   - Install Command: `bun install` (or `npm install`)
+4. **DO NOT click Deploy yet** — first add the environment variables (next section).
+
+---
+
+## 4. Environment variables (Vercel → Project → Settings → Environment Variables)
+
+Add EACH of these for **Production + Preview + Development** environments (or at least Production). A ready-to-paste copy lives in `.env.vercel.local` (gitignored — your personal copy with real values).
+
+| Key | Value | Notes |
+|-----|-------|-------|
+| `DATABASE_URL` | `postgresql://postgres.wopzantzdnobajjlzwpl:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres` | From Supabase → Database → Connection string (Transaction pooler). **Critical:** must start with `postgres` so the build switches the Prisma provider. |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://wopzantzdnobajjlzwpl.supabase.co` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `eyJhbGciOiJIUzI1NiIs...` (anon JWT) | Safe for the browser |
+| `SUPABASE_SERVICE_ROLE_KEY` | `eyJhbGciOiJIUzI1NiIs...` (service_role JWT) | **Server only** — used for cloud sync inserts |
+| `OPENROUTER_API_KEY` | `sk-or-v1-...` | Your OpenRouter key |
+| `OPENROUTER_DEFAULT_MODEL` | `anthropic/claude-3.7-sonnet` | Premium quality; change in `.env` or in-app Settings anytime. Free alt: `nvidia/nemotron-3-super-120b-a12b:free` |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | |
+| `OPENROUTER_SITE_URL` | `https://<your-vercel-domain>.vercel.app` | Shows in OpenRouter rankings |
+| `OPENROUTER_APP_NAME` | `NEXUS AI` | |
+| `AGNES_API_KEY` | `sk-i9TG...` | Agnes AI video generation |
+| `AGNES_BASE_URL` | `https://api.agnes.ai/v1` | Update if Agnes uses a different host |
+| `NEXUS_EMAIL_SECRET` | (any random 32-char string) | Used to AES-encrypt stored email passwords. **Must match across deploys** — if you change it later, saved email accounts must be re-connected. Generate with `openssl rand -hex 32` |
+| `APP_URL` | `https://<your-vercel-domain>.vercel.app` | |
+| `PORT` | `3000` | |
+
+After adding all vars, click **Deploy**. First build takes ~2-3 min.
+
+---
+
+## 5. Postgres + Prisma on Vercel
+
+The first deploy will run `prisma generate` (via the `postinstall` hook) and `prisma db push` is NOT automatic. After the first successful deploy:
+
+1. Run the schema push from your LOCAL machine (with the Supabase `DATABASE_URL`):
+   ```bash
+   DATABASE_URL="postgresql://postgres.wopzantzdnobajjlzwpl:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres" bun run db:push
+   ```
+   This creates all tables from `prisma/schema.prisma` in Supabase Postgres. (You can also just run the `supabase-schema.sql` from step 2 — both produce the same tables.)
+
+2. Confirm in Supabase → Table Editor → you see `ChatSession`, `ChatMessage`, `User`, `EmailAccount`, etc.
+
+---
+
+## 6. Verify the deploy
+
+After Vercel shows "Ready", visit your `https://<project>.vercel.app`:
+
+| Check | Expected |
+|-------|----------|
+| Landing page loads | Marketing page with "Get started" / "Explore as guest" |
+| Sign up + sign in | Cookie session works; survives reload |
+| Send a chat message | Streams word-by-word; dev.log-equivalent shows `[smartChat] served by OpenRouter` |
+| Attach a document + ask about it | AI quotes the document content (Author/Date lines included) |
+| Click the sun/moon icon (sidebar bottom-left) | Shell switches between dark and light |
+| Settings → Connect → Gmail | Enter your Gmail + 16-char App Password → "Connected successfully" |
+| Generate an image | Returns an inline image card |
+| Generate a video | Returns a job id; status polls until the MP4 is ready (Agnes AI) |
+| Supabase → Table Editor → `chat_messages` | New rows appear as you chat (cloud sync working) |
+
+---
+
+## 7. Model choice for OpenRouter
+
+The default is `anthropic/claude-3.7-sonnet` (premium, strong reasoning + writing). Alternatives you can set in `OPENROUTER_DEFAULT_MODEL` or pick in **Settings → AI Models**:
+
+- `openai/gpt-4o-mini` — cheap, fast, great for chat
+- `openai/gpt-4o` — premium OpenAI
+- `anthropic/claude-3.7-sonnet` — premium Anthropic (recommended)
+- `google/gemini-flash-2.0` — fast + multimodal
+- `nvidia/nemotron-3-super-120b-a12b:free` — free tier, no credits needed
+
+See <https://openrouter.ai/models> for the full catalog.
+
+---
+
+## 8. "Alpha ox" note
+
+You mentioned "Alpha ox" — there's no widely-known service or model by that exact name. If you meant a specific OpenRouter model (e.g., an alpha/release-candidate model), set it in `OPENROUTER_DEFAULT_MODEL`. If you meant a separate service, share the base URL + docs and I'll wire it in. The current setup uses OpenRouter + Agnes AI as you specified.
+
+---
+
+## 9. Local dev (sandbox)
+
+For local development, `.env.local` (gitignored) is already configured with all keys + SQLite. The dev server uses:
+- Layer 0: OpenRouter (when key is set)
+- Layer 0b: Z.ai (sandbox gateway, fast fallback)
+- Layer 1: user DB-configured provider
+- Layer 2: free AI pool (LLM7, OVH, Kilo)
+
+```bash
+bun run dev      # start on :3000
+bun run lint     # 0 errors expected
+bun run db:push  # apply schema changes to local SQLite
+```
+
+---
+
+## 10. Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| Build fails on Prisma | Ensure `DATABASE_URL` is set in Vercel AND starts with `postgres`. The `build` script auto-switches the provider. |
+| Chat returns "All AI engines are busy" | `OPENROUTER_API_KEY` not set or invalid. Check Vercel env vars. |
+| Email connect "failed" with correct creds | You're on an old deploy. The `getZAI` export fix is in commit `9f61998`. Redeploy. |
+| Videos never complete | `AGNES_API_KEY` / `AGNES_BASE_URL` wrong. Check the Agnes API docs for the correct base URL. |
+| Supabase tables empty after chat | `SUPABASE_SERVICE_ROLE_KEY` not set or wrong. Sync is fire-and-forget — check Vercel logs for `[supabase-sync] ... failed`. |
+| Light mode toggle does nothing | Hard-refresh (Ctrl+Shift+R) — next-themes needs the client bundle. |
+
+---
+
+**Repo:** <https://github.com/mounirshaban022-create/nexus-ai> · **Commit:** `9f61998` · **Author:** Mounir Shaaban
