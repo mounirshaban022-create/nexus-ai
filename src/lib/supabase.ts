@@ -18,6 +18,68 @@ export function supabaseConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_KEY)
 }
 
+/* ------------------------------------------------------------------ */
+/* CLIENT-SIDE AUTH BRIDGE                                             */
+/*                                                                     */
+/* The app originally authenticated through the Supabase JS client     */
+/* (browser sessions with the anon key). It now uses DB-backed         */
+/* cookie sessions exposed via /api/auth/* routes (see src/lib/auth).  */
+/* Legacy components (page.tsx, settings/profile/home modes) still     */
+/* import the old helper names — these functions implement that exact  */
+/* interface on top of the modern API routes, so both worlds work.     */
+/* ------------------------------------------------------------------ */
+
+interface BridgeUser {
+  id: string
+  email: string
+  name?: string
+  avatarUrl?: string | null
+  createdAt?: string
+  [key: string]: unknown
+}
+
+/** Auth is DB+cookie based now — always available, Supabase or not. */
+export const isSupabaseConfigured = true
+
+/** Fetch the signed-in user (or null) via the session cookie. */
+export async function getCurrentUser(): Promise<BridgeUser | null> {
+  try {
+    const res = await fetch('/api/auth/me', {
+      method: 'GET',
+      credentials: 'include',
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { user: BridgeUser | null }
+    return data.user ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Sign out — clears the session cookie server-side. */
+export async function signOut(): Promise<void> {
+  try {
+    await fetch('/api/auth/signout', {
+      method: 'POST',
+      credentials: 'include',
+    })
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Auth-change subscription. The modern cookie-session auth has no live
+ * events, so we return a no-op unsubscribe — components re-fetch the
+ * user on mount which covers all practical flows.
+ */
+export function onAuthChange(
+  _callback: (user: BridgeUser | null) => void
+): () => void {
+  return () => {}
+}
+
+
 type SupabaseAdmin = Awaited<ReturnType<typeof createAdminClient>>
 
 let cached: SupabaseAdmin | null = null

@@ -457,17 +457,7 @@ async function executeChatTool(
   args: Record<string, unknown>,
   activeDoc: ActiveDoc | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
-<<<<<<< HEAD
   const origin = appOrigin(req)
-=======
-  // Dynamic origin — works on localhost, Vercel previews, and production
-  const origin = process.env.APP_URL
-    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined)
-    || (process.env.VERCEL && process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : undefined)
-    || `http://localhost:${process.env.PORT || 3000}`
->>>>>>> 66da959 (security: Alibaba open-code-review fixes — rate limiting + dynamic origins)
 
   if (toolId === 'generate_image') {
     const prompt = String(args.prompt ?? '').slice(0, 2000)

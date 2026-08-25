@@ -12,12 +12,14 @@ import { SearchMode } from '@/components/omni/search-mode'
 import { ReaderMode } from '@/components/omni/reader-mode'
 import { AgentMode } from '@/components/omni/agent-mode'
 import { ConnectorsMode } from '@/components/omni/connectors-mode'
+import { WhatsAppMode } from '@/components/omni/whatsapp-mode'
 import { VoiceLiveMode } from '@/components/omni/voice-live-mode'
 import { OfficeMode } from '@/components/omni/office-mode'
 import { DocumentsMode } from '@/components/omni/documents-mode'
 import { SettingsMode } from '@/components/omni/settings-mode'
 import { ProfileMode } from '@/components/omni/profile-mode'
 import { OnboardingOverlay } from '@/components/omni/onboarding'
+import { StudioMode } from '@/components/omni/studio-mode'
 import { AiModelsMode } from '@/components/omni/ai-models-mode'
 import { CodeMode } from '@/components/omni/code-mode'
 import { VideoMode } from '@/components/omni/video-mode'
@@ -39,7 +41,7 @@ const GROUPS: Array<{ label: string; ids: ModeId[] }> = [
   { label: '', ids: ['chat', 'agent', 'voice-live'] },
   { label: 'Create', ids: ['image', 'video', 'code', 'office', 'documents'] },
   { label: 'Tools', ids: ['search', 'reader', 'vision', 'voice'] },
-  { label: 'Account', ids: ['profile', 'settings', 'models', 'connectors'] },
+  { label: 'Account', ids: ['profile', 'settings', 'models', 'connectors', 'whatsapp'] },
 ]
 
 // BUILD VERSION — visible proof of which version is running
@@ -267,6 +269,7 @@ export default function Page() {
               >
                 {activeMode === 'home' && <HomeMode onOpenMode={openMode} />}
                 {activeMode === 'connectors' && <ConnectorsMode />}
+                {activeMode === 'whatsapp' && <WhatsAppMode />}
                 {activeMode === 'image' && <ImageMode />}
                 {activeMode === 'vision' && <VisionMode />}
                 {activeMode === 'voice' && <VoiceMode />}
@@ -299,7 +302,7 @@ export default function Page() {
         ].map(({ id, label }) => {
           const m = MODE_MAP[id]
           const Icon = m.icon
-          const active = activeMode === id || (id === 'home' && ['code', 'video', 'image', 'office', 'reader', 'vision', 'voice', 'models', 'connectors', 'settings', 'home'].includes(activeMode))
+          const active = activeMode === id || (id === 'home' && ['code', 'video', 'image', 'office', 'reader', 'vision', 'voice', 'models', 'connectors', 'whatsapp', 'settings', 'home'].includes(activeMode))
           return (
             <button
               key={id}
@@ -332,6 +335,14 @@ export default function Page() {
             // Re-check auth state after modal closes (sign-in may have completed)
             getCurrentUser().then(setUser).catch(() => {})
           }}
+        />
+      )}
+
+      {/* Studio suite — opens as a full-screen layer from the sidebar/ability picker */}
+      {activeMode === 'studio' && (
+        <StudioMode
+          open
+          onClose={() => setActiveMode('home')}
         />
       )}
 

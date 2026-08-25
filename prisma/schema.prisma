@@ -210,3 +210,76 @@ model ProjectFile {
 
   @@index([projectId, createdAt])
 }
+
+/* ------------------------------------------------------------------ */
+/* WHATSAPP BUSINESS (Meta Cloud API)                                  */
+/*                                                                     */
+/* One WhatsApp connection per deployment (Phase 1: Meta's free TEST   */
+/* number — 5 verified recipients, no business verification needed).   */
+/* Credentials come from the Meta developer console:                   */
+/*   - phoneNumberId: "Phone number ID" shown on the WhatsApp > API    */
+/*     Setup tab (a long numeric ID, NOT the phone number itself).     */
+/*   - accessToken: the temporary (24h) or permanent system-user       */
+/*     token, stored AES-256-GCM encrypted (same scheme as email).     */
+/*   - verifyToken: random string WE generate — the user pastes it     */
+/*     into the Meta webhook config so we can verify Meta's handshake. */
+/*                                                                     */
+/* autoReply + agentPrompt drive the incoming-message agent: when a    */
+/* customer texts the business number, the webhook saves the message   */
+/* and (if autoReply) routes it through the NEXUS smart-chat brain     */
+/* with the persona below, then sends the reply back via the API.      */
+/* ------------------------------------------------------------------ */
+model WhatsAppAccount {
+  id             String   @id @default(cuid())
+  label          String   @default("WhatsApp Business")
+  // Display name shown to customers ("business name" on WhatsApp profile)
+  businessName   String   @default("NEXUS Assistant")
+  // Meta "Phone number ID" (numeric string from the API Setup tab)
+  phoneNumberId  String
+  // The WhatsApp number itself (E.164 digits, e.g. "15551234567")
+  displayPhone   String   @default("")
+  // Bearer token for graph.facebook.com — AES-256-GCM encrypted
+  accessTokenEnc String
+  // Our webhook handshake token — the user pastes it into the Meta
+  // webhook config; Meta echoes it back on the verification GET.
+  verifyToken    String
+  // status: pending (saved, webhook unconfirmed) | connected | error
+  status         String   @default("pending")
+  statusMessage  String   @default("")
+  // Agent behaviour
+  autoReply      Boolean  @default(true)
+  agentPrompt    String   @default("")
+  // Phase 1: Meta test number allows messaging 5 pre-verified recipients.
+  // JSON array of E.164 strings the user has whitelisted.
+  allowList      String   @default("[]")
+  // Whether Meta has successfully called our webhook (receive confirmed)
+  webhookVerified Boolean @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  messages       WhatsAppMessage[]
+
+  @@index([createdAt])
+}
+
+// Every inbound/outbound WhatsApp message. Feeds the agent's conversation
+// memory (last N messages per customer) and the inbox UI.
+model WhatsAppMessage {
+  id          String          @id @default(cuid())
+  accountId   String
+  account     WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // E.164 digits without '+' (WhatsApp convention)
+  fromNumber  String
+  toNumber    String
+  direction   String // "in" (customer -> us) | "out" (us -> customer)
+  body        String
+  // WhatsApp message id (wamid.*) for dedupe + delivery status updates
+  waMessageId String?
+  status      String          @default("sent") // received | sent | failed | delivered | read
+  error       String          @default("")
+  createdAt   DateTime        @default(now())
+
+  @@unique([waMessageId, direction])
+  @@index([accountId, createdAt])
+  @@index([fromNumber, createdAt])
+}

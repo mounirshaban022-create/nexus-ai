@@ -14,6 +14,9 @@ import {
   Clapperboard,
   Settings,
   UserCircle2,
+  MessageCircle,
+  FileStack,
+  FileSearch,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -23,12 +26,15 @@ export type ModeId =
   | 'chat'
   | 'voice-live'
   | 'connectors'
+  | 'whatsapp'
   | 'image'
   | 'vision'
   | 'voice'
   | 'search'
   | 'reader'
   | 'studio'
+  | 'office'
+  | 'documents'
   | 'models'
   | 'code'
   | 'video'
@@ -168,6 +174,20 @@ export const MODES: ModeDefinition[] = [
     gradient: 'from-orange-500 to-rose-500',
   },
   {
+    id: 'whatsapp',
+    label: 'WhatsApp',
+    shortLabel: 'WhatsApp',
+    tagline: 'Reply on autopilot',
+    description:
+      'Connect your WhatsApp Business number — NEXUS reads customer messages and answers them for you, instantly.',
+    icon: MessageCircle,
+    group: 'superpowers',
+    accentText: 'text-emerald-500',
+    accentBg: 'bg-emerald-100',
+    accentBorder: 'border-emerald-200',
+    gradient: 'from-emerald-500 to-teal-500',
+  },
+  {
     id: 'image',
     label: 'Image Studio',
     shortLabel: 'Image',
@@ -260,6 +280,34 @@ export const MODES: ModeDefinition[] = [
     accentText: 'text-primary',
     accentBg: 'bg-secondary',
     accentBorder: 'border-border',
+    gradient: 'from-orange-500 to-rose-500',
+  },
+  {
+    id: 'documents',
+    label: 'Documents',
+    shortLabel: 'Docs',
+    tagline: 'Read · Chat · Edit — any document',
+    description:
+      'Upload PDF, Word, Excel, PowerPoint — AI reads it, answers questions, and edits it like Claude.',
+    icon: FileSearch,
+    group: 'superpowers',
+    accentText: 'text-primary',
+    accentBg: 'bg-secondary',
+    accentBorder: 'border-border',
+    gradient: 'from-orange-500 to-rose-500',
+  },
+  {
+    id: 'office',
+    label: 'Office Studio',
+    shortLabel: 'Office',
+    tagline: 'Real documents, built for you',
+    description:
+      'Generate real Word, Excel, PowerPoint and Markdown files — or read any uploaded document.',
+    icon: FileStack,
+    group: 'superpowers',
+    accentText: 'text-foreground',
+    accentBg: 'bg-secondary',
+    accentBorder: 'border-sky-500/30',
     gradient: 'from-orange-500 to-rose-500',
   },
   {
