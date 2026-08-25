@@ -23,10 +23,14 @@ export const dynamic = 'force-dynamic'
  *
  * AUTH
  * ----
- * `?token=<ADMIN_MIGRATION_TOKEN>` must match `process.env.ADMIN_MIGRATION_TOKEN`.
- * If the env var is unset, the endpoint allows access ONLY when
- * `NODE_ENV !== 'production'` (so dev/staging can use it without a token,
- * but prod (Vercel) requires the token).
+ * `?token=<T>` must match ONE of:
+ *   - `process.env.ADMIN_MIGRATION_TOKEN` (preferred — set this on Vercel), OR
+ *   - `process.env.SUPABASE_SERVICE_ROLE_KEY` (fallback — already set on Vercel
+ *     for cloud sync, so the user doesn't need to add a new env var for the
+ *     one-shot migration).
+ * Either unlocks the endpoint. Both are server-side secrets the caller
+ * wouldn't know without privileged access. In dev (`NODE_ENV !== 'production'`)
+ * the token check is skipped.
  *
  * MODES
  * -----
@@ -80,23 +84,28 @@ async function dbInfo(): Promise<{ database: string; version: string }> {
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const token = url.searchParams.get('token') ?? ''
-  const expected = process.env.ADMIN_MIGRATION_TOKEN ?? ''
+  const expectedAdmin = process.env.ADMIN_MIGRATION_TOKEN ?? ''
+  const expectedServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
   const isProd = process.env.NODE_ENV === 'production'
   const dry = url.searchParams.get('dry') === '1'
 
-  // Auth gate.
+  // Auth gate. Two acceptable secrets: ADMIN_MIGRATION_TOKEN (preferred)
+  // OR SUPABASE_SERVICE_ROLE_KEY (fallback — already on Vercel for cloud sync).
+  const matchesAdmin = expectedAdmin && token === expectedAdmin
+  const matchesServiceRole = expectedServiceRole && token === expectedServiceRole
+
   if (isProd) {
-    if (!expected) {
+    if (!expectedAdmin && !expectedServiceRole) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            'ADMIN_MIGRATION_TOKEN is not set in production. Set it in Vercel env vars and redeploy.',
+            'Neither ADMIN_MIGRATION_TOKEN nor SUPABASE_SERVICE_ROLE_KEY is set in production. Set at least one in Vercel env vars and redeploy.',
         },
         { status: 500 }
       )
     }
-    if (!token || token !== expected) {
+    if (!matchesAdmin && !matchesServiceRole) {
       return NextResponse.json(
         { ok: false, error: 'Invalid or missing token.' },
         { status: 401 }
@@ -104,7 +113,7 @@ export async function GET(req: NextRequest) {
     }
   } else {
     // Dev: still prefer a token, but allow it if unset (for local convenience).
-    if (expected && token !== expected) {
+    if ((expectedAdmin || expectedServiceRole) && !matchesAdmin && !matchesServiceRole) {
       return NextResponse.json(
         { ok: false, error: 'Invalid token.' },
         { status: 401 }
