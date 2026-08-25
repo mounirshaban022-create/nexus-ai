@@ -83,7 +83,7 @@ export const ALL_VOICES: VoiceOption[] = [...NEXUS_VOICES, ...EDGE_VOICES]
  * (calm/professional), jam (British gentleman), kazi (clear/standard),
  * douji (natural/fluent), luodo (richly expressive).
  */
-export const DEFAULT_VOICE = 'tongtong'
+export const DEFAULT_VOICE = 'en-US-AvaMultilingualNeural' // Premium Microsoft HD voice — multilingual, natural, expressive. Works on Vercel (Edge TTS needs no SDK).
 
 /** Maps a UI language ('en' | 'ar') to a high-quality default Microsoft neural voice. */
 export function pickVoiceForLanguage(lang: 'en' | 'ar'): string {

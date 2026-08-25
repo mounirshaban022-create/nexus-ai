@@ -39,7 +39,7 @@ function readConfig(): OpenRouterConfig | null {
     process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1'
   const defaultModel =
     process.env.OPENROUTER_DEFAULT_MODEL?.trim() ||
-    'anthropic/claude-sonnet-4' // Premium Claude Sonnet 4 — fast, extremely smart, multimodal.
+    'deepseek/deepseek-chat' // DeepSeek V3 — smart, fast, globally available (no region block)
   return {
     apiKey,
     baseUrl,

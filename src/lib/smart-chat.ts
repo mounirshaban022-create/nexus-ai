@@ -80,20 +80,20 @@ const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
     documents: ['glm-5.3', 'glm-5'],           // best writer
     fast: ['glm-5-turbo'],
   },
-  // OpenRouter — PREMIUM-first model pool (Claude Sonnet 4 leads every
-  // task; free models remain as last-resort fallbacks when a premium model
-  // is rate-limited or the user's OpenRouter credits run low).
-  // The user explicitly requested "smarter AI that understands everything"
-  // + "premium" — Claude Sonnet 4 is the strongest general-purpose model
-  // on OpenRouter (smart, fast, multimodal, 200k context). GPT-4o is the
-  // fallback premium; the :free models are emergency-only.
+  // OpenRouter — GLOBALLY-AVAILABLE model pool.
+  // Closed-source models (anthropic/claude-*, openai/gpt-*, google/gemini-*)
+  // are IP-geo-blocked in many regions (HTTP 403 "not available in your region")
+  // — including the sandbox AND some Vercel regions. DeepSeek (V3) is smart,
+  // fast, and globally available — it leads every task. Qwen 2.5 72B is the
+  // fast fallback. Claude/GPT remain in the chain as bonus fallbacks (when
+  // the caller's region allows them, they're even smarter than DeepSeek).
   openrouter: {
-    code: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'cohere/north-mini-code:free'],
-    reasoning: ['anthropic/claude-sonnet-4', 'openai/o1-mini', 'nvidia/nemotron-3-ultra-550b-a55b:free'],
-    chat: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet'],
-    voice: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'liquid/lfm-2.5-2.6b:free'],
-    documents: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemma-4-31b-it:free'],
-    fast: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'liquid/lfm-2.5-2.6b:free'],
+    code: ['deepseek/deepseek-chat', 'qwen/qwen-2.5-72b-instruct', 'anthropic/claude-sonnet-4'],
+    reasoning: ['deepseek/deepseek-r1', 'deepseek/deepseek-chat', 'qwen/qwen-2.5-72b-instruct'],
+    chat: ['deepseek/deepseek-chat', 'anthropic/claude-sonnet-4', 'openai/gpt-4o'],
+    voice: ['deepseek/deepseek-chat', 'qwen/qwen-2.5-72b-instruct', 'liquid/lfm-2.5-2.6b:free'],
+    documents: ['deepseek/deepseek-chat', 'qwen/qwen-2.5-72b-instruct', 'anthropic/claude-sonnet-4'],
+    fast: ['qwen/qwen-2.5-72b-instruct', 'deepseek/deepseek-chat', 'liquid/lfm-2.5-2.6b:free'],
   },
   // Putra AI (Malaysia) — OpenAI-compatible, 500 free API calls
   putra: {

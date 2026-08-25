@@ -60,7 +60,7 @@ const LANGUAGES = [
   // via the z-ai-web-dev-sdk). Other languages fall back to free
   // Microsoft Edge neural voices because the Z.ai TTS catalog is
   // English/Chinese-only.
-  { code: 'en-US', label: 'English', voice: 'tongtong' },
+  { code: 'en-US', label: 'English', voice: 'en-US-AvaMultilingualNeural' },
   { code: 'ar-AE', label: 'العربية', voice: 'ar-AE-FatimaNeural' },
   { code: 'ar-SA', label: 'العربية (SA)', voice: 'ar-SA-ZariyahNeural' },
   { code: 'fr-FR', label: 'Français', voice: 'fr-FR-DeniseNeural' },
@@ -111,7 +111,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const [muted, setMuted] = useState(false)
   const [micDenied, setMicDenied] = useState(false)
   const [lang, setLang] = useState('en-US')
-  const [voiceId, setVoiceId] = useState('tongtong')
+  const [voiceId, setVoiceId] = useState('en-US-AvaMultilingualNeural')
   const [interim, setInterim] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
   const [error, setError] = useState('')
@@ -136,8 +136,8 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const openRef = useRef(false)
   const busyRef = useRef(false)
   const langRef = useRef('en-US')
-  const voiceIdRef = useRef('tongtong')
-  const serverVoiceRef = useRef('tongtong')
+  const voiceIdRef = useRef('en-US-AvaMultilingualNeural')
+  const serverVoiceRef = useRef('en-US-AvaMultilingualNeural')
   const uiLangRef = useRef<'en' | 'ar'>('en')
   const kokoroReadyRef = useRef(false)
   const kokoroTriedRef = useRef(false)
@@ -789,7 +789,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     const ui = uiLangRef.current
     // Premium Z.ai voice by default for English UI; Arabic UI keeps the
     // Arabic Microsoft Edge voice because Z.ai has no Arabic voice.
-    const defServer = ui === 'ar' ? 'ar-SA-HamedNeural' : 'tongtong'
+    const defServer = ui === 'ar' ? 'ar-SA-HamedNeural' : 'en-US-AvaMultilingualNeural'
     const storedServer = window.localStorage.getItem(SERVER_VOICE_KEY)
     const server = storedServer && resolveVoice(storedServer) ? storedServer : defServer
     serverVoiceRef.current = server
