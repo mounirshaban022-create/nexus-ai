@@ -1,44 +1,48 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-// Open WebUI uses Inter — their exact choice
+// Open WebUI uses Inter — their exact choice (body font)
 const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
+// The Agency — display font for headings/logo (Space Grotesk)
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-display",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
-  title: "NEXUS AI — One AI. Infinite connections.",
+  title: "NEXUS — The Agency · 255 AI Specialists",
   description:
-    "The AI super app: an autonomous agent with live connectors, plus chat, image generation, vision, voice, web search and page reading — all in one place.",
+    "Hire from an agency of 255 specialist AI agents across 17 divisions — designers, engineers, marketers, analysts and more. Each with real personality, real process, real deliverables. One conversation away.",
   keywords: [
     "AI",
-    "AI agent",
-    "connectors",
+    "AI agents",
+    "AI agency",
+    "AI specialists",
     "chatbot",
-    "image generation",
-    "vision AI",
-    "text to speech",
-    "speech to text",
-    "web search",
-    "NEXUS AI",
+    "NEXUS",
+    "The Agency",
   ],
   authors: [{ name: "NEXUS AI" }],
   icons: {
     icon: "/nexus-mark.png",
   },
   openGraph: {
-    title: "NEXUS AI — One AI. Infinite connections.",
-    description: "Chat, images, vision, voice, search, reading and an autonomous connector agent.",
-    siteName: "NEXUS AI",
+    title: "NEXUS — The Agency · 255 AI Specialists",
+    description:
+      "Hire the entire agency — 255 specialist AI agents across 17 divisions, one conversation away.",
+    siteName: "NEXUS — The Agency",
     type: "website",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#faf9f5",
+  themeColor: "#09090b",
   width: "device-width",
   initialScale: 1,
 };
@@ -73,7 +77,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
       <body
-        className={`${inter.variable} antialiased bg-background text-foreground`}
+        className={`${inter.variable} ${spaceGrotesk.variable} antialiased bg-background text-foreground`}
       >
         {children}
         <Toaster />
