@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
         title: s.title,
         kind: s.kind,
         agentSlug: s.agentSlug ?? null,
+        agentPinned: s.agentPinned ?? false,
         updatedAt: s.updatedAt,
         messageCount: s.messages.length,
         preview: s.messages[0]?.content?.slice(0, 120) ?? '',

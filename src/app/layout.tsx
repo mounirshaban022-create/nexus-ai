@@ -16,9 +16,9 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "NEXUS — The Agency · 255 AI Specialists",
+  title: "NEXUS — One AI. Every superpower.",
   description:
-    "Hire from an agency of 255 specialist AI agents across 17 divisions — designers, engineers, marketers, analysts and more. Each with real personality, real process, real deliverables. One conversation away.",
+    "One premium chat with 255 AI specialists that auto-take-over: images, videos, documents (Word/Excel/PDF), code, CLI, live browser, email, WhatsApp and voice — real results in one conversation.",
   keywords: [
     "AI",
     "AI agents",
@@ -26,17 +26,17 @@ export const metadata: Metadata = {
     "AI specialists",
     "chatbot",
     "NEXUS",
-    "The Agency",
+    "ChatGPT alternative",
   ],
   authors: [{ name: "NEXUS AI" }],
   icons: {
-    icon: "/nexus-mark.png",
+    icon: "/brand/nexus-icon.png",
   },
   openGraph: {
-    title: "NEXUS — The Agency · 255 AI Specialists",
+    title: "NEXUS — One AI. Every superpower.",
     description:
-      "Hire the entire agency — 255 specialist AI agents across 17 divisions, one conversation away.",
-    siteName: "NEXUS — The Agency",
+      "One chat. 255 specialists. Images, videos, documents, code, browser, email, WhatsApp and voice.",
+    siteName: "NEXUS",
     type: "website",
   },
 };

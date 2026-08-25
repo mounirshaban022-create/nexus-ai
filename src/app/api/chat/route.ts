@@ -4,7 +4,8 @@ import { db } from '@/lib/db'
 import { smartChat } from '@/lib/smart-chat'
 import { getActiveAiProvider } from '@/lib/ai-providers'
 import { getSession } from '@/lib/auth'
-import { getAgentMeta, buildPersonaSystemPrompt } from '@/lib/agency'
+import { getAgentMeta, buildPersonaSystemPrompt, getDivision } from '@/lib/agency'
+import { routeMessage, type RoutingDecision } from '@/lib/orchestrator'
 import { getSupabaseAdmin, supabaseUpsert } from '@/lib/supabase' 
 
 /**
@@ -68,9 +69,11 @@ const requestSchema = z.object({
   // into the system prompt so NEXUS has persistent project context.
   projectId: z.string().max(64).optional().nullable(),
   // The Agency: specialist persona for this conversation (e.g.
-  // "design-ui-designer" from the agency catalog). Stamped on the session
-  // at creation; on resume the session's own agentSlug is authoritative.
-  // null / unknown slug = plain NEXUS conversation.
+  // "design-ui-designer" from the agency catalog). Passing a VALID slug
+  // PINS the persona (sticky for the whole session). Passing an EMPTY
+  // string UNPINS it (back to auto-routing). Passing nothing keeps the
+  // session's current state. When NOT pinned, the NEXUS Orchestrator
+  // auto-routes EVERY message to the best of 255 specialists.
   agentSlug: z.string().max(80).optional().nullable(),
   // Document/PDF attachment: when the user attaches a file in the composer,
   // the server parses it, injects its content into the conversation, and
@@ -140,6 +143,36 @@ const CHAT_TOOL_DEFS: Array<{
     id: 'read_page',
     description: 'Read the full content of a web page URL. Use after searching, to get details.',
     params: 'url (required)',
+  },
+  {
+    id: 'generate_video',
+    description:
+      'Create a short AI VIDEO (2-6 scenes, with AI images, narration voiceover, captions, rendered as MP4) from a text description. Returns a jobId — the video renders in the background and appears inline when done.',
+    params: 'prompt (required: what the video should show), scenes (2-6, optional, default 4), style (cinematic|vibrant|minimal|documentary, optional)',
+  },
+  {
+    id: 'browser_action',
+    description:
+      "Control a REAL headless browser on the live internet: open URLs, read page content, click buttons/links, fill and type into inputs, take screenshots. Use for real web tasks the user asks for (open a site, log in flows they describe, click through pages, extract data that needs interaction). Actions: 'open' (url), 'read' (get readable text of current page), 'click' (selector or text like 'Login'), 'fill' (selector, text), 'press' (key e.g. Enter), 'screenshot'. Chain multiple actions by calling the tool repeatedly.",
+    params: 'action (open|read|click|fill|press|screenshot, required), url (for open), selector (CSS selector or visible text for click/fill), text (for fill), key (for press)',
+  },
+  {
+    id: 'send_email',
+    description:
+      'Send a real email from the user\'s connected email account (SMTP). Requires the user to have connected an account in Settings → Email.',
+    params: 'to (required: recipient email), subject (required), body (required: plain text or simple HTML)',
+  },
+  {
+    id: 'send_whatsapp',
+    description:
+      'Send a real WhatsApp message from the user\'s connected WhatsApp Business number. Requires the user to have connected WhatsApp in Settings. Phone in international format without + (e.g. 971501234567).',
+    params: 'to (required: phone number), message (required: text to send)',
+  },
+  {
+    id: 'run_command',
+    description:
+      'Run a shell command in the NEXUS CLI sandbox (bash, 15s timeout) — for file operations, git, curl, data processing, system tasks and connecting to other CLI tools. Dangerous operations are blocked. Use run_code for JavaScript/Python.',
+    params: 'command (required: the shell command)',
   },
 ]
 
@@ -797,6 +830,182 @@ async function executeChatTool(
     }
   }
 
+  /* ---- generate_video: kick off the background AI video pipeline ---- */
+  if (toolId === 'generate_video') {
+    const prompt = String(args.prompt ?? '').slice(0, 1000)
+    if (prompt.length < 3) throw new Error('prompt required')
+    const scenes = String(args.scenes ?? '4')
+    const style = String(args.style ?? 'cinematic')
+    const res = await fetch(`${origin}/api/video/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        scenes: ['2', '3', '4', '5', '6'].includes(scenes) ? scenes : '4',
+        style: ['cinematic', 'vibrant', 'minimal', 'documentary'].includes(style) ? style : 'cinematic',
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Video generation failed to start')
+    return {
+      result: {
+        jobId: data.jobId,
+        note: 'Video is rendering in the background (AI scenes + narration + captions). Tell the user it is being made and will appear in the chat as a video card shortly. Do NOT call the tool again for the same video.',
+      },
+      attachment: {
+        type: 'video',
+        videoJobId: data.jobId,
+        title: prompt.slice(0, 80),
+        status: 'planning',
+        progress: 5,
+        note: 'Rendering — the card below tracks live progress.',
+      },
+    }
+  }
+
+  /* ---- browser_action: real headless browser via agent-browser CLI ---- */
+  if (toolId === 'browser_action') {
+    const { execFile } = await import('child_process')
+    const { promisify } = await import('util')
+    const execFileAsync = promisify(execFile)
+    const action = String(args.action ?? '').toLowerCase()
+    const url = String(args.url ?? '')
+    const selector = String(args.selector ?? '')
+    const text = String(args.text ?? '')
+    const key = String(args.key ?? '')
+
+    const runCli = async (cliArgs: string[]): Promise<string> => {
+      const { stdout } = await execFileAsync('agent-browser', cliArgs, {
+        timeout: 45_000,
+        maxBuffer: 2_000_000,
+      })
+      return stdout
+    }
+
+    if (action === 'open') {
+      if (!/^https?:\/\//i.test(url)) throw new Error('url required (must start with http:// or https://)')
+      const out = await runCli(['open', url])
+      return { result: { action, url, output: String(out).slice(0, 4000), note: 'Page opened. Use read or screenshot next, or click elements.' } }
+    }
+    if (action === 'read') {
+      const readUrl = url && /^https?:\/\//i.test(url) ? url : undefined
+      const out = await runCli(readUrl ? ['read', readUrl] : ['read'])
+      return { result: { action, output: String(out).slice(0, 12_000), note: 'Readable page content above — use it to answer or continue clicking.' } }
+    }
+    if (action === 'click' || action === 'dblclick') {
+      if (!selector) throw new Error('selector required (CSS selector or visible text)')
+      const out = await runCli([action, selector])
+      return { result: { action, target: selector, output: String(out).slice(0, 4000), note: 'Clicked. Read or screenshot to see the result.' } }
+    }
+    if (action === 'fill' || action === 'type') {
+      if (!selector || !text) throw new Error('selector and text required')
+      const out = await runCli(['fill', selector, text])
+      return { result: { action, target: selector, output: String(out).slice(0, 4000), note: 'Field filled.' } }
+    }
+    if (action === 'press') {
+      if (!key) throw new Error('key required (e.g. Enter, Tab)')
+      const out = await runCli(['press', key])
+      return { result: { action, key, output: String(out).slice(0, 4000), note: `Pressed ${key}.` } }
+    }
+    if (action === 'screenshot') {
+      const { randomUUID } = await import('crypto')
+      const { mkdir, writeFile } = await import('fs/promises')
+      const pathMod = await import('path')
+      const dir = pathMod.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'public', 'browser-shots')
+      await mkdir(dir, { recursive: true })
+      const id = randomUUID()
+      const file = pathMod.join(dir, `${id}.png`)
+      await runCli(['screenshot', '--path', file])
+      const screenshotUrl = `/browser-shots/${id}.png`
+      return {
+        result: { action, screenshotUrl, note: 'Screenshot taken — show it inline.' },
+        attachment: { type: 'image', url: screenshotUrl, title: 'Browser screenshot' },
+      }
+    }
+    throw new Error(`Unknown browser action "${action}". Use open|read|click|fill|press|screenshot.`)
+  }
+
+  /* ---- send_email: real email via the connected SMTP account ---- */
+  if (toolId === 'send_email') {
+    const { sendEmail, getPrimaryAccount } = await import('@/lib/email')
+    const account = await getPrimaryAccount()
+    if (!account) {
+      throw new Error('No email account connected. Ask the user to connect their email in Settings → Email first.')
+    }
+    const to = String(args.to ?? '').trim()
+    const subject = String(args.subject ?? '').slice(0, 200)
+    const body = String(args.body ?? '').slice(0, 10_000)
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error('valid "to" email required')
+    if (!subject || !body) throw new Error('subject and body required')
+    try {
+      const result = await sendEmail(account, { to, subject, body })
+      return { result: { sent: true, to, subject, messageId: result.messageId, note: 'Email sent successfully. Confirm to the user.' } }
+    } catch (e) {
+      throw new Error(`Email send failed: ${e instanceof Error ? e.message : 'unknown error'}`)
+    }
+  }
+
+  /* ---- send_whatsapp: real WhatsApp via the connected number ---- */
+  if (toolId === 'send_whatsapp') {
+    const { waSendText, getWhatsAppAccount, normalizeWaNumber } = await import('@/lib/whatsapp')
+    const account = await getWhatsAppAccount()
+    if (!account) {
+      throw new Error('No WhatsApp number connected. Ask the user to connect WhatsApp first (sidebar → WhatsApp).')
+    }
+    const to = normalizeWaNumber(String(args.to ?? ''))
+    const message = String(args.message ?? '').slice(0, 3000)
+    if (!to || to.length < 8) throw new Error('valid "to" phone required (international format, e.g. 971501234567)')
+    if (!message) throw new Error('message required')
+    const result = await waSendText(account, to, message)
+    if (!result.ok) throw new Error(result.error || 'WhatsApp send failed')
+    return { result: { sent: true, to, note: 'WhatsApp message sent successfully. Confirm to the user.' } }
+  }
+
+  /* ---- run_command: CLI sandbox (bash, blocked dangerous ops) ---- */
+  if (toolId === 'run_command') {
+    const command = String(args.command ?? '').slice(0, 2000)
+    if (!command.trim()) throw new Error('command required')
+    const blocked = /\b(rm\s+-rf\s+\/|mkfs|shutdown|reboot|init\s+0|curl[^|]*\|\s*(ba)?sh|wget[^|]*\|\s*(ba)?sh|nc\s+-l|ncat|chmod\s+777\s+\/|kill\s+-9\s+1\b|pkill\s+-9|>\/dev\/sd[a-z])|\(\)\s*\{.*\}\s*;?\s*:/i
+    if (blocked.test(command)) {
+      throw new Error('Command blocked by the NEXUS safety filter (destructive or remote-code injection pattern).')
+    }
+    const { spawn } = await import('child_process')
+    const { mkdtemp, rm } = await import('fs/promises')
+    const { tmpdir } = await import('os')
+    const pathMod = await import('path')
+    const cwd = await mkdtemp(pathMod.join(tmpdir(), 'nexus-cli-'))
+    try {
+      const exec = await new Promise<{ stdout: string; stderr: string; code: number | null; timedOut: boolean }>((resolve) => {
+        const child = spawn('bash', ['-c', command], {
+          cwd,
+          env: { PATH: process.env.PATH, HOME: cwd, LANG: 'en_US.UTF-8', NEXUS_SANDBOX: '1' } as unknown as NodeJS.ProcessEnv,
+          stdio: ['ignore', 'pipe', 'pipe'] as Array<'ignore' | 'pipe'>,
+        })
+        let stdout = ''
+        let stderr = ''
+        let timedOut = false
+        const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, 15_000)
+        child.stdout?.on('data', (d: Buffer) => { if (stdout.length < 60_000) stdout += d.toString().slice(0, 60_000 - stdout.length) })
+        child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 20_000) stderr += d.toString().slice(0, 20_000 - stderr.length) })
+        child.on('error', (err) => { clearTimeout(timer); resolve({ stdout, stderr: stderr + err.message, code: null, timedOut }) })
+        child.on('close', (code) => { clearTimeout(timer); resolve({ stdout, stderr, code, timedOut }) })
+      })
+      return {
+        result: {
+          stdout: exec.stdout.slice(0, 6000),
+          stderr: exec.stderr.slice(0, 2000),
+          exitCode: exec.code,
+          timedOut: exec.timedOut,
+          note: exec.timedOut
+            ? 'Command timed out after 15s. Suggest a shorter/faster command.'
+            : 'Command finished — include the output in your answer.',
+        },
+      }
+    } finally {
+      void rm(cwd, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
   // Data connectors pass through
   const connector = CONNECTOR_MAP.get(toolId)
   if (!connector) return { result: { error: `Unknown tool "${toolId}"` } }
@@ -942,6 +1151,8 @@ export async function POST(req: NextRequest) {
     // Unknown slugs are silently dropped (plain NEXUS chat) — never a 500.
     let verifiedAgentSlug: string | null = null
     if (agentSlug && getAgentMeta(agentSlug)) verifiedAgentSlug = agentSlug
+    // The user explicitly sent agentSlug: '' → UNPIN (back to auto mode)
+    const wantsUnpin = agentSlug === ''
 
     // Phase 0 Bug 3: ownership check.
     //   - Authenticated user (verifiedUserId = "abc"): may only resume
@@ -964,8 +1175,10 @@ export async function POST(req: NextRequest) {
           title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
           // Phase 0 Bug 3: stamp ownership on creation.
           userId: verifiedUserId,
-          // The Agency: stamp the specialist persona on creation.
+          // The Agency: stamp the specialist persona on creation. A persona
+          // provided up-front is PINNED (sticky); otherwise auto mode runs.
           agentSlug: verifiedAgentSlug,
+          agentPinned: Boolean(verifiedAgentSlug),
           // Phase 1 P3: stamp the verified project binding on creation.
           // null when: guest, no projectId provided, or projectId not owned
           // by this user (verifiedProjectId is null in all three cases).
@@ -1030,9 +1243,54 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    // The Agency: on resume the session's persona is authoritative (same
-    // pattern as projectId). Guest legacy sessions have null → plain NEXUS.
-    const effectiveAgentSlug = session.agentSlug ?? null
+    // The Agency / NEXUS One: persona resolution.
+    //   PINNED  (agentPinned=true): the session's specialist is sticky —
+    //           every message runs with that persona.
+    //   AUTO    (default): the NEXUS Orchestrator classifies THIS message
+    //           against the 255-agent catalog and the best specialist
+    //           takes over. The session's agentSlug is updated (not
+    //           pinned) to reflect the latest active specialist.
+    // Pin/unpin requests from the client are applied first.
+    if (wantsUnpin || verifiedAgentSlug) {
+      const nextPinned = Boolean(verifiedAgentSlug)
+      const nextSlug = verifiedAgentSlug
+      if (session.agentPinned !== nextPinned || session.agentSlug !== nextSlug) {
+        await db.chatSession.update({
+          where: { id: session.id },
+          data: { agentSlug: nextSlug, agentPinned: nextPinned },
+        }).catch(() => {})
+        session = { ...session, agentSlug: nextSlug, agentPinned: nextPinned }
+      }
+    }
+
+    // Build message history (needed for routing context + LLM messages)
+    const history = await db.chatMessage.findMany({
+      where: { sessionId: session.id },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const routingHistory = history
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .slice(-6)
+      .map((m) => ({ role: m.role, content: m.content }))
+
+    let effectiveAgentSlug: string | null
+    let routingDecision: RoutingDecision | null = null
+    if (session.agentPinned && session.agentSlug) {
+      effectiveAgentSlug = session.agentSlug
+    } else {
+      // AUTO-ROUTE: pick the best specialist for THIS message
+      routingDecision = await routeMessage(effectiveMessage, routingHistory)
+      effectiveAgentSlug = routingDecision.agentSlug
+      // Reflect the active specialist on the session (never pins)
+      if (session.agentSlug !== effectiveAgentSlug) {
+        await db.chatSession.update({
+          where: { id: session.id },
+          data: { agentSlug: effectiveAgentSlug },
+        }).catch(() => {})
+      }
+    }
+
     const personaPrompt = effectiveAgentSlug ? buildPersonaSystemPrompt(effectiveAgentSlug) : null
     const systemPrompt = buildSystemPrompt(enabledConnectors, language, userMemories, openArtifact, projectContext, personaPrompt)
 
@@ -1055,12 +1313,6 @@ export async function POST(req: NextRequest) {
         }).catch((e) => console.error('[memory] save failed:', e))
       }
     }
-
-    // Build message history
-    const history = await db.chatMessage.findMany({
-      where: { sessionId: session.id },
-      orderBy: { createdAt: 'asc' },
-    })
 
     const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
@@ -1103,6 +1355,25 @@ export async function POST(req: NextRequest) {
             }, { onConflict: 'id' })
           }
           send({ type: 'user', id: userMessage.id, content: trimmed })
+
+          // NEXUS One: announce the agent takeover (or hand-back to NEXUS)
+          // so the UI can render the live routing chip. Only emitted for
+          // AUTO-routed sessions — pinned sessions already show their agent.
+          if (routingDecision) {
+            const decisionMeta = routingDecision.agentSlug ? getAgentMeta(routingDecision.agentSlug) : null
+            send({
+              type: 'agent_assign',
+              agentSlug: routingDecision.agentSlug,
+              name: routingDecision.agentName,
+              division: routingDecision.division,
+              emoji: routingDecision.emoji,
+              color: routingDecision.color,
+              reason: routingDecision.reason,
+              elapsedMs: routingDecision.elapsedMs,
+              pinned: false,
+              divisionLabel: decisionMeta ? getDivision(decisionMeta.division)?.label ?? null : null,
+            })
+          }
 
           // LLM conversation: system + history + tool exchanges
           const llmMessages: Array<{ role: string; content: string }> = [
@@ -1332,7 +1603,14 @@ export async function POST(req: NextRequest) {
               // one-line acknowledgement like "Done — shortened the intro.").
               const finalAnswer = stripToolCall(content) || 'I could not complete that. Try rephrasing.'
               const assistantMessage = await db.chatMessage.create({
-                data: { sessionId: session!.id, role: 'assistant', content: finalAnswer },
+                data: {
+                  sessionId: session!.id,
+                  role: 'assistant',
+                  content: finalAnswer,
+                  // NEXUS One: persist attachments so image/video/document
+                  // cards survive session resume.
+                  attachments: attachments.length ? JSON.stringify(attachments) : null,
+                },
               })
               await db.chatSession.update({
                 where: { id: session!.id },

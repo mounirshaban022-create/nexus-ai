@@ -437,3 +437,182 @@ nav[aria-label="Primary"] {
 .font-display {
   font-family: var(--font-display), 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
+
+/* ==================================================================
+   NEXUS ONE — premium unified chat (v3 redesign)
+   Brand: Nexus gradient #F5A623 → #FF5A5F → #FF2A68 (from the logo)
+   Canvas: deep warm black. Surfaces: hairline glass cards.
+   ================================================================== */
+
+.nx {
+  --nx-1: #f5a623; /* brand orange   */
+  --nx-2: #ff5a5f; /* brand coral    */
+  --nx-3: #ff2a68; /* brand magenta  */
+  --nx-grad: linear-gradient(135deg, #f5a623 0%, #ff5a5f 52%, #ff2a68 100%);
+}
+
+/* Gradient text */
+.nx-gradient-text {
+  background: var(--nx-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Gradient border card */
+.nx-glow-card {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+.nx-glow-card:hover {
+  border-color: rgba(255, 90, 95, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px -12px rgba(255, 42, 104, 0.25);
+}
+
+/* Premium gradient CTA button surface */
+.nx-gradient-surface {
+  background: var(--nx-grad);
+  color: #fff;
+  transition: filter 0.2s ease, transform 0.15s ease, box-shadow 0.25s ease;
+  box-shadow: 0 4px 18px -6px rgba(255, 90, 95, 0.55);
+}
+.nx-gradient-surface:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 28px -6px rgba(255, 42, 104, 0.65);
+}
+.nx-gradient-surface:active {
+  transform: scale(0.985);
+}
+
+/* Soft animated brand aura behind hero elements */
+.nx-aura {
+  position: relative;
+}
+.nx-aura::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(closest-side, rgba(255, 90, 95, 0.22), rgba(245, 166, 35, 0.1), transparent 70%);
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Message entrance */
+@keyframes nx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.nx-rise {
+  animation: nx-rise 0.35s cubic-bezier(0.21, 1.02, 0.73, 1) both;
+}
+
+/* Agent handoff pill shimmer */
+@keyframes nx-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.nx-shimmer {
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0) 33%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(255, 255, 255, 0) 66%
+  );
+  background-size: 200% 100%;
+  animation: nx-shimmer 1.6s linear infinite;
+}
+
+/* Typing dots */
+@keyframes nx-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.nx-dot {
+  animation: nx-bounce 1.2s ease-in-out infinite;
+}
+.nx-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.nx-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Composer focus ring — brand gradient */
+.nx-composer {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(24, 24, 27, 0.85);
+  backdrop-filter: blur(12px);
+  transition: border-color 0.2s ease, box-shadow 0.25s ease;
+}
+.nx-composer:focus-within {
+  border-color: rgba(255, 90, 95, 0.45);
+  box-shadow: 0 0 0 4px rgba(255, 90, 95, 0.08), 0 12px 40px -16px rgba(255, 42, 104, 0.35);
+}
+
+/* Thin premium scrollbar for the whole nexus shell */
+.nx-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+.nx-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.nx-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nx-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.nx-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 90, 95, 0.45);
+  background-clip: padding-box;
+}
+
+/* Video card progress bar */
+.nx-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.nx-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--nx-grad);
+  transition: width 0.6s ease;
+}
+
+/* Hide scrollbars on horizontal rails */
+.nx-rail {
+  scrollbar-width: none;
+}
+.nx-rail::-webkit-scrollbar {
+  display: none;
+}

@@ -12,7 +12,9 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(_req: NextRequest, context: RouteContext) {
     // Rate limit: 60 reads per minute per client (prevents scraping/DoS)
-    const rl = rateLimit(`file-read:${clientKey(req)}`, 60, 60_000)
+    // NOTE(F1): was `clientKey(req)` — ReferenceError since ce239fb renamed the
+    // param to _req; every generated-image URL 500'd. Minimal emergency fix.
+    const rl = rateLimit(`file-read:${clientKey(_req)}`, 60, 60_000)
     if (!rl.ok) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
     }

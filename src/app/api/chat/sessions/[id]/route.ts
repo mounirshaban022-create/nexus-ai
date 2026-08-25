@@ -22,6 +22,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         title: session.title,
         kind: session.kind,
         agentSlug: session.agentSlug ?? null,
+        agentPinned: session.agentPinned ?? false,
         updatedAt: session.updatedAt,
         messages: session.messages.map((m) => ({
           id: m.id,
@@ -30,6 +31,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           thinking: m.thinking,
           toolName: m.toolName,
           toolData: m.toolData,
+          attachments: m.attachments ? JSON.parse(m.attachments) : [],
         })),
       },
     })

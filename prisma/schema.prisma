@@ -18,6 +18,10 @@ model ChatSession {
   // null = plain NEXUS conversation (no persona). Stamped on session creation
   // and authoritative on resume — same pattern as projectId below.
   agentSlug String?
+  // NEXUS One: true when the user EXPLICITLY pinned this agent from the
+  // directory (sticky persona). false = auto mode: the orchestrator re-routes
+  // every message and updates agentSlug to the latest active specialist.
+  agentPinned Boolean @default(false)
   // Phase 0 Bug 3: ownership. null = guest session (any guest may resume).
   // Non-null = owned by a specific authenticated user; only that user may resume.
   userId    String?
@@ -43,6 +47,9 @@ model ChatMessage {
   thinking  String? // assistant reasoning shown in the thinking panel
   toolName  String? // when role=tool: which connector ran
   toolData  String? // when role=tool: JSON { args, result }
+  // NEXUS One: JSON array of attachments produced by this assistant message
+  // (image/video/document/code cards) so they survive session resume.
+  attachments String?
   createdAt DateTime     @default(now())
 
   @@index([sessionId, createdAt])

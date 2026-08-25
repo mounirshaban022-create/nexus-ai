@@ -1,0 +1,752 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useRef, useState } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  ArrowLeft,
+     7→  ArrowUp,
+     8→  Brain,
+     9→  Check,
+    10→  ChevronDown,
+    11→  Download,
+    12→  FileText,
+    13→  Loader2,
+    14→  RotateCcw,
+    15→  X,
+    16→} from 'lucide-react'
+    17→import { Markdown } from '@/components/omni/markdown'
+    18→import {
+    19→  agentOrNexus,
+    20→  divisionOf,
+    21→  type AgencyMessage,
+    22→  type ChatStreamEvent,
+    23→  type View,
+    24→  tint,
+    25→} from './shared'
+    26→import { CHAT_PREFILL_KEY, DIVISION_OPENERS, NEXUS_OPENERS } from './agent-profile'
+    27→
+    28→/* ------------------------------------------------------------------ */
+    29→/* Local message model (extends the shared AgencyMessage)              */
+    30→/* ------------------------------------------------------------------ */
+    31→
+    32→interface ChatMsg extends AgencyMessage {
+    33→  /** Live tool-chip state for role:'tool' rows. */
+    34→  toolStatus?: 'running' | 'done' | 'error'
+    35→  toolMessage?: string
+    36→  toolIndex?: number
+    37→  /** Rendered as a red error bubble. */
+    38→  isError?: boolean
+    39→}
+    40→
+    41→const TOOL_LABELS: Record<string, string> = {
+    42→  web_search: 'Searching the web',
+    43→  read_page: 'Reading page',
+    44→  generate_image: 'Creating image',
+    45→  create_document: 'Building document',
+    46→  create_spreadsheet: 'Building spreadsheet',
+    47→  run_code: 'Running code',
+    48→  pdf_operation: 'Editing PDF',
+    49→  edit_document: 'Editing document',
+    50→}
+    51→
+    52→function toolLabel(name: string): string {
+    53→  if (TOOL_LABELS[name]) return TOOL_LABELS[name]
+    54→  return name
+    55→    .replace(/_/g, ' ')
+    56→    .replace(/\b\w/g, (c) => c.toUpperCase())
+    57→}
+    58→
+    59→/* ------------------------------------------------------------------ */
+    60→/* Attachments (V1 — robust, every field guarded)                      */
+    61→/* ------------------------------------------------------------------ */
+    62→
+    63→function AttachmentCard({ item }: { item: unknown }) {
+    64→  if (!item || typeof item !== 'object') return null
+    65→  const a = item as { type?: unknown; url?: unknown; title?: unknown }
+    66→  const type = typeof a.type === 'string' ? a.type : ''
+    67→  const url = typeof a.url === 'string' ? a.url : ''
+    68→  const title = typeof a.title === 'string' && a.title ? a.title : ''
+    69→
+    70→  if (type === 'image' && url) {
+    71→    return (
+    72→      // Generated images are dynamic same-origin URLs — plain <img> is correct here.
+    73→      <img
+    74→        src={url}
+    75→        alt={title || 'Generated image'}
+    76→        loading="lazy"
+    77→        className="w-full max-w-sm rounded-xl border border-zinc-800/60"
+    78→      />
+    79→    )
+    80→  }
+    81→
+    82→  if (type === 'document' && url) {
+    83→    return (
+    84→      <a
+    85→        href={url}
+    86→        download
+    87→        aria-label={title ? `Download ${title}` : 'Download document'}
+    88→        className="flex max-w-sm items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 transition hover:border-zinc-700"
+    89→      >
+    90→        <FileText className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+    91→        <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{title || 'Document'}</span>
+    92→        <Download className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+    93→      </a>
+    94→    )
+    95→  }
+    96→
+    97→  return (
+    98→    <div className="flex max-w-sm items-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-3 py-2">
+    99→      <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+   100→      <span className="truncate text-xs text-zinc-400">{title || type || 'Attachment'}</span>
+   101→    </div>
+   102→  )
+   103→}
+   104→
+   105→function AttachmentList({ items }: { items: unknown[] | undefined }) {
+   106→  if (!Array.isArray(items) || items.length === 0) return null
+   107→  return (
+   108→    <div className="mt-3 flex flex-col gap-2">
+   109→      {items.map((item, i) => (
+   110→        <AttachmentCard key={i} item={item} />
+   111→      ))}
+   112→    </div>
+   113→  )
+   114→}
+   115→
+   116→/* ------------------------------------------------------------------ */
+   117→/* Message subcomponents                                               */
+   118→/* ------------------------------------------------------------------ */
+   119→
+   120→function ThinkingPanel({ thinking }: { thinking: string }) {
+   121→  const [open, setOpen] = useState(false)
+   122→  return (
+   123→    <div className="mb-2">
+   124→      <button
+   125→        onClick={() => setOpen(!open)}
+   126→        aria-expanded={open}
+   127→        className="flex min-h-[32px] items-center gap-1.5 text-xs text-zinc-500 transition hover:text-zinc-400"
+   128→      >
+   129→        <Brain className="h-3.5 w-3.5 text-amber-400" aria-hidden />
+   130→        Thought process
+   131→        <ChevronDown
+   132→          className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+   133→          aria-hidden
+   134→        />
+   135→      </button>
+   136→      {open && (
+   137→        <p className="mt-1 whitespace-pre-wrap border-l-2 border-amber-400/30 pl-3 text-xs italic leading-relaxed text-zinc-500">
+   138→          {thinking}
+   139→        </p>
+   140→      )}
+   141→    </div>
+   142→  )
+   143→}
+   144→
+   145→function ToolChip({ msg }: { msg: ChatMsg }) {
+   146→  const label = toolLabel(msg.toolName ?? '')
+   147→  return (
+   148→    <div className="flex justify-start pl-11" role="status" aria-label={label}>
+   149→      <div
+   150→        className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${
+   151→          msg.toolStatus === 'error'
+   152→            ? 'border-red-900/50 bg-red-950/30 text-red-300'
+   153→            : msg.toolStatus === 'done'
+   154→              ? 'border-zinc-800/60 bg-zinc-900/40 text-zinc-500'
+   155→              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400'
+   156→        }`}
+   157→      >
+   158→        {msg.toolStatus === 'running' ? (
+   159→          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" aria-hidden />
+   160→        ) : msg.toolStatus === 'error' ? (
+   161→          <X className="h-3.5 w-3.5" aria-hidden />
+   162→        ) : (
+   163→          <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
+   164→        )}
+   165→        <span className="max-w-[260px] truncate sm:max-w-md">
+   166→          {msg.toolMessage && msg.toolStatus === 'running' ? msg.toolMessage : label}
+   167→        </span>
+   168→      </div>
+   169→    </div>
+   170→  )
+   171→}
+   172→
+   173→/* ------------------------------------------------------------------ */
+   174→/* The chat view                                                       */
+   175→/* ------------------------------------------------------------------ */
+   176→
+   177→export function AgencyChat({
+   178→  agentSlug,
+   179→  sessionId,
+   180→  setView,
+   181→}: {
+   182→  agentSlug: string | null
+   183→  sessionId?: string
+   184→  setView: (v: View) => void
+   185→}) {
+   186→  const agent = agentOrNexus(agentSlug)
+   187→  const division = divisionOf(agent)
+   188→
+   189→  const [messages, setMessages] = useState<ChatMsg[]>([])
+   190→  const [streaming, setStreaming] = useState(false)
+   191→  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(sessionId)
+   192→  const [input, setInput] = useState('')
+   193→  const [thinkingEnabled, setThinkingEnabled] = useState(false)
+   194→
+   195→  const scrollRef = useRef<HTMLDivElement>(null)
+   196→  const textareaRef = useRef<HTMLTextAreaElement>(null)
+   197→  const userScrolledUpRef = useRef(false)
+   198→  const streamIdRef = useRef<string | null>(null)
+   199→  const pendingDeltaRef = useRef('')
+   200→  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+   201→  const abortRef = useRef<AbortController | null>(null)
+   202→
+   203→  /* ---------- prefill a suggested opener into the composer ---------- */
+   204→  useEffect(() => {
+   205→    try {
+   206→      const p = sessionStorage.getItem(CHAT_PREFILL_KEY)
+   207→      if (p) {
+   208→        sessionStorage.removeItem(CHAT_PREFILL_KEY)
+   209→        setInput(p)
+   210→      }
+   211→    } catch {
+   212→      /* storage blocked — open a plain empty composer */
+   213→    }
+   214→  }, [])
+   215→
+   216→  /* ---------- load an existing session (mount + navigation) ---------- */
+   217→  useEffect(() => {
+   218→    if (!sessionId) return
+   219→    let cancelled = false
+   220→    ;(async () => {
+   221→      try {
+   222→        const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
+   223→        if (!res.ok) return
+   224→        const data = await res.json()
+   225→        const s = data?.session
+   226→        if (cancelled || !s) return
+   227→        const rows: AgencyMessage[] = Array.isArray(s.messages) ? s.messages : []
+   228→        setMessages(
+   229→          rows
+   230→            .filter((m) => !!m && typeof m === 'object')
+   231→            .map((m, i) => ({
+   232→              id: typeof m.id === 'string' ? m.id : `m-${i}`,
+   233→              role: m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool' : 'assistant',
+   234→              content: typeof m.content === 'string' ? m.content : '',
+   235→              thinking: typeof m.thinking === 'string' ? m.thinking : null,
+   236→              toolName: typeof m.toolName === 'string' ? m.toolName : null,
+   237→              toolStatus: m.role === 'tool' ? 'done' : undefined,
+   238→            }))
+   239→        )
+   240→        setActiveSessionId(typeof s.id === 'string' ? s.id : sessionId)
+   241→      } catch {
+   242→        /* failed to load — fall back to an empty transcript */
+   243→      }
+   244→    })()
+   245→    return () => {
+   246→      cancelled = true
+   247→    }
+   248→  }, [sessionId])
+   249→
+   250→  /* ---------- abort any live stream on unmount ---------- */
+   251→  useEffect(() => {
+   252→    return () => {
+   253→      abortRef.current?.abort()
+   254→    }
+   255→  }, [])
+   256→
+   257→  /* ---------- auto-scroll while the user is near the bottom ---------- */
+   258→  useEffect(() => {
+   259→    const el = scrollRef.current
+   260→    if (!el || userScrolledUpRef.current) return
+   261→    el.scrollTop = el.scrollHeight
+   262→  }, [messages])
+   263→
+   264→  const onScroll = () => {
+   265→    const el = scrollRef.current
+   266→    if (!el) return
+   267→    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+   268→    userScrolledUpRef.current = distFromBottom > 150
+   269→  }
+   270→
+   271→  /* ---------- textarea auto-resize ---------- */
+   272→  useEffect(() => {
+   273→    const el = textareaRef.current
+   274→    if (!el) return
+   275→    el.style.height = 'auto'
+   276→    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+   277→  }, [input])
+   278→
+   279→  /* ---------- streaming helpers ---------- */
+   280→
+   281→  const appendDelta = useCallback((delta: string) => {
+   282→    const id = streamIdRef.current
+   283→    if (!id || !delta) return
+   284→    setMessages((prev) =>
+   285→      prev.map((m) => (m.id === id ? { ...m, content: m.content + delta } : m))
+   286→    )
+   287→  }, [])
+   288→
+   289→  /** Deltas are buffered and flushed every 80ms so react-markdown is not
+   290→   * re-parsed on every single token — keeps long streams silky. */
+   291→  const startDeltaFlusher = useCallback(() => {
+   292→    if (flushTimerRef.current) return
+   293→    flushTimerRef.current = setInterval(() => {
+   294→      if (!pendingDeltaRef.current) return
+   295→      const chunk = pendingDeltaRef.current
+   296→      pendingDeltaRef.current = ''
+   297→      appendDelta(chunk)
+   298→    }, 80)
+   299→  }, [appendDelta])
+   300→
+   301→  const stopDeltaFlusher = useCallback(() => {
+   302→    if (flushTimerRef.current) {
+   303→      clearInterval(flushTimerRef.current)
+   304→      flushTimerRef.current = null
+   305→    }
+   306→    if (pendingDeltaRef.current) {
+   307→      const chunk = pendingDeltaRef.current
+   308→      pendingDeltaRef.current = ''
+   309→      appendDelta(chunk)
+   310→    }
+   311→  }, [appendDelta])
+   312→
+   313→  /** Patch the live tool chip that matches (toolName, index). */
+   314→  const updateToolMessage = useCallback(
+   315→    (tool: string, index: number, patch: Partial<ChatMsg>) => {
+   316→      setMessages((prev) => {
+   317→        let target = -1
+   318→        for (let i = prev.length - 1; i >= 0; i--) {
+   319→          const m = prev[i]
+   320→          if (m.role === 'tool' && m.toolName === tool && m.toolIndex === index) {
+   321→            target = i
+   322→            break
+   323→          }
+   324→        }
+   325→        if (target === -1) {
+   326→          for (let i = prev.length - 1; i >= 0; i--) {
+   327→            const m = prev[i]
+   328→            if (m.role === 'tool' && m.toolName === tool && m.toolStatus === 'running') {
+   329→              target = i
+   330→              break
+   331→            }
+   332→          }
+   333→        }
+   334→        if (target === -1) return prev
+   335→        const copy = [...prev]
+   336→        copy[target] = { ...copy[target], ...patch }
+   337→        return copy
+   338→      })
+   339→    },
+   340→    []
+   341→  )
+   342→
+   343→  /* ---------- send ---------- */
+   344→
+   345→  const send = useCallback(
+   346→    async (text: string) => {
+   347→      const trimmed = text.trim()
+   348→      if (!trimmed || streaming) return
+   349→
+   350→      const userMsg: ChatMsg = {
+   351→        id: `local-${Date.now()}`,
+   352→        role: 'user',
+   353→        content: trimmed,
+   354→      }
+   355→      setMessages((prev) => [...prev, userMsg])
+   356→      setInput('')
+   357→      setStreaming(true)
+   358→      userScrolledUpRef.current = false
+   359→
+   360→      abortRef.current = new AbortController()
+   361→      try {
+   362→        const res = await fetch('/api/chat', {
+   363→          method: 'POST',
+   364→          headers: { 'Content-Type': 'application/json' },
+   365→          body: JSON.stringify({
+   366→            message: trimmed,
+   367→            ...(activeSessionId ? { sessionId: activeSessionId } : {}),
+   368→            thinking: thinkingEnabled,
+   369→            language: 'en',
+   370→            ...(agentSlug ? { agentSlug } : {}),
+   371→          }),
+   372→          signal: abortRef.current.signal,
+   373→        })
+   374→
+   375→        if (!res.ok || !res.body) {
+   376→          const data = await res.json().catch(() => null)
+   377→          throw new Error(data?.error || 'Chat request failed.')
+   378→        }
+   379→
+   380→        // Consume the NDJSON stream (same protocol as omni/chat-mode)
+   381→        const reader = res.body.getReader()
+   382→        const decoder = new TextDecoder()
+   383→        let buffer = ''
+   384→
+   385→        for (;;) {
+   386→          const { done, value } = await reader.read()
+   387→          if (done) break
+   388→          buffer += decoder.decode(value, { stream: true })
+   389→          const lines = buffer.split('\n')
+   390→          buffer = lines.pop() ?? ''
+   391→          for (const line of lines) {
+   392→            const text = line.trim()
+   393→            if (!text) continue
+   394→            let event: ChatStreamEvent
+   395→            try {
+   396→              event = JSON.parse(text) as ChatStreamEvent
+   397→            } catch {
+   398→              continue // partial / malformed line — skip
+   399→            }
+   400→
+   401→            switch (event.type) {
+   402→              case 'user': {
+   403→                setMessages((prev) =>
+   404→                  prev.map((m) =>
+   405→                    m.id === userMsg.id ? { ...m, id: event.id, content: event.content } : m
+   406→                  )
+   407→                )
+   408→                break
+   409→              }
+   410→              case 'assistant_start': {
+   411→                streamIdRef.current = event.id
+   412→                setMessages((prev) => [
+   413→                  ...prev,
+   414→                  { id: event.id, role: 'assistant', content: '', streaming: true },
+   415→                ])
+   416→                break
+   417→              }
+   418→              case 'assistant_delta': {
+   419→                pendingDeltaRef.current += event.delta
+   420→                startDeltaFlusher()
+   421→                break
+   422→              }
+   423→              case 'assistant_end': {
+   424→                stopDeltaFlusher()
+   425→                const id = streamIdRef.current
+   426→                streamIdRef.current = null
+   427→                if (id) {
+   428→                  const attachments = Array.isArray(event.attachments) ? event.attachments : []
+   429→                  setMessages((prev) =>
+   430→                    prev.map((m) =>
+   431→                      m.id === id
+   432→                        ? {
+   433→                            ...m,
+   434→                            streaming: false,
+   435→                            ...(attachments.length > 0 ? { attachments } : {}),
+   436→                          }
+   437→                        : m
+   438→                    )
+   439→                  )
+   440→                }
+   441→                break
+   442→              }
+   443→              case 'assistant': {
+   444→                // Full-message fallback (non-streaming providers)
+   445→                stopDeltaFlusher()
+   446→                const id = streamIdRef.current
+   447→                streamIdRef.current = null
+   448→                const attachments = Array.isArray(event.attachments) ? event.attachments : []
+   449→                if (id) {
+   450→                  setMessages((prev) =>
+   451→                    prev.map((m) =>
+   452→                      m.id === id
+   453→                        ? {
+   454→                            ...m,
+   455→                            content: event.content,
+   456→                            streaming: false,
+   457→                            ...(attachments.length > 0 ? { attachments } : {}),
+   458→                          }
+   459→                        : m
+   460→                    )
+   461→                  )
+   462→                } else {
+   463→                  setMessages((prev) => [
+   464→                    ...prev,
+   465→                    {
+   466→                      id: `a-${Date.now()}`,
+   467→                      role: 'assistant',
+   468→                      content: event.content,
+   469→                      ...(attachments.length > 0 ? { attachments } : {}),
+   470→                    },
+   471→                  ])
+   472→                }
+   473→                break
+   474→              }
+   475→              case 'tool_start': {
+   476→                setMessages((prev) => [
+   477→                  ...prev,
+   478→                  {
+   479→                    id: `tool-${event.index}-${Date.now()}`,
+   480→                    role: 'tool',
+   481→                    content: '',
+   482→                    toolName: event.tool,
+   483→                    toolIndex: event.index,
+   484→                    toolStatus: 'running',
+   485→                  },
+   486→                ])
+   487→                break
+   488→              }
+   489→              case 'tool_progress': {
+   490→                updateToolMessage(event.tool, event.index, { toolMessage: event.message })
+   491→                break
+   492→              }
+   493→              case 'tool_result': {
+   494→                updateToolMessage(event.tool, event.index, {
+   495→                  toolStatus: event.ok ? 'done' : 'error',
+   496→                })
+   497→                break
+   498→              }
+   499→              case 'done': {
+   500→                setActiveSessionId(event.sessionId)
+   501→                break
+   502→              }
+   503→              case 'error': {
+   504→                throw new Error(event.message)
+   505→              }
+   506→            }
+   507→          }
+   508→        }
+   509→      } catch (error) {
+   510→        if (error instanceof DOMException && error.name === 'AbortError') return
+   511→        setMessages((prev) => [
+   512→          ...prev,
+   513→          {
+   514→            id: `err-${Date.now()}`,
+   515→            role: 'assistant',
+   516→            content:
+   517→              error instanceof Error
+   518→                ? `Something went wrong: ${error.message}`
+   519→                : 'Something went wrong. Please try again.',
+   520→            isError: true,
+   521→          },
+   522→        ])
+   523→      } finally {
+   524→        stopDeltaFlusher()
+   525→        streamIdRef.current = null
+   526→        setStreaming(false)
+   527→        setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)))
+   528→      }
+   529→    },
+   530→    [activeSessionId, streaming, thinkingEnabled, agentSlug, startDeltaFlusher, stopDeltaFlusher, updateToolMessage]
+   531→  )
+   532→
+   533→  const startNew = () => {
+   534→    if (streaming) abortRef.current?.abort()
+   535→    setMessages([])
+   536→    setActiveSessionId(undefined)
+   537→    setInput('')
+   538→    streamIdRef.current = null
+   539→    setStreaming(false)
+   540→    textareaRef.current?.focus()
+   541→  }
+   542→
+   543→  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   544→    if (e.key === 'Enter' && !e.shiftKey) {
+   545→      e.preventDefault()
+   546→      send(input)
+   547→    }
+   548→  }
+   549→
+   550→  const openers = division ? DIVISION_OPENERS[division.id] ?? NEXUS_OPENERS : NEXUS_OPENERS
+   551→  const suggestions = openers.slice(0, 3)
+   552→  const canSend = input.trim().length > 0 && !streaming
+   553→
+   554→  return (
+   555→    <div className="flex h-[calc(100vh-56px)] flex-col md:h-screen">
+   556→      {/* Header */}
+   557→      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-800/60 px-4">
+   558→        <button
+   559→          onClick={() => setView(agentSlug ? { type: 'agent', agentSlug } : { type: 'home' })}
+   560→          aria-label={agentSlug ? `Back to ${agent.name} profile` : 'Back to home'}
+   561→          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-400 transition hover:bg-zinc-800/60 hover:text-zinc-100"
+   562→        >
+   563→          <ArrowLeft className="h-5 w-5" aria-hidden />
+   564→        </button>
+   565→        <div className="flex min-w-0 flex-1 items-center gap-3">
+   566→          <span
+   567→            className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-base"
+   568→            style={{
+   569→              backgroundColor: division ? tint(division.color, 0.12) : 'rgba(113,113,122,0.12)',
+   570→            }}
+   571→            aria-hidden
+   572→          >
+   573→            {agent.emoji}
+   574→          </span>
+   575→          <div className="min-w-0">
+   576→            <p className="truncate text-sm font-semibold text-zinc-100">{agent.name}</p>
+   577→            {division && (
+   578→              <span
+   579→                className="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium"
+   580→                style={{ backgroundColor: tint(division.color, 0.12), color: division.color }}
+   581→              >
+   582→                {division.label}
+   583→              </span>
+   584→            )}
+   585→          </div>
+   586→        </div>
+   587→        <button
+   588→          onClick={startNew}
+   589→          aria-label="New conversation"
+   590→          title="New conversation"
+   591→          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-400 transition hover:bg-zinc-800/60 hover:text-zinc-100"
+   592→        >
+   593→          <RotateCcw className="h-4 w-4" aria-hidden />
+   594→        </button>
+   595→      </header>
+   596→
+   597→      {/* Messages */}
+   598→      <div
+   599→        ref={scrollRef}
+   600→        onScroll={onScroll}
+   601→        className="agency-scroll [scrollbar-width:thin] flex-1 overflow-y-auto"
+   602→        aria-label={`Conversation with ${agent.name}`}
+   603→      >
+   604→        <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6">
+   605→          {messages.length === 0 && !streaming ? (
+   606→            /* Empty state */
+   607→            <motion.div
+   608→              initial={{ opacity: 0, y: 8 }}
+   609→              animate={{ opacity: 1, y: 0 }}
+   610→              transition={{ duration: 0.3, ease: 'easeOut' }}
+   611→              className="flex flex-col items-center pt-10 text-center md:pt-20"
+   612→            >
+   613→              <div
+   614→                className="grid h-20 w-20 place-items-center rounded-2xl text-5xl"
+   615→                style={{
+   616→                  backgroundColor: division
+   617→                    ? tint(division.color, 0.12)
+   618→                    : 'rgba(113,113,122,0.12)',
+   619→                }}
+   620→                aria-hidden
+   621→              >
+   622→                {agent.emoji}
+   623→              </div>
+   624→              <h2 className="mt-5 font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-zinc-100">
+   625→                {agent.name}
+   626→              </h2>
+   627→              {agent.vibe && <p className="mt-1.5 text-sm italic text-zinc-500">{agent.vibe}</p>}
+   628→              <p className="mt-4 max-w-md text-xs leading-relaxed text-zinc-600">
+   629→                {agent.description}
+   630→              </p>
+   631→              <div className="mt-8 flex flex-col items-stretch gap-2 sm:items-center">
+   632→                {suggestions.map((s) => (
+   633→                  <button
+   634→                    key={s}
+   635→                    onClick={() => send(s)}
+   636→                    className="min-h-[44px] rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 text-left text-sm text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100 sm:min-w-[320px]"
+   637→                  >
+   638→                    {s}
+   639→                  </button>
+   640→                ))}
+   641→              </div>
+   642→            </motion.div>
+   643→          ) : (
+   644→            messages.map((m) =>
+   645→              m.role === 'user' ? (
+   646→                <div key={m.id} className="flex justify-end">
+   647→                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-zinc-800 px-4 py-3 text-sm leading-relaxed text-zinc-100">
+   648→                    {m.content}
+   649→                  </div>
+   650→                </div>
+   651→              ) : m.role === 'tool' ? (
+   652→                <ToolChip key={m.id} msg={m} />
+   653→              ) : (
+   654→                <div key={m.id} className="flex gap-3">
+   655→                  <span
+   656→                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-base"
+   657→                    style={{
+   658→                      backgroundColor: division
+   659→                        ? tint(division.color, 0.12)
+   660→                        : 'rgba(113,113,122,0.12)',
+   661→                    }}
+   662→                    aria-hidden
+   663→                  >
+   664→                    {agent.emoji}
+   665→                  </span>
+   666→                  <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border border-zinc-800/60 bg-zinc-900/80 px-4 py-3">
+   667→                    {m.thinking ? <ThinkingPanel thinking={m.thinking} /> : null}
+   668→                    {m.isError ? (
+   669→                      <p className="text-sm leading-relaxed text-red-400">{m.content}</p>
+   670→                    ) : m.streaming && !m.content ? (
+   671→                      <span className="flex items-center gap-2 text-xs text-zinc-500">
+   672→                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" aria-hidden />
+   673→                        thinking…
+   674→                      </span>
+   675→                    ) : (
+   676→                      /* `dark` wrapper: the omni-prose stylesheet ships dark
+   677→                         code/inline-code rules scoped to `.dark .omni-prose` */
+   678→                      <div className="dark text-sm text-zinc-100">
+   679→                        <Markdown content={m.content} />
+   680→                        {m.streaming && (
+   681→                          <span
+   682→                            className="ml-0.5 inline-block h-4 w-2 animate-pulse rounded-sm bg-amber-400 align-text-bottom"
+   683→                            aria-hidden
+   684→                          />
+   685→                        )}
+   686→                      </div>
+   687→                    )}
+   688→                    <AttachmentList items={m.attachments} />
+   689→                  </div>
+   690→                </div>
+   691→              )
+   692→            )
+   693→          )}
+   694→        </div>
+   695→      </div>
+   696→
+   697→      {/* Composer */}
+   698→      <div className="shrink-0 border-t border-zinc-800/60 p-3 md:p-4">
+   699→        <div className="mx-auto w-full max-w-3xl">
+   700→          <form
+   701→            onSubmit={(e) => {
+   702→              e.preventDefault()
+   703→              send(input)
+   704→            }}
+   705→            className="flex items-end gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-2 transition focus-within:border-zinc-600"
+   706→          >
+   707→            <textarea
+   708→              ref={textareaRef}
+   709→              value={input}
+   710→              onChange={(e) => setInput(e.target.value)}
+   711→              onKeyDown={onKeyDown}
+   712→              rows={1}
+   713→              placeholder={`Message ${agent.name}…`}
+   714→              aria-label={`Message ${agent.name}`}
+   715→              className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+   716→            />
+   717→            <button
+   718→              type="button"
+   719→              onClick={() => setThinkingEnabled(!thinkingEnabled)}
+   720→              aria-pressed={thinkingEnabled}
+   721→              aria-label="Toggle deep thinking"
+   722→              title="Deep thinking"
+   723→              className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition ${
+   724→                thinkingEnabled
+   725→                  ? 'bg-amber-400/15 text-amber-400'
+   726→                  : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+   727→              }`}
+   728→            >
+   729→              <Brain className="h-4 w-4" aria-hidden />
+   730→            </button>
+   731→            <button
+   732→              type="submit"
+   733→              disabled={!canSend}
+   734→              aria-label="Send message"
+   735→              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-400 text-zinc-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+   736→            >
+   737→              {streaming ? (
+   738→                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   739→              ) : (
+   740→                <ArrowUp className="h-4 w-4" aria-hidden />
+   741→              )}
+   742→            </button>
+   743→          </form>
+   744→          <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
+   745→            {agent.name} can use NEXUS superpowers — images, documents, code, live data & search.
+   746→          </p>
+   747→        </div>
+   748→      </div>
+   749→    </div>
+   750→  )
+   751→}
+   752→
