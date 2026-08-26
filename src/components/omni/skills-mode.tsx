@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   AlertTriangle,
@@ -34,6 +35,7 @@ import {
   HardDrive,
   Image as ImageIcon,
   KanbanSquare,
+  Loader2,
   MessageCircle,
   MessageSquare,
   Music,
@@ -49,11 +51,35 @@ import {
   Wand2,
   Workflow,
   X,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { tint } from '@/components/nexus/shared'
 import type { CliSkill } from '@/lib/cli-skills'
+import { resolveSkillAction } from '@/lib/skill-map'
+
+/** localStorage key for the installed-skills set. */
+const INSTALLED_KEY = 'nexus-installed-skills'
+
+/** Read the installed set (safe for SSR). */
+function readInstalled(): Set<string> {
+  try {
+    const raw = localStorage.getItem(INSTALLED_KEY)
+    return new Set(Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+/** Persist the installed set. */
+function writeInstalled(set: Set<string>) {
+  try {
+    localStorage.setItem(INSTALLED_KEY, JSON.stringify([...set]))
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 export interface SkillsModeProps {
   /** hand a pre-filled prompt to the chat composer and navigate there */
@@ -135,6 +161,32 @@ function hostOf(url: string): string {
 
 export function SkillsMode({ onUseInChat }: SkillsModeProps) {
   const { toast } = useToast()
+
+  /* ---------------- installed skills (localStorage) ---------------- */
+  const [installed, setInstalled] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setInstalled(readInstalled())
+  }, [])
+  const toggleInstall = useCallback(
+    (skill: CliSkill) => {
+      setInstalled((prev) => {
+        const next = new Set(prev)
+        if (next.has(skill.name)) {
+          next.delete(skill.name)
+          toast({ title: `${skill.displayName} uninstalled` })
+        } else {
+          next.add(skill.name)
+          toast({
+            title: `${skill.displayName} installed`,
+            description: `Ready in chat — runs ${resolveSkillAction(skill.name, skill.category).label.toLowerCase()} for free.`,
+          })
+        }
+        writeInstalled(next)
+        return next
+      })
+    },
+    [toast]
+  )
 
   /* ---------------- catalog (fetched once, cached) ---------------- */
   const [skills, setSkills] = useState<CliSkill[]>([])
@@ -405,7 +457,13 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
               {filtered.map((s) => (
-                <SkillCard key={s.name} skill={s} onOpen={() => setDetail(s)} />
+                <SkillCard
+                  key={s.name}
+                  skill={s}
+                  installed={installed.has(s.name)}
+                  onToggleInstall={() => toggleInstall(s)}
+                  onOpen={() => setDetail(s)}
+                />
               ))}
 
               {filtered.length === 0 && (
@@ -490,8 +548,19 @@ function CategoryChip({
 /* Skill card                                                          */
 /* ------------------------------------------------------------------ */
 
-function SkillCard({ skill, onOpen }: { skill: CliSkill; onOpen: () => void }) {
+function SkillCard({
+  skill,
+  installed,
+  onToggleInstall,
+  onOpen,
+}: {
+  skill: CliSkill
+  installed: boolean
+  onToggleInstall: () => void
+  onOpen: () => void
+}) {
   const { icon: Icon, color } = categoryMeta(skill.category)
+  const action = resolveSkillAction(skill.name, skill.category)
 
   return (
     <article
@@ -505,8 +574,22 @@ function SkillCard({ skill, onOpen }: { skill: CliSkill; onOpen: () => void }) {
           onOpen()
         }
       }}
-      className="nx-glow-card group flex cursor-pointer flex-col p-4 text-left outline-none focus-visible:border-[#ff5a5f]/50 focus-visible:shadow-[0_0_0_4px_rgba(255,90,95,0.10)]"
+      className="nx-glow-card group relative flex cursor-pointer flex-col p-4 text-left outline-none focus-visible:border-[#ff5a5f]/50 focus-visible:shadow-[0_0_0_4px_rgba(255,90,95,0.10)]"
     >
+      {/* installed glow edge */}
+      <AnimatePresence>
+        {installed && (
+          <motion.span
+            aria-hidden
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none absolute inset-0 rounded-[inherit]"
+            style={{ boxShadow: 'inset 0 0 0 1.5px rgba(52,211,153,0.45)' }}
+          />
+        )}
+      </AnimatePresence>
+
       <div className="flex items-start gap-3">
         <div
           className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
@@ -519,13 +602,61 @@ function SkillCard({ skill, onOpen }: { skill: CliSkill; onOpen: () => void }) {
           <h3 className="truncate text-sm font-semibold text-zinc-100" title={skill.displayName}>
             {skill.displayName}
           </h3>
-          <span
-            className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{ background: tint(color, 0.14), color }}
-          >
-            {categoryLabel(skill.category)}
-          </span>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span
+              className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+              style={{ background: tint(color, 0.14), color }}
+            >
+              {categoryLabel(skill.category)}
+            </span>
+            {/* Cloud-executable badge — every skill maps to a free action */}
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+              <Zap className="h-2.5 w-2.5" aria-hidden />
+              {action.chip}
+            </span>
+          </div>
         </div>
+        {/* Install toggle */}
+        <button
+          type="button"
+          aria-pressed={installed}
+          aria-label={installed ? `Uninstall ${skill.displayName}` : `Install ${skill.displayName}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleInstall()
+          }}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border transition"
+          style={
+            installed
+              ? { borderColor: 'rgba(52,211,153,0.4)', background: 'rgba(52,211,153,0.12)' }
+              : { borderColor: 'rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.04)' }
+          }
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            {installed ? (
+              <motion.span
+                key="on"
+                initial={{ scale: 0.4, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0.4, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+                className="grid place-items-center"
+              >
+                <Check className="h-4 w-4 text-emerald-400" aria-hidden />
+              </motion.span>
+            ) : (
+              <motion.span
+                key="off"
+                initial={{ scale: 0.4, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.4, opacity: 0 }}
+                className="grid place-items-center"
+              >
+                <Wand2 className="h-4 w-4 text-zinc-500 transition group-hover:text-[#ff8a8d]" aria-hidden />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </button>
       </div>
 
       <p className="mt-2.5 line-clamp-3 min-h-[3.4rem] text-xs leading-relaxed text-zinc-400">
@@ -636,6 +767,32 @@ function SkillDetailDialog({
 
             {/* Actions + install + meta */}
             <div className="shrink-0 space-y-3 border-b border-white/8 px-5 py-4">
+              {/* Cloud-action mapping banner */}
+              {(() => {
+                const action = resolveSkillAction(skill.name, skill.category)
+                return (
+                  <div className="flex items-center gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-3.5 py-3">
+                    <motion.span
+                      aria-hidden
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-lg"
+                      animate={{ scale: [1, 1.08, 1] }}
+                      transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
+                    >
+                      {action.emoji}
+                    </motion.span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-emerald-300">
+                        Runs in NEXUS cloud — free
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-zinc-400">
+                        Mapped to: {action.label.replace(' with FLUX', '')} · {action.chip}
+                      </p>
+                    </div>
+                    <Zap className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+                  </div>
+                )
+              })()}
+
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"

@@ -29,7 +29,8 @@ import { zaiStreamChat, zaiOnCooldown, zaiConfigured, getZAI } from '@/lib/zai'
 import { openrouterConfigured, openrouterStreamChatCallback } from '@/lib/openrouter'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
-import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName } from '@/lib/cli-skills'
+import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listCliSkills } from '@/lib/cli-skills'
+import { runSkillAction, resolveSkillAction } from '@/lib/skill-actions'
 
 /** Resolves the app's own origin — works on localhost, Vercel previews,
  *  and production (falls back to localhost for direct dev calls). */
@@ -609,6 +610,36 @@ interface ActiveDoc {
   dataUrl: string
 }
 
+/* ------------------------------------------------------------------ */
+/* SKILL DIRECTIVE — deterministic pre-scan for explicit skill runs.   */
+/* Matches the Skills-view hand-off (Use the "X" skill to help me: …)  */
+/* and direct slash syntax (/skill X …). Runs the skill's REAL cloud   */
+/* action and streams a dedicated animated card + artifact.            */
+/* ------------------------------------------------------------------ */
+function parseSkillDirective(message: string): { skill: string; task: string } | null {
+  // /skill blender make a fox  |  /skill blender: make a fox
+  const slash = message.match(/^\s*\/skill\s+[""']?([\w.-]+)[""']?\s*:?\s+(.+)$/i)
+  if (slash) return { skill: slash[1], task: slash[2] }
+  // Use the "cli-anything-blender" skill to help me: make a fox
+  const quoted = message.match(
+    /^\s*use\s+(?:the\s+)?[""']?([\w.-]+)[""']?\s+skill\s+(?:to\s+help\s+me\s*:?\s*|for\s+|and\s+)(.+)$/i
+  )
+  if (quoted) return { skill: quoted[1], task: quoted[2] }
+  return null
+}
+
+/** Resolve a directive skill name against the catalog (full or short form). */
+async function matchSkillFromCatalog(skill: string) {
+  const catalog = await listCliSkills()
+  const short = skill.replace(/^cli-anything-/, '')
+  return (
+    catalog.find((s) => s.name === skill) ??
+    catalog.find((s) => s.name === `cli-anything-${short}`) ??
+    catalog.find((s) => s.name.replace(/^cli-anything-/, '') === short) ??
+    null
+  )
+}
+
 async function executeChatTool(
   req: NextRequest,
   toolId: string,
@@ -616,7 +647,6 @@ async function executeChatTool(
   activeDoc: ActiveDoc | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
   const origin = appOrigin(req)
-
   if (toolId === 'generate_image') {
     const prompt = String(args.prompt ?? '').slice(0, 2000)
     if (!prompt) throw new Error('prompt required')
@@ -1694,6 +1724,103 @@ export async function POST(req: NextRequest) {
           // the composer lock up after identity questions).
           controller.close()
           return
+        }
+
+        /* ---------- SKILL RUN: deterministic, real cloud execution ------- */
+        // "Use the blender skill to help me: ..." (Skills-view hand-off) or
+        // "/skill blender ..." — executes the skill's mapped FREE cloud
+        // action (image / video / doc / sheet / search / read / speak /
+        // research) and streams a dedicated animated card + artifact.
+        const skillDirective = parseSkillDirective(trimmed)
+        if (skillDirective) {
+          const catalogEntry = await matchSkillFromCatalog(skillDirective.skill)
+          if (catalogEntry) {
+            const actionMeta = resolveSkillAction(catalogEntry.name, catalogEntry.category)
+            try {
+              // Persist the user message.
+              const userMessage = await db.chatMessage.create({
+                data: { sessionId: session!.id, role: 'user', content: trimmed },
+              })
+              send({ type: 'user', id: userMessage.id, content: trimmed })
+
+              // Animated card: running state.
+              send({
+                type: 'skill_run',
+                status: 'running',
+                skill: catalogEntry.displayName,
+                skillName: catalogEntry.name,
+                emoji: actionMeta.emoji,
+                action: actionMeta.kind,
+                actionLabel: actionMeta.label,
+                task: skillDirective.task.slice(0, 200),
+              })
+
+              const result = await runSkillAction(
+                req,
+                catalogEntry.name,
+                catalogEntry.category,
+                skillDirective.task,
+                catalogEntry.displayName
+              )
+
+              if (result.ok) {
+                send({
+                  type: 'skill_run',
+                  status: 'done',
+                  skill: catalogEntry.displayName,
+                  skillName: catalogEntry.name,
+                  emoji: actionMeta.emoji,
+                  action: actionMeta.kind,
+                  actionLabel: actionMeta.label,
+                })
+                const saved = await db.chatMessage.create({
+                  data: { sessionId: session!.id, role: 'assistant', content: result.summary },
+                })
+                send({
+                  type: 'assistant',
+                  id: saved.id,
+                  content: result.summary,
+                  attachments: result.attachment ? [result.attachment] : [],
+                })
+              } else {
+                send({
+                  type: 'skill_run',
+                  status: 'error',
+                  skill: catalogEntry.displayName,
+                  skillName: catalogEntry.name,
+                  emoji: actionMeta.emoji,
+                  action: actionMeta.kind,
+                  actionLabel: actionMeta.label,
+                  error: result.error,
+                })
+                const fallback =
+                  `The **${catalogEntry.displayName}** skill run hit a snag: ${result.error ?? 'unknown error'}.\n\n` +
+                  'Try rephrasing the task — I can also help directly if you describe what you need.'
+                await db.chatMessage.create({
+                  data: { sessionId: session!.id, role: 'assistant', content: fallback },
+                })
+                send({ type: 'assistant', content: fallback, attachments: [] })
+              }
+            } catch (skillErr) {
+              console.error('[chat] skill run failed:', skillErr)
+              send({
+                type: 'skill_run',
+                status: 'error',
+                skill: catalogEntry.displayName,
+                skillName: catalogEntry.name,
+                emoji: actionMeta.emoji,
+                action: actionMeta.kind,
+                actionLabel: actionMeta.label,
+                error: skillErr instanceof Error ? skillErr.message : 'Skill run failed.',
+              })
+              send({ type: 'assistant', content: 'The skill run failed unexpectedly — please try again.', attachments: [] })
+            }
+            send({ type: 'done', sessionId: session!.id })
+            controller.close()
+            return
+          }
+          // Unknown skill name → fall through to the normal LLM flow (the
+          // model will answer conversationally).
         }
 
         try {

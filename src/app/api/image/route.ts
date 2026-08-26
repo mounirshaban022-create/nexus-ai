@@ -21,6 +21,40 @@ const IMAGES_DIR = IS_VERCEL
   ? path.join('/tmp', 'generated-images') // Vercel: writable /tmp (ephemeral)
   : path.join(process.cwd(), 'generated-images')
 
+/**
+ * IMAGE GENERATION — free-first pipeline (works everywhere, no paid keys):
+ *
+ *   1. Pollinations FLUX (FREE, open, no API key) — primary engine.
+ *   2. Z.ai engine — optional enhancement when the platform gateway is
+ *      reachable (sandbox only).
+ *   3. OpenRouter — optional fallback when the user configured a key.
+ *
+ * Bytes are persisted BOTH to disk and to the DB (base64) so generated
+ * images survive Vercel's ephemeral /tmp across serverless invocations.
+ */
+
+async function pollinationsImage(prompt: string, size: string): Promise<Buffer> {
+  const [w, h] = size.split('x').map(Number)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 90_000)
+  try {
+    // Quality-boosted prompt (cinematic quality terms improve Pollinations output significantly)
+    const qualityPrompt = `${prompt}, high quality, detailed, professional, sharp focus, beautiful lighting`
+    const seed = Math.floor(Math.random() * 1_000_000)
+    const res = await fetch(
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(qualityPrompt)}?width=${w}&height=${h}&nologo=true&enhance=true&model=flux&seed=${seed}`,
+      { signal: controller.signal }
+    )
+    if (!res.ok) throw new Error(`Free image service responded ${res.status}`)
+    const arr = new Uint8Array(await res.arrayBuffer())
+    const buffer = Buffer.from(arr)
+    if (buffer.length < 1000) throw new Error('Free image service returned no data')
+    return buffer
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const limit = rateLimit(`image:${clientKey(req)}`, 8, 60_000)
@@ -37,81 +71,75 @@ export async function POST(req: NextRequest) {
     }
 
     const chosenSize = parsed.data.size ?? '1024x1024'
-    const provider = parsed.data.provider ?? 'nexus'
     const trimmedPrompt = parsed.data.prompt.trim()
 
     const user = await getCurrentUser(req)
 
-    let buffer: Buffer
-    if (provider === 'free') {
-      // Free generation via Pollinations (enhanced quality from Open-Generative-AI patterns)
-      const [w, h] = chosenSize.split('x').map(Number)
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 90_000)
+    let buffer: Buffer | null = null
+    let usedEngine = 'pollinations'
+
+    /* ---- 1. FREE engine first — Pollinations FLUX (no key, works on Vercel) ---- */
+    try {
+      buffer = await pollinationsImage(trimmedPrompt, chosenSize)
+    } catch (freeErr) {
+      console.warn('[api/image] Pollinations failed:', freeErr instanceof Error ? freeErr.message : freeErr)
+    }
+
+    /* ---- 2. Z.ai engine — optional enhancement when reachable ---- */
+    if (!buffer && (await zaiConfigured().catch(() => false))) {
       try {
-        // Quality-boosted prompt (cinematic quality terms improve Pollinations output significantly)
-        const qualityPrompt = `${trimmedPrompt}, high quality, detailed, professional, sharp focus, beautiful lighting`
-        const res = await fetch(
-          `https://image.pollinations.ai/prompt/${encodeURIComponent(qualityPrompt)}?width=${w}&height=${h}&nologo=true&enhance=true&model=flux&seed=${Math.floor(Math.random() * 1_000_000)}`,
-          { signal: controller.signal }
-        )
-        if (!res.ok) throw new Error(`Free image service responded ${res.status}`)
-        const arr = new Uint8Array(await res.arrayBuffer())
-        buffer = Buffer.from(arr)
-        if (buffer.length < 1000) throw new Error('Free image service returned no data')
-      } finally {
-        clearTimeout(timer)
-      }
-    } else {
-      // IMAGE GENERATION — Z.ai (sandbox) with OpenRouter fallback (Vercel).
-      // On Vercel the Z.ai SDK can't load, so we fall through to OpenRouter's
-      // /images/generations endpoint using the user's OPENROUTER_API_KEY.
-      // This keeps image generation working end-to-end on Vercel without
-      // needing a separate image-specific API key.
-      let generated = false
-      if (await zaiConfigured()) {
-        try {
-          const zai = await getZAI()
-          const response = await zai.images.generations.create({
-            prompt: trimmedPrompt,
-            size: chosenSize,
-          })
-          const base64 = response.data?.[0]?.base64
-          if (base64) {
-            buffer = Buffer.from(base64, 'base64')
-            generated = true
-          }
-        } catch (zaiImgErr) {
-          console.warn('[api/image] Z.ai image gen failed, trying OpenRouter:', zaiImgErr instanceof Error ? zaiImgErr.message : zaiImgErr)
-        }
-      }
-      if (!generated && openrouterConfigured()) {
-        const { base64, format } = await openrouterGenerateImage({
+        const zai = await getZAI()
+        const response = await zai.images.generations.create({
           prompt: trimmedPrompt,
           size: chosenSize,
         })
-        buffer = Buffer.from(base64, 'base64')
-        console.log(`[api/image] generated via OpenRouter (${format})`)
-        generated = true
-      }
-      if (!generated) {
-        throw new Error('Image generation is unavailable. Set OPENROUTER_API_KEY or use the "free" provider.')
+        const base64 = response.data?.[0]?.base64
+        if (base64) {
+          buffer = Buffer.from(base64, 'base64')
+          usedEngine = 'zai'
+        }
+      } catch (zaiImgErr) {
+        console.warn('[api/image] Z.ai image gen failed:', zaiImgErr instanceof Error ? zaiImgErr.message : zaiImgErr)
       }
     }
-    const filename = `${randomUUID()}.png`
 
-    await mkdir(IMAGES_DIR, { recursive: true })
-    await writeFile(path.join(IMAGES_DIR, filename), buffer)
+    /* ---- 3. OpenRouter — optional last resort with a user key ---- */
+    if (!buffer && openrouterConfigured()) {
+      const { base64 } = await openrouterGenerateImage({ prompt: trimmedPrompt, size: chosenSize })
+      buffer = Buffer.from(base64, 'base64')
+      usedEngine = 'openrouter'
+    }
+
+    if (!buffer) {
+      throw new Error('Image generation is temporarily unavailable — the free image service is busy. Please try again in a moment.')
+    }
+
+    const filename = `${randomUUID()}`
+    const buffer_ = buffer as Buffer
+
+    // Persist to disk (local + warm /tmp) AND to the DB (survives Vercel).
+    await mkdir(IMAGES_DIR, { recursive: true }).catch(() => {})
+    await writeFile(path.join(IMAGES_DIR, `${filename}.png`), buffer_).catch(() => {})
 
     const record = await db.generatedImage.create({
       data: {
         prompt: trimmedPrompt,
         size: chosenSize,
-        provider,
-        url: `/api/image/file/${filename.replace('.png', '')}`,
+        provider: usedEngine,
+        url: `/api/image/file/${filename}`,
+        data: buffer_.toString('base64'),
         userId: user?.id ?? null,
       },
     })
+    if (record.userId) {
+      void supabaseUpsert('library_items', {
+        id: record.id,
+        user_id: record.userId,
+        kind: 'image',
+        status: 'done',
+        url: record.url,
+      }, { onConflict: 'id' })
+    }
 
     return NextResponse.json({
       image: {

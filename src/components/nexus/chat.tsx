@@ -29,9 +29,9 @@ import {
 import { Markdown } from '@/components/omni/markdown'
 import { useI18n } from '@/lib/i18n'
 import { usePreferences } from '@/lib/preferences'
-import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent } from './shared'
+import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent, SkillRunEvent } from './shared'
 import { BrandMark, DIVISION_MAP, agentOrNexus, useActiveChatSession } from './shared'
-import { AgentAvatar, AttachmentList, HandoffPill, ToolCard, type ToolCardInfo } from './chat-parts'
+import { AgentAvatar, AttachmentList, HandoffPill, SkillRunCard, ToolCard, type ToolCardInfo } from './chat-parts'
 import { PersonalityRail } from './personality-rail'
 
 export interface NexusChatProps {
@@ -51,12 +51,14 @@ export interface NexusChatProps {
 /* ------------------------------------------------------------------ */
 
 interface NxMsg extends Omit<ChatMessageView, 'role'> {
-  role: 'user' | 'assistant' | 'tool' | 'agent'
+  role: 'user' | 'assistant' | 'tool' | 'agent' | 'skill'
   isError?: boolean
   /** filename the user attached with this message */
   attachName?: string
   /** role:'agent' → the routing handoff pill */
   assign?: AgentAssignEvent
+  /** role:'skill' → the animated cloud-skill execution card */
+  skillInfo?: SkillRunEvent
   /** live tool chip state for role:'tool' rows */
   toolStatus?: 'running' | 'done' | 'error'
   toolMessage?: string
@@ -596,6 +598,53 @@ export function NexusChat(props: NexusChatProps) {
                 updateTool(event.tool, event.index, { toolMessage: event.message })
                 break
               }
+              case 'skill_run': {
+                // Animated cloud-skill execution card. 'running' inserts the
+                // card; 'done'/'error' patch it in place.
+                if (event.status === 'running') {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: nextId(`skill-${event.skillName}`),
+                      role: 'skill',
+                      content: '',
+                      skillInfo: {
+                        status: 'running',
+                        skill: event.skill,
+                        skillName: event.skillName,
+                        emoji: event.emoji,
+                        action: event.action,
+                        actionLabel: event.actionLabel,
+                        task: event.task,
+                      },
+                    },
+                  ])
+                } else {
+                  setMessages((prev) => {
+                    // Patch the LAST skill card for this skill.
+                    const idx = [...prev]
+                      .map((m, i) => ({ m, i }))
+                      .filter(({ m }) => m.role === 'skill' && m.skillInfo?.skillName === event.skillName)
+                      .pop()?.i
+                    if (idx === undefined) return prev
+                    const copy = [...prev]
+                    copy[idx] = {
+                      ...copy[idx],
+                      skillInfo: {
+                        status: event.status,
+                        skill: event.skill,
+                        skillName: event.skillName,
+                        emoji: event.emoji,
+                        action: event.action,
+                        actionLabel: event.actionLabel,
+                        error: event.error,
+                      },
+                    }
+                    return copy
+                  })
+                }
+                break
+              }
               case 'tool_result': {
                 let data: string | null = null
                 try {
@@ -644,7 +693,13 @@ export function NexusChat(props: NexusChatProps) {
         setStatusText('')
         setMessages((prev) =>
           prev.map((m) =>
-            m.streaming ? { ...m, streaming: false } : m.toolStatus === 'running' ? { ...m, toolStatus: 'done' } : m
+            m.streaming
+              ? { ...m, streaming: false }
+              : m.toolStatus === 'running'
+                ? { ...m, toolStatus: 'done' }
+                : m.role === 'skill' && m.skillInfo?.status === 'running'
+                  ? { ...m, skillInfo: { ...m.skillInfo, status: 'done' } }
+                  : m
           )
         )
       }
@@ -879,6 +934,14 @@ export function NexusChat(props: NexusChatProps) {
                 return (
                   <div key={m.id} className="flex ps-11">
                     <HandoffPill assign={m.assign} live={streaming && i === lastAssignIdx} />
+                  </div>
+                )
+              }
+
+              if (m.role === 'skill' && m.skillInfo) {
+                return (
+                  <div key={m.id} className="flex ps-11">
+                    <SkillRunCard info={m.skillInfo} />
                   </div>
                 )
               }

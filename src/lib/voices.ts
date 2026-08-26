@@ -99,3 +99,25 @@ export function isEdgeVoice(voiceId: string): boolean {
   // Edge voice ids look like "en-US-AriaNeural"
   return /^[a-z]{2}-[A-Z]{2}-\w+Neural$/.test(voiceId) || voiceId.includes('Neural')
 }
+
+/**
+ * FREE-FOREVER FALLBACK MAP — when the Z.ai engine is unavailable (e.g. on
+ * Vercel, where the internal gateway is unreachable), every premium NEXUS
+ * voice transparently maps to a FREE Microsoft neural voice with a similar
+ * character. Voice mode keeps working end-to-end with zero paid services.
+ */
+const NEXUS_TO_EDGE: Record<string, string> = {
+  tongtong: 'en-US-AvaMultilingualNeural', // warm · friendly
+  chuichui: 'en-US-EmmaNeural', // lively · bright
+  xiaochen: 'en-US-MichelleNeural', // calm · professional
+  jam: 'en-GB-RyanNeural', // British gentleman
+  kazi: 'en-US-AndrewNeural', // clear · standard
+  douji: 'en-US-BrianNeural', // natural · casual
+  luodo: 'en-US-AvaNeural', // expressive
+}
+
+/** Returns a FREE Edge voice id for any voice id (Edge ids pass through). */
+export function edgeFallbackFor(voiceId: string): string {
+  if (isEdgeVoice(voiceId)) return voiceId
+  return NEXUS_TO_EDGE[voiceId] ?? DEFAULT_VOICE
+}

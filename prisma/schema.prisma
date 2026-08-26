@@ -64,6 +64,7 @@ model GeneratedImage {
   size      String
   url       String
   provider  String   @default("nexus")
+  data      String?  // base64 bytes — survives Vercel's ephemeral /tmp
   userId    String?
   user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
@@ -78,6 +79,7 @@ model GeneratedVideo {
   url       String?
   jobId     String?
   status    String   @default("planning") // planning | images | narration | rendering | done | error
+  data      String?  // base64 bytes of the final MP4 — survives Vercel's ephemeral /tmp
   userId    String?
   user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())

@@ -190,6 +190,18 @@ export interface AgentAssignEvent {
   pinned?: boolean
 }
 
+/** Skill execution card event (from the deterministic skill-run path). */
+export interface SkillRunEvent {
+  status: 'running' | 'done' | 'error'
+  skill: string
+  skillName: string
+  emoji: string
+  action: string
+  actionLabel: string
+  task?: string
+  error?: string
+}
+
 export type ChatStreamEvent =
   | ({ type: 'user'; id: string; content: string })
   | ({ type: 'agent_assign' } & AgentAssignEvent)
@@ -201,6 +213,7 @@ export type ChatStreamEvent =
   | { type: 'tool_start'; tool: string; args: Record<string, unknown>; index: number }
   | { type: 'tool_result'; tool: string; ok: boolean; result: unknown; index: number }
   | { type: 'tool_progress'; tool: string; index: number; elapsedMs: number; message: string }
+  | ({ type: 'skill_run' } & SkillRunEvent)
   | { type: 'done'; sessionId: string }
   | { type: 'error'; message: string }
 

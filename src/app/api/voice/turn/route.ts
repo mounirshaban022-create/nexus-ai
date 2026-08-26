@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { getZAI } from '@/lib/zai'
+import { getZAI, zaiConfigured } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { DEFAULT_VOICE, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
+import { DEFAULT_VOICE, edgeFallbackFor, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
 
 export const maxDuration = 90
 
@@ -217,11 +217,18 @@ export async function POST(req: NextRequest) {
     try {
       const speechText = stripMarkdownForSpeech(reply).slice(0, 3000)
 
-      if (isEdgeVoice(effectiveVoice)) {
+      // FREE-FIRST HARDENING: when the Z.ai engine is unavailable (Vercel /
+      // gateway outage), swap premium NEXUS voices for their FREE Microsoft
+      // neural equivalents so every voice turn still SPEAKS.
+      const zaiAvailable = isEdgeVoice(effectiveVoice) ? false : await zaiConfigured().catch(() => false)
+      if (isEdgeVoice(effectiveVoice) || !zaiAvailable) {
+        const freeVoice = edgeFallbackFor(effectiveVoice)
+        if (!isEdgeVoice(effectiveVoice)) {
+          console.warn(`[api/voice/turn] Z.ai unavailable — using free Edge voice ${freeVoice}`)
+        }
         const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
         const tts = new MsEdgeTTS()
-        // 96kbit/s MP3 — 2× bitrate vs the old 48kbit/s default for clearer speech.
-        await tts.setMetadata(effectiveVoice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
+        await tts.setMetadata(freeVoice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
         const { audioStream } = tts.toStream(speechText)
         const chunks: Buffer[] = []
         for await (const chunk of audioStream) {

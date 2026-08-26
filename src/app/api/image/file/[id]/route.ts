@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { db } from '@/lib/db'
 
 const IS_VERCEL = Boolean(process.env.VERCEL)
 const IMAGES_DIR = IS_VERCEL
@@ -12,8 +13,6 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(_req: NextRequest, context: RouteContext) {
     // Rate limit: 60 reads per minute per client (prevents scraping/DoS)
-    // NOTE(F1): was `clientKey(req)` — ReferenceError since ce239fb renamed the
-    // param to _req; every generated-image URL 500'd. Minimal emergency fix.
     const rl = rateLimit(`file-read:${clientKey(_req)}`, 60, 60_000)
     if (!rl.ok) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
@@ -26,8 +25,29 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Invalid image id.' }, { status: 400 })
     }
 
-    const filePath = path.join(IMAGES_DIR, `${id}.png`)
-    const buffer = await readFile(filePath)
+    let buffer: Buffer | null = null
+
+    // 1. Disk (local FS or a warm Vercel /tmp from the generating lambda).
+    try {
+      buffer = await readFile(path.join(IMAGES_DIR, `${id}.png`))
+    } catch {
+      /* fall through to the DB copy */
+    }
+
+    // 2. DB base64 — the durable copy that survives Vercel's ephemeral /tmp.
+    if (!buffer) {
+      const record = await db.generatedImage.findFirst({
+        where: { url: `/api/image/file/${id}` },
+        select: { data: true },
+      })
+      if (record?.data) {
+        buffer = Buffer.from(record.data, 'base64')
+      }
+    }
+
+    if (!buffer || buffer.length === 0) {
+      return NextResponse.json({ error: 'Image not found.' }, { status: 404 })
+    }
 
     // Sniff the real image type from magic bytes (generator may return JPEG data)
     const isPng =

@@ -468,6 +468,8 @@ html:not(.dark) .nx-scroll::-webkit-scrollbar-thumb:hover { background: color-mi
 .omni-prose ol { list-style: decimal; }
 .omni-prose li { margin: 0.3em 0; }
 .omni-prose a { color: oklch(0.55 0.12 40); text-decoration: underline; text-underline-offset: 3px; }
+/* Links must stay legible in the always-dark nexus chat too. */
+.dark .omni-prose a { color: oklch(0.78 0.13 50); }
 .omni-prose code {
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
   font-size: 0.82em;
@@ -513,6 +515,16 @@ html:not(.dark) .nx-scroll::-webkit-scrollbar-thumb:hover { background: color-mi
 .omni-prose th { background: oklch(0.945 0.008 85); font-weight: 600; }
 .omni-prose hr { border: none; border-top: 1px solid oklch(0.87 0.01 80); margin: 1em 0; }
 .omni-prose strong { font-weight: 650; color: oklch(0.2 0.01 60); }
+/* FIX (invisible bold words): the nexus chat renders markdown inside a .dark
+   wrapper — bold/blockquote/table colors above are hardcoded LIGHT values,
+   which made **bold words**, quotes and tables invisible on the dark chat.
+   These overrides make every prose element legible on dark surfaces. */
+.dark .omni-prose strong { color: oklch(0.96 0.005 80); }
+.dark .omni-prose blockquote { color: oklch(0.72 0.01 65); border-left-color: oklch(0.635 0.13 45 / 60%); }
+.dark .omni-prose th { background: oklch(0.24 0.008 70); }
+.dark .omni-prose th, .dark .omni-prose td { border-color: oklch(0.3 0.008 70); }
+.dark .omni-prose hr { border-top-color: oklch(0.3 0.008 70); }
+.dark .omni-prose h1, .dark .omni-prose h2, .dark .omni-prose h3, .dark .omni-prose h4 { color: oklch(0.97 0.005 80); }
 
 /* ---- Dark-mode code blocks (theme-aware overrides) ---- */
 .dark .omni-prose pre {

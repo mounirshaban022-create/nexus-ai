@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { getZAI } from '@/lib/zai'
+import { getZAI, zaiConfigured } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { DEFAULT_VOICE, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
+import { DEFAULT_VOICE, edgeFallbackFor, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
 
 const requestSchema = z.object({
   text: z.string().min(1).max(6000),
@@ -87,6 +87,8 @@ async function edgeTts(text: string, voice: string, speed: number): Promise<Buff
 }
 
 export async function POST(req: NextRequest) {
+  // Parsed echo for the last-resort fail-soft path in the catch block.
+  let parsedData: { text: string; voice: string; speed: number } | null = null
   try {
     const limit = rateLimit(`tts:${clientKey(req)}`, 15, 60_000)
     if (!limit.ok) {
@@ -105,6 +107,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { text, voice, speed } = parsed.data
+    parsedData = parsed.data
     const lang = readLangParam(req)
 
     // Language override: if the caller asks for Arabic (?lang=ar) but
@@ -137,6 +140,24 @@ export async function POST(req: NextRequest) {
     }
 
     /* ---------- Provider: NEXUS voices (bundled SDK) ---------- */
+    // FREE-FIRST HARDENING: when the Z.ai engine is unavailable (Vercel,
+    // gateway outage), transparently swap the premium voice for its FREE
+    // Microsoft neural equivalent — speech NEVER fails with a 500.
+    if (!(await zaiConfigured())) {
+      const freeVoice = edgeFallbackFor(effectiveVoice)
+      console.warn(`[api/tts] Z.ai unavailable — using free Edge voice ${freeVoice}`)
+      const buffers = await Promise.all(chunks.map((c) => edgeTts(c, freeVoice, speed)))
+      const merged = Buffer.concat(buffers)
+      return new NextResponse(new Uint8Array(merged), {
+        status: 200,
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': merged.length.toString(),
+          'Cache-Control': 'no-cache',
+        },
+      })
+    }
+
     const zai = await getZAI()
     // Bug G: synthesize every chunk in parallel (was sequential for-loop).
     const audioBuffers = await Promise.all(
@@ -168,6 +189,27 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (error) {
+    // Last-resort fail-soft: if ANYTHING above blew up, synthesize with a
+    // free Edge voice so the caller still gets audio instead of a 500.
+    try {
+      if (parsedData?.text) {
+        const freeVoice = edgeFallbackFor(parsedData.voice ?? DEFAULT_VOICE)
+        const buffers = await Promise.all(
+          splitTextIntoChunks(parsedData.text.trim()).map((c) => edgeTts(c, freeVoice, parsedData?.speed ?? 1.0))
+        )
+        const merged = Buffer.concat(buffers)
+        return new NextResponse(new Uint8Array(merged), {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': merged.length.toString(),
+            'Cache-Control': 'no-cache',
+          },
+        })
+      }
+    } catch {
+      /* give up gracefully below */
+    }
     console.error('[api/tts] POST error:', error)
     const message =
       error instanceof Error ? error.message : 'Speech synthesis failed. Please try again.'

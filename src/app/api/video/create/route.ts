@@ -2,20 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { mkdir, writeFile, readFile, rm } from 'fs/promises'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { videoJobs, pruneVideoJobs, type VideoJob } from '@/lib/video-jobs'
 import { agnesConfigured, agnesCreateVideo } from '@/lib/agnes-video'
+import { ffmpegPath, ffprobePath, execFileAsync } from '@/lib/ffmpeg'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
 import { getCurrentUser } from '@/lib/auth'
 
 export const maxDuration = 300
-
-const execFileAsync = promisify(execFile)
 
 /**
  * REAL AI video generation pipeline:
@@ -31,7 +28,21 @@ const IS_VERCEL = Boolean(process.env.VERCEL)
 const VIDEO_DIR = IS_VERCEL
   ? path.join('/tmp', 'generated-videos') // Vercel: writable /tmp (ephemeral)
   : path.join(process.cwd(), 'generated-videos')
-const FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+// Font bundled in the repo (assets/fonts) — /usr/share fonts don't exist on
+// Vercel. Fall back to the system font in the sandbox if missing.
+const BUNDLED_FONT = path.join(process.cwd(), 'assets', 'fonts', 'DejaVuSans-Bold.ttf')
+const SYSTEM_FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+let FONT_CACHE: string | null = null
+async function fontPath(): Promise<string> {
+  if (FONT_CACHE) return FONT_CACHE
+  try {
+    await readFile(BUNDLED_FONT)
+    FONT_CACHE = BUNDLED_FONT
+  } catch {
+    FONT_CACHE = SYSTEM_FONT
+  }
+  return FONT_CACHE
+}
 const W = 1024
 const H = 576
 
@@ -60,7 +71,7 @@ async function edgeTtsToFile(text: string, voice: string, outPath: string) {
 
 async function audioDuration(file: string): Promise<number> {
   try {
-    const { stdout } = await execFileAsync('ffprobe', [
+    const { stdout } = await execFileAsync(await ffprobePath(), [
       '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file,
     ])
     return parseFloat(stdout.trim()) || 0
@@ -243,6 +254,7 @@ export async function POST(req: NextRequest) {
           const dur = Math.max(narrations[i].dur + 0.6, 3.2)
           const out = path.join(workDir, `clip${i}.mp4`)
           const caption = scenes[i].caption ? scenes[i].caption.slice(0, 60) : ''
+          const FONT = await fontPath()
           // Alternate zoom direction for visual variety
           const zoomIn = i % 2 === 0
           const zoomExpr = zoomIn
@@ -257,7 +269,7 @@ export async function POST(req: NextRequest) {
               : '') +
             `,fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.5).toFixed(2)}:d=0.5[v]`
 
-          await execFileAsync('ffmpeg', [
+          await execFileAsync(await ffmpegPath(), [
             '-y',
             '-loop', '1',
             '-i', path.join(workDir, `scene${i}.png`),
@@ -287,7 +299,7 @@ export async function POST(req: NextRequest) {
           sceneFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n')
         )
         const finalPath = path.join(VIDEO_DIR, `${id}.mp4`)
-        await execFileAsync('ffmpeg', [
+        await execFileAsync(await ffmpegPath(), [
           '-y',
           '-f', 'concat',
           '-safe', '0',
@@ -309,7 +321,8 @@ export async function POST(req: NextRequest) {
         job.message = 'Video ready!'
         job.url = `/api/video/file/${id}`
 
-        // Persist the finished video to the library DB.
+        // Persist the finished video to the library DB — base64 bytes ride
+        // along so the file survives Vercel's ephemeral /tmp across lambdas.
         try {
           const videoRecord = await db.generatedVideo.create({
             data: {
@@ -320,6 +333,7 @@ export async function POST(req: NextRequest) {
               url: job.url,
               jobId: id,
               status: 'done',
+              data: finalBuf.toString('base64'),
               userId: user?.id ?? null,
             },
           })

@@ -2,12 +2,14 @@
 
 /**
  * NEXUS One — chat subcomponents used by NexusChat:
- * agent avatars, agent_assign handoff pills, expandable tool cards and
- * attachment renderers (image / live video job / document / code / sources).
+ * agent avatars, agent_assign handoff pills, expandable tool cards,
+ * the animated skill-run card and attachment renderers (image / live video
+ * job / document / code / sources / speech).
  * Every field coming off the wire is guarded — attachments are `unknown`.
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
   Check,
   ChevronDown,
@@ -16,12 +18,15 @@ import {
   FileText,
   Link2,
   Loader2,
+  Play,
   RefreshCcw,
+  Sparkles,
   Terminal,
+  Volume2,
   X,
 } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
-import type { AgentAssignEvent, AgentMeta } from './shared'
+import type { AgentAssignEvent, AgentMeta, SkillRunEvent } from './shared'
 import { BrandMark, DIVISION_MAP, tint, toolLabel } from './shared'
 
 /* ------------------------------------------------------------------ */
@@ -397,6 +402,254 @@ function VideoJobCard({
 }
 
 /* ------------------------------------------------------------------ */
+/* SkillRunCard — beautifully animated cloud-skill execution card      */
+/* ------------------------------------------------------------------ */
+
+/** Stage labels mapped from the action kind (mirrors skill-actions.ts). */
+const SKILL_STAGES: Record<string, string[]> = {
+  image: ['Understanding the brief', 'Composing the prompt', 'Painting with FLUX', 'Finishing touches'],
+  diagram: ['Understanding the brief', 'Structuring the diagram', 'Drawing vectors', 'Finishing touches'],
+  video: ['Planning scenes', 'Generating scene art', 'Recording AI narration', 'Cinematic edit'],
+  doc: ['Understanding the task', 'Researching & writing', 'Formatting the file', 'Exporting'],
+  sheet: ['Understanding the data', 'Building rows & formulas', 'Styling the workbook', 'Exporting'],
+  slides: ['Understanding the story', 'Writing slide content', 'Designing layout', 'Exporting'],
+  search: ['Parsing the question', 'Searching the live web', 'Ranking sources'],
+  read: ['Fetching the page', 'Reading content', 'Summarizing'],
+  speak: ['Preparing the script', 'Neural voice synthesis'],
+  research: ['Searching the web', 'Analyzing findings', 'Writing the briefing', 'Exporting'],
+}
+
+/**
+ * A premium execution card: pulsing icon ring while running, staged
+ * checklist that ticks off with spring animations, success burst on
+ * completion. framer-motion drives every transition.
+ */
+export function SkillRunCard({ info }: { info: SkillRunEvent }) {
+  const [elapsed, setElapsed] = useState(0)
+  const running = info.status === 'running'
+  const error = info.status === 'error'
+
+  useEffect(() => {
+    if (!running) return
+    const started = Date.now()
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [running])
+
+  const stages = SKILL_STAGES[info.action] ?? ['Working']
+  // Advance the visible stage with time (~2.4s per stage while running).
+  const stageIdx = running ? Math.min(stages.length - 1, Math.floor(elapsed / 2.4)) : stages.length - 1
+
+  const accent = error ? '#f87171' : running ? '#ff8a8d' : '#34d399'
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+      className="relative w-full max-w-md overflow-hidden rounded-2xl border bg-white/[0.03] p-4"
+      style={{ borderColor: `${accent}38` }}
+      role="status"
+      aria-label={`Skill ${info.skill} ${info.status}`}
+    >
+      {/* animated gradient wash */}
+      {running && (
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(110deg, transparent 25%, rgba(255,138,141,0.10) 45%, rgba(255,42,104,0.12) 55%, transparent 75%)',
+          }}
+          initial={{ x: '-100%' }}
+          animate={{ x: '100%' }}
+          transition={{ repeat: Infinity, duration: 1.6, ease: 'linear' }}
+        />
+      )}
+
+      <div className="relative flex items-center gap-3">
+        {/* Icon with pulsing ring */}
+        <div className="relative grid h-11 w-11 shrink-0 place-items-center">
+          {running && (
+            <motion.span
+              aria-hidden
+              className="absolute inset-0 rounded-full"
+              style={{ border: `2px solid ${accent}` }}
+              initial={{ opacity: 0.6, scale: 0.8 }}
+              animate={{ opacity: 0, scale: 1.55 }}
+              transition={{ repeat: Infinity, duration: 1.15, ease: 'easeOut' }}
+            />
+          )}
+          <span
+            className="grid h-11 w-11 place-items-center rounded-full text-xl"
+            style={{ backgroundColor: `${accent}1f`, border: `1px solid ${accent}45` }}
+          >
+            {error ? <X className="h-5 w-5" style={{ color: accent }} aria-hidden /> : info.emoji}
+          </span>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-semibold text-zinc-100">{info.skill}</p>
+            <span
+              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
+              style={{ backgroundColor: `${accent}1a`, color: accent }}
+            >
+              {error ? 'failed' : running ? 'running' : 'done'}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-zinc-500">
+            {info.actionLabel}
+            {running && elapsed > 0 ? ` · ${elapsed}s` : ''}
+          </p>
+        </div>
+
+        {running ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" style={{ color: accent }} aria-hidden />
+        ) : error ? null : (
+          <motion.span
+            initial={{ scale: 0, rotate: -30 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-500/15"
+          >
+            <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+          </motion.span>
+        )}
+      </div>
+
+      {/* Stage checklist */}
+      <ul className="relative mt-3 space-y-1.5" aria-hidden>
+        {stages.map((label, i) => {
+          const done = error ? i < stageIdx : i <= stageIdx && !running ? true : i < stageIdx
+          const active = running && i === stageIdx
+          return (
+            <li key={label} className="flex items-center gap-2 text-[11px]">
+              <AnimatePresence mode="wait">
+                {done ? (
+                  <motion.span
+                    key="done"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/20"
+                  >
+                    <Check className="h-2.5 w-2.5 text-emerald-400" />
+                  </motion.span>
+                ) : active ? (
+                  <motion.span
+                    key="active"
+                    className="block h-4 w-4 rounded-full"
+                    style={{ border: `2px solid ${accent}` }}
+                    animate={{ opacity: [0.35, 1, 0.35] }}
+                    transition={{ repeat: Infinity, duration: 0.9 }}
+                  />
+                ) : (
+                  <span key="idle" className="block h-4 w-4 rounded-full border-2 border-white/10" />
+                )}
+              </AnimatePresence>
+              <span className={done ? 'text-zinc-400' : active ? 'text-zinc-200' : 'text-zinc-600'}>
+                {label}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+
+      {/* Task context line */}
+      {info.task ? (
+        <p className="relative mt-3 truncate rounded-lg bg-black/25 px-2.5 py-1.5 font-mono text-[10px] text-zinc-500">
+          {info.task}
+        </p>
+      ) : null}
+
+      {/* Error detail */}
+      {error && info.error ? (
+        <p className="relative mt-2.5 rounded-lg bg-red-500/[0.07] px-2.5 py-1.5 text-[11px] leading-relaxed text-red-300/90">
+          {info.error}
+        </p>
+      ) : null}
+    </motion.div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Speech attachment — free neural TTS player                          */
+/* ------------------------------------------------------------------ */
+
+function TtsAttachment({ text }: { text: string }) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  const synthesize = async () => {
+    if (loading || audioUrl) return
+    setLoading(true)
+    setErr('')
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!res.ok) throw new Error('Speech synthesis failed.')
+      const blob = await res.blob()
+      setAudioUrl(URL.createObjectURL(blob))
+    } catch {
+      setErr('Could not synthesize — try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl)
+    }
+  }, [audioUrl])
+
+  return (
+    <div className="w-full max-w-sm rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={synthesize}
+          disabled={loading || Boolean(audioUrl)}
+          className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition hover:brightness-110 disabled:opacity-70"
+          aria-label="Play speech"
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <Play className="h-4 w-4" aria-hidden />
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+            <Volume2 className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+            Neural speech
+          </p>
+          <p className="mt-0.5 truncate text-[11px] text-zinc-500">{text}</p>
+        </div>
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-zinc-600" aria-hidden />
+      </div>
+      {audioUrl ? (
+        <motion.audio
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          controls
+          autoPlay
+          src={audioUrl}
+          className="mt-2.5 w-full"
+        >
+          <track kind="captions" />
+        </motion.audio>
+      ) : null}
+      {err ? <p className="mt-1.5 text-[11px] text-red-300/80">{err}</p> : null}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Attachments                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -438,6 +691,13 @@ function AttachmentCard({ item }: { item: unknown }) {
         initialMessage={str(a.note)}
       />
     )
+  }
+
+  /* Speech — free neural TTS player (skills 'speak' action). */
+  if (type === 'tts') {
+    const text = str(a.text)
+    if (!text) return null
+    return <TtsAttachment text={text} />
   }
 
   /* Document — Word / Excel / PowerPoint / PDF download card. */
