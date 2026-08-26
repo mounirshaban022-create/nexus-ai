@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { mkdir, writeFile, readFile, rm } from 'fs/promises'
@@ -81,7 +82,16 @@ async function audioDuration(file: string): Promise<number> {
 }
 
 function escDrawText(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%')
+  // ffmpeg's filter parser treats ASCII apostrophes as quote delimiters —
+  // an "Ocean's" caption kills the whole filtergraph (the 'video generation
+  // is not working' bug). Swap to the typographic apostrophe (parser-safe,
+  // visually identical) and escape the remaining metacharacters.
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, '\u2019')
+    .replace(/"/g, '\u201C')
+    .replace(/:/g, '\\:')
+    .replace(/%/g, '\\%')
 }
 
 export async function POST(req: NextRequest) {
@@ -127,14 +137,13 @@ export async function POST(req: NextRequest) {
           update: { status, ...(message ? { status } : {}) },
         })
         .catch((e: unknown) => console.error('[video] stage persist failed:', e))
-    void persistStage('planning')
 
     /* ---- AGNES AI path (when configured) ----
      * When AGNES_API_KEY + AGNES_BASE_URL are set, hand off video
      * generation to Agnes and let the status route poll its API.
      * The local ffmpeg pipeline (below) is the sandbox fallback. */
     if (agnesConfigured()) {
-      ;(async () => {
+      const agnesTask = async (): Promise<void> => {
         try {
           job.status = 'planning'
           job.progress = 10
@@ -153,8 +162,9 @@ export async function POST(req: NextRequest) {
           // Persist a placeholder record so the library shows the
           // in-progress job. Updated when the status route sees completion.
           try {
-            await db.generatedVideo.create({
-              data: {
+            await db.generatedVideo.upsert({
+              where: { jobId: id },
+              create: {
                 prompt,
                 scenes: sceneCount,
                 voice,
@@ -164,6 +174,7 @@ export async function POST(req: NextRequest) {
                 status: 'rendering',
                 userId: user?.id ?? null,
               },
+              update: { status: 'rendering' },
             })
           } catch (e) {
             console.error('[video] agnes db placeholder save failed:', e)
@@ -173,8 +184,9 @@ export async function POST(req: NextRequest) {
           job.status = 'error'
           job.error = err instanceof Error ? err.message : 'Agnes submission failed.'
           try {
-            await db.generatedVideo.create({
-              data: {
+            await db.generatedVideo.upsert({
+              where: { jobId: id },
+              create: {
                 prompt,
                 scenes: sceneCount,
                 voice,
@@ -184,18 +196,25 @@ export async function POST(req: NextRequest) {
                 status: 'error',
                 userId: user?.id ?? null,
               },
+              update: { status: 'error' },
             })
           } catch (e) {
             console.error('[video] agnes db error-path save failed:', e)
           }
         }
-      })()
+      }
+      await persistStage('planning')
+      after(() => agnesTask())
 
       return NextResponse.json({ jobId: id })
     }
 
-    // Run the whole pipeline in the background
-    ;(async () => {
+    // Run the whole pipeline AFTER the response — `after()` maps to Vercel's
+    // waitUntil, which keeps the serverless function alive until the render
+    // finishes (a plain fire-and-forget promise is frozen/killed the moment
+    // the response is sent on serverless). Falls back to a floating promise
+    // when `after` is unavailable (older runtimes).
+    const pipeline = async (): Promise<void> => {
       const workDir = path.join(VIDEO_DIR, id)
       try {
         await mkdir(workDir, { recursive: true })
@@ -408,8 +427,13 @@ export async function POST(req: NextRequest) {
           console.error('[video] db save (error path) failed:', e)
         }
       }
-    })()
+    }
 
+    // Schedule the pipeline: `after()` keeps the lambda alive on Vercel
+    // (waitUntil). The placeholder row is awaited FIRST so a status poll
+    // on ANY instance can already resolve the job from the DB.
+    await persistStage('planning')
+    after(() => pipeline())
     return NextResponse.json({ jobId: id })
   } catch (error) {
     console.error('[api/video/create] POST error:', error)
