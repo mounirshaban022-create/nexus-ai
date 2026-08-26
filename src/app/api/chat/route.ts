@@ -379,7 +379,7 @@ function buildSystemPrompt(
     languageInstruction || '7. LANGUAGE: respond in the user\'s language (default English).',
     '8. THINK BEFORE ACTING: for multi-step requests, plan which tools to use in which order.',
     '9. DOCUMENTS, PDFs & SPREADSHEETS: when the user attached a document (content appears in the conversation), answer questions about it directly — for spreadsheets, reason over the markdown tables (sums, trends, comparisons). If they ask to EDIT/CHANGE/REWRITE a document, call edit_document. If they ask for PDF operations (rotate/delete/reorder/split/watermark pages), call pdf_operation. If they want a spreadsheet, budget, tracker, or tabular data as Excel, call create_spreadsheet with typed cells and formulas. When asked to analyze data in an attached spreadsheet, compute the actual numbers (use run_code for anything non-trivial) — never guess.',
-    '10. When you attach or create a file, ALWAYS present the download link clearly and briefly describe what you produced.',
+    '10. When you create or attach a file, present the download link clearly — copying the URL EXACTLY from the tool result. NEVER invent, guess, or pattern-match a file URL: a link you made up is a broken link. If a file was not created by a tool call, it does not exist — say so instead of linking it.',
     '11. SKILLS & EXTERNAL APPS (VERY IMPORTANT): the moment the user wants to control, connect to, or use an EXTERNAL application — notes apps (Obsidian, Joplin), design tools (Blender, GIMP, Inkscape, Krita), office (LibreOffice), automation (n8n), Zoom, mailchimp, media (Audacity, Shotcut, OBS), browsers, or ANY other app — you MUST call use_skill FIRST: TOOL_CALL with skill="search" and the app name, then load the manual (use_skill with the skill name), then FOLLOW it: install the CLI via run_command as `python3 -m pip install <pkg>` (NEVER bare `pip install` — it fails on this system), then run the CLI commands and report real output. Never claim an app is impossible before trying use_skill. For managing the user\'s INBOX from chat (check emails, find messages, organize, mark read, move, delete, star), use email_list / email_search / email_read / email_organize / email_folders directly. For browsing websites with clicks, use browser_action.',
     '12. CURRENT INFORMATION: any question about news, prices, scores, weather, "latest", "today", or anything time-sensitive REQUIRES web_search — never answer from memory alone.',
     '13. CODING & REAL PRODUCTS: when the user asks for a website, web app, landing page, tool, game, script or any CODE — put the COMPLETE, RUNNABLE source directly in your chat reply as a markdown code block (a full single-file HTML page with inline CSS/JS for websites and apps, or a complete file/component). Do NOT call create_document or any tool for code — code belongs IN THE CHAT so the user can read, copy and run it. Never truncate: include every line. Prefer modern, polished output (responsive layout, hover states, sensible colors). End with one short "How to run" line. Never say "implement this yourself" — build it fully.',
@@ -2321,12 +2321,69 @@ export async function POST(req: NextRequest) {
             send({ type: 'status', message: step === 0 ? 'Thinking…' : 'Continuing…' })
 
             /** Deltas funnel: tracks what is already on screen so a failed
-             *  stream can keep its partial text instead of duplicating. */
+             *  stream can keep its partial text instead of duplicating.
+             *
+             * ANTI-HALLUCINATION GUARD: models sometimes invent download URLs
+             * ("/api/office/file/1a2b3c4d-…") for files they never actually
+             * created — the user clicks and gets a 404. Every file URL span
+             * is held back until complete, then validated against the set of
+             * REAL files created by this request's tool calls. Fake URLs are
+             * replaced with a visible note; real ones stream through. */
             let streamedSoFar = ''
-            const emitDelta = (delta: string) => {
-              streamedSoFar += delta
+            /** Real file URLs produced by tool calls in THIS request. */
+            const realFileUrls = new Set<string>()
+            let heldDelta = ''
+            const FILE_URL_RE = /\/api\/(?:office|image)\/file\/[^\s)\]"'`]*/g
+            const URL_TERMINATOR = /[\s)\]"'`]/
+            const emitDeltaRaw = (delta: string) => {
               send({ type: 'assistant_delta', delta })
             }
+            /** Validate complete URLs in a chunk; hold a trailing incomplete
+             *  URL back until its terminator arrives. */
+            const processDeltaText = (chunk: string) => {
+              let buf = heldDelta + chunk
+              heldDelta = ''
+              // Hold back a trailing, potentially-incomplete file URL.
+              const lastStart = Math.max(buf.lastIndexOf('/api/office/file/'), buf.lastIndexOf('/api/image/file/'))
+              if (lastStart !== -1) {
+                const tail = buf.slice(lastStart)
+                if (!URL_TERMINATOR.test(tail)) {
+                  heldDelta = tail
+                  buf = buf.slice(0, lastStart)
+                }
+              }
+              if (!buf) return
+              const validated = buf.replace(FILE_URL_RE, (url) => {
+                const path = url.split('?')[0]
+                return realFileUrls.has(path) ? url : '~~(this file was not actually created — ask me to create it)~~'
+              })
+              emitDeltaRaw(validated)
+            }
+            const emitDelta = (delta: string) => {
+              streamedSoFar += delta
+              processDeltaText(delta)
+            }
+            /** Release any held-back URL fragment (call when a stream ends).
+             *  Validates WITHOUT re-holding — the stream is over, so whatever
+             *  is held must be emitted now. */
+            const flushHeldDelta = () => {
+              if (!heldDelta) return
+              const held = heldDelta
+              heldDelta = ''
+              const validated = held.replace(FILE_URL_RE, (url) => {
+                const path = url.split('?')[0]
+                return realFileUrls.has(path)
+                  ? url
+                  : '~~(this file was not actually created — ask me to create it)~~'
+              })
+              emitDeltaRaw(validated)
+            }
+            /** Same validation for non-streamed final answers. */
+            const sanitizeFileUrls = (text: string) =>
+              text.replace(FILE_URL_RE, (url) => {
+                const path = url.split('?')[0]
+                return realFileUrls.has(path) ? url : '~~(this file was not actually created — ask me to create it)~~'
+              })
 
             /** Task-aware routing: code requests go to the CODE specialists
              *  (Qwen2.5-Coder-32B on HF / grok-4-fast / DeepSeek) — markedly
@@ -2564,14 +2621,26 @@ export async function POST(req: NextRequest) {
                 clearInterval(heartbeat)
               }
 
-              if (attachment) attachments.push(attachment)
+              if (attachment) {
+                attachments.push(attachment)
+                // Register the REAL file URL for the anti-hallucination guard.
+                const aUrl = String(attachment.url ?? '')
+                if (aUrl) realFileUrls.add(aUrl.split('?')[0])
+              }
               send({ type: 'tool_result', tool: toolCall.tool, ok, result, index: toolCallsUsed })
 
               const resultJson = JSON.stringify(result).slice(0, 4000)
               llmMessages.push({ role: 'assistant', content })
               llmMessages.push({
                 role: 'user',
-                content: `TOOL_RESULT (${toolCall.tool}):\n${resultJson}\n\nContinue: use another TOOL_CALL if needed, or give your final answer.`,
+                content:
+                  `TOOL_RESULT (${toolCall.tool}):\n${resultJson}\n\n` +
+                  'Continue: use another TOOL_CALL if needed, or give your final answer.\n' +
+                  'CRITICAL: only the system writes TOOL_RESULT messages — NEVER write one yourself. ' +
+                  'Every file the user asked for must come from a REAL TOOL_CALL — if a requested file ' +
+                  'has no downloadUrl above, it was NOT created: either call the tool again to create it, ' +
+                  'or tell the user honestly. NEVER invent, guess or pattern-match a download URL — ' +
+                  'copy URLs verbatim from the TOOL_RESULT payloads only.',
               })
             } else {
               // Phase 1 P2: parse any ARTIFACT_PATCH directives from the
@@ -2599,9 +2668,10 @@ export async function POST(req: NextRequest) {
               // Final answer: strip both TOOL_CALL and ARTIFACT_PATCH
               // directives from the visible prose (leaving the model's
               // one-line acknowledgement like "Done — shortened the intro.").
-              const finalAnswer =
+              const finalAnswer = sanitizeFileUrls(
                 stripToolCall(content) ||
-                "I've hit my tool-use limit for this reply — say \"continue\" and I'll pick up right where I left off."
+                  "I've hit my tool-use limit for this reply — say \"continue\" and I'll pick up right where I left off."
+              )
               const assistantMessage = await db.chatMessage.create({
                 data: {
                   sessionId: session!.id,
@@ -2642,6 +2712,7 @@ export async function POST(req: NextRequest) {
                 // parsing failed — the user used to get a blank message.
                 // Emit whatever visible text we have (final answer or a
                 // graceful fallback) so the bubble is never empty.
+                flushHeldDelta()
                 if (!streamedSoFar.trim() && finalAnswer) {
                   send({ type: 'assistant_delta', delta: finalAnswer })
                 }
