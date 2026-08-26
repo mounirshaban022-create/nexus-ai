@@ -278,7 +278,30 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       console.error('[api/voice/turn] TTS failed:', err)
-      // Reply text still usable — client will show it silently
+      // LAST-RESORT FAIL-SOFT: the Z.ai engine constructed but couldn't
+      // actually reach the gateway (Vercel) — synthesize with a FREE Edge
+      // voice so the spoken reply always arrives.
+      try {
+        const speechText = stripMarkdownForSpeech(reply).slice(0, 3000)
+        const freeVoice = edgeFallbackFor(effectiveVoice)
+        const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
+        const tts = new MsEdgeTTS()
+        await tts.setMetadata(freeVoice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
+        const { audioStream } = tts.toStream(speechText)
+        const chunks: Buffer[] = []
+        for await (const chunk of audioStream) {
+          chunks.push(chunk as Buffer)
+        }
+        const mp3 = Buffer.concat(chunks)
+        if (mp3.length > 100) {
+          audioBase64 = mp3.toString('base64')
+          audioFormat = 'mp3'
+          console.warn(`[api/voice/turn] recovered via free Edge voice ${freeVoice}`)
+        }
+      } catch (softErr) {
+        console.error('[api/voice/turn] Edge fail-soft also failed:', softErr)
+        // Reply text still usable — client falls back to its own TTS chain.
+      }
     }
 
     return NextResponse.json({

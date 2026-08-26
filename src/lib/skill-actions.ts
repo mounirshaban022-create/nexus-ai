@@ -48,11 +48,17 @@ export interface SkillRunResult {
 /* ------------------------------------------------------------------ */
 
 function origin(req: Request): string {
-  const explicit = process.env.APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
-  if (explicit) return explicit
-  const proto = req.headers.get('x-forwarded-proto') ?? 'http'
-  const host = req.headers.get('host') ?? `localhost:${process.env.PORT || 3000}`
-  return `${proto}://${host}`
+  // The request's own host is the most reliable origin everywhere (sandbox,
+  // Vercel preview, production domain). Env overrides come second — APP_URL
+  // may be stale/misconfigured.
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+  if (host) {
+    const proto = req.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
+    return `${proto}://${host}`
+  }
+  if (process.env.APP_URL) return process.env.APP_URL
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return `http://localhost:${process.env.PORT || 3000}`
 }
 
 async function callApi<T>(base: string, path: string, body: unknown): Promise<T> {
