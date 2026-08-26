@@ -29,21 +29,6 @@ const IS_VERCEL = Boolean(process.env.VERCEL)
 const VIDEO_DIR = IS_VERCEL
   ? path.join('/tmp', 'generated-videos') // Vercel: writable /tmp (ephemeral)
   : path.join(process.cwd(), 'generated-videos')
-// Font bundled in the repo (assets/fonts) — /usr/share fonts don't exist on
-// Vercel. Fall back to the system font in the sandbox if missing.
-const BUNDLED_FONT = path.join(process.cwd(), 'assets', 'fonts', 'DejaVuSans-Bold.ttf')
-const SYSTEM_FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-let FONT_CACHE: string | null = null
-async function fontPath(): Promise<string> {
-  if (FONT_CACHE) return FONT_CACHE
-  try {
-    await readFile(BUNDLED_FONT)
-    FONT_CACHE = BUNDLED_FONT
-  } catch {
-    FONT_CACHE = SYSTEM_FONT
-  }
-  return FONT_CACHE
-}
 const W = 1024
 const H = 576
 
@@ -79,19 +64,6 @@ async function audioDuration(file: string): Promise<number> {
   } catch {
     return 0
   }
-}
-
-function escDrawText(text: string): string {
-  // ffmpeg's filter parser treats ASCII apostrophes as quote delimiters —
-  // an "Ocean's" caption kills the whole filtergraph (the 'video generation
-  // is not working' bug). Swap to the typographic apostrophe (parser-safe,
-  // visually identical) and escape the remaining metacharacters.
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, '\u2019')
-    .replace(/"/g, '\u201C')
-    .replace(/:/g, '\\:')
-    .replace(/%/g, '\\%')
 }
 
 export async function POST(req: NextRequest) {
@@ -281,18 +253,46 @@ export async function POST(req: NextRequest) {
           narrations.push({ file: mp3, dur })
         }
 
-        /* ---- 4. Render with ffmpeg (Ken Burns + captions) ---- */
+        /* ---- 4. Render with ffmpeg (Ken Burns + sharp-burned captions) ---- */
         job.status = 'rendering'
         job.progress = 72
         void persistStage('rendering')
         const sceneFiles: string[] = []
+
+        /** Burns the caption band into the scene PNG with sharp.
+         *  (ffmpeg-static ships WITHOUT libfreetype → no drawtext filter —
+         *  sharp renders the same caption style portably everywhere.) */
+        const burnCaption = async (idx: number, text: string): Promise<string> => {
+          if (!text) return path.join(workDir, `scene${idx}.png`)
+          const src = path.join(workDir, `scene${idx}.png`)
+          const dst = path.join(workDir, `cap${idx}.png`)
+          const safe = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+          const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="${H - 150}" width="${W}" height="150" fill="black" opacity="0.55"/>
+  <text x="50%" y="${H - 78}" text-anchor="middle" dominant-baseline="middle"
+        font-family="DejaVu Sans, Verdana, sans-serif" font-weight="bold"
+        font-size="44" fill="#ffffff" stroke="#000000" stroke-width="1.4"
+        paint-order="stroke">${safe}</text>
+</svg>`
+          const sharp = (await import('sharp')).default
+          await sharp(src)
+            .resize(W, H, { fit: 'cover' })
+            .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+            .png()
+            .toFile(dst)
+          return dst
+        }
+
         for (let i = 0; i < scenes.length; i++) {
           job.progress = 72 + Math.round((i / scenes.length) * 22)
           job.message = `Rendering scene ${i + 1} of ${scenes.length}…`
           const dur = Math.max(narrations[i].dur + 0.6, 3.2)
           const out = path.join(workDir, `clip${i}.mp4`)
-          const caption = scenes[i].caption ? scenes[i].caption.slice(0, 60) : ''
-          const FONT = await fontPath()
+          const caption = scenes[i].caption ? scenes[i].caption.slice(0, 40) : ''
+          const inputPng = await burnCaption(i, caption)
           // Alternate zoom direction for visual variety
           const zoomIn = i % 2 === 0
           const zoomExpr = zoomIn
@@ -301,16 +301,12 @@ export async function POST(req: NextRequest) {
           const vf =
             `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},` +
             `${zoomExpr}:d=${Math.round(dur * 25)}:s=${W}x${H}:fps=25,` +
-            `drawbox=y=ih-140:color=black@0.45:width=iw:height=140:t=fill` +
-            (caption
-              ? `,drawtext=fontfile=${FONT}:text='${escDrawText(caption)}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=h-100:shadowx=2:shadowy=2:shadowcolor=black@0.7`
-              : '') +
-            `,fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.5).toFixed(2)}:d=0.5[v]`
+            `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.5).toFixed(2)}:d=0.5[v]`
 
           await execFileAsync(await ffmpegPath(), [
             '-y',
             '-loop', '1',
-            '-i', path.join(workDir, `scene${i}.png`),
+            '-i', inputPng,
             '-i', narrations[i].file,
             '-filter_complex', vf,
             '-map', '[v]',
