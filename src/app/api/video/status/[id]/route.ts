@@ -15,9 +15,38 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     }
 
   const { id } = await context.params
-  const job = videoJobs.get(id)
+  let job = videoJobs.get(id)
+
+  /* ---- VERCEL FALLBACK: serverless invocations hit different instances,
+   * so the in-memory map can miss a job that's actively rendering on the
+   * instance that created it. Derive the snapshot from the DB row. ---- */
   if (!job) {
-    return NextResponse.json({ error: 'Job not found.' }, { status: 404 })
+    try {
+      const row = await db.generatedVideo.findFirst({ where: { jobId: id } })
+      if (!row) {
+        return NextResponse.json({ error: 'Job not found.' }, { status: 404 })
+      }
+      const status = row.status === 'done' ? 'done' : row.status === 'error' ? 'error' : 'rendering'
+      return NextResponse.json({
+        job: {
+          id,
+          status,
+          progress: status === 'done' ? 100 : status === 'error' ? 0 : 60,
+          message:
+            status === 'done'
+              ? 'Video ready!'
+              : status === 'error'
+                ? 'Video generation failed on the server.'
+                : 'Rendering your video…',
+          url: row.url ?? (status === 'done' ? `/api/video/file/${id}` : ''),
+          error: status === 'error' ? 'Video generation failed on the server.' : '',
+          prompt: row.prompt,
+          scenes: null,
+        },
+      })
+    } catch {
+      return NextResponse.json({ error: 'Job not found.' }, { status: 404 })
+    }
   }
 
   /* ---- Agnes poll (only when the job originated there) ----

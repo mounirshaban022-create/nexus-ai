@@ -115,6 +115,20 @@ export async function POST(req: NextRequest) {
     pruneVideoJobs()
     videoJobs.set(id, job)
 
+    // VERCEL-SAFE JOB STATE: serverless invocations may hit different
+    // instances — the in-memory map alone makes status polls 404. Persist
+    // a placeholder row immediately; stage transitions update it, and the
+    // status route falls back to this row when the map misses.
+    const persistStage = (status: string, message?: string) =>
+      db.generatedVideo
+        .upsert({
+          where: { jobId: id },
+          create: { prompt, scenes: sceneCount, voice, style, url: null, jobId: id, status, userId: user?.id ?? null },
+          update: { status, ...(message ? { status } : {}) },
+        })
+        .catch((e: unknown) => console.error('[video] stage persist failed:', e))
+    void persistStage('planning')
+
     /* ---- AGNES AI path (when configured) ----
      * When AGNES_API_KEY + AGNES_BASE_URL are set, hand off video
      * generation to Agnes and let the status route poll its API.
@@ -210,6 +224,7 @@ export async function POST(req: NextRequest) {
 
         /* ---- 2. Generate images (Pollinations — free) ---- */
         job.status = 'images'
+        void persistStage('images')
         for (let i = 0; i < scenes.length; i++) {
           job.progress = 15 + Math.round((i / scenes.length) * 45)
           job.message = `Generating scene ${i + 1} of ${scenes.length}…`
@@ -236,6 +251,7 @@ export async function POST(req: NextRequest) {
         job.status = 'narration'
         job.progress = 62
         job.message = 'Recording AI narration…'
+        void persistStage('narration')
         const narrations: Array<{ file: string; dur: number }> = []
         for (let i = 0; i < scenes.length; i++) {
           const mp3 = path.join(workDir, `nar${i}.mp3`)
@@ -247,6 +263,7 @@ export async function POST(req: NextRequest) {
         /* ---- 4. Render with ffmpeg (Ken Burns + captions) ---- */
         job.status = 'rendering'
         job.progress = 72
+        void persistStage('rendering')
         const sceneFiles: string[] = []
         for (let i = 0; i < scenes.length; i++) {
           job.progress = 72 + Math.round((i / scenes.length) * 22)
@@ -323,11 +340,13 @@ export async function POST(req: NextRequest) {
 
         // Persist the finished video to the library DB — base64 bytes ride
         // along so the file survives Vercel's ephemeral /tmp across lambdas.
-        // If the live DB lacks the `data` column (pre-migration), retry
-        // without it so the video still lands (schema-drift resilience).
+        // UPSERT against the placeholder row (jobId unique) so stage rows
+        // never duplicate. If the live DB lacks the `data` column
+        // (pre-migration), retry without it so the video still lands.
         const persistDone = async (withData: boolean) =>
-          db.generatedVideo.create({
-            data: {
+          db.generatedVideo.upsert({
+            where: { jobId: id },
+            create: {
               prompt,
               scenes: sceneCount,
               voice,
@@ -337,6 +356,11 @@ export async function POST(req: NextRequest) {
               status: 'done',
               ...(withData ? { data: finalBuf.toString('base64') } : {}),
               userId: user?.id ?? null,
+            },
+            update: {
+              url: job.url,
+              status: 'done',
+              ...(withData ? { data: finalBuf.toString('base64') } : {}),
             },
           })
         try {
@@ -366,8 +390,9 @@ export async function POST(req: NextRequest) {
 
         // Persist the failed attempt too, so the user sees it in the library with an error badge.
         try {
-          await db.generatedVideo.create({
-            data: {
+          await db.generatedVideo.upsert({
+            where: { jobId: id },
+            create: {
               prompt,
               scenes: sceneCount,
               voice,
@@ -377,6 +402,7 @@ export async function POST(req: NextRequest) {
               status: 'error',
               userId: user?.id ?? null,
             },
+            update: { status: 'error' },
           })
         } catch (e) {
           console.error('[video] db save (error path) failed:', e)

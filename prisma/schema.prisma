@@ -77,7 +77,7 @@ model GeneratedVideo {
   voice     String   @default("en-US-AriaNeural")
   style     String   @default("cinematic")
   url       String?
-  jobId     String?
+  jobId     String? @unique
   status    String   @default("planning") // planning | images | narration | rendering | done | error
   data      String?  // base64 bytes of the final MP4 — survives Vercel's ephemeral /tmp
   userId    String?
