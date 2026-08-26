@@ -138,11 +138,13 @@ export async function POST(req: NextRequest) {
         })
         .catch((e: unknown) => console.error('[video] stage persist failed:', e))
 
-    /* ---- AGNES AI path (when configured) ----
-     * When AGNES_API_KEY + AGNES_BASE_URL are set, hand off video
-     * generation to Agnes and let the status route poll its API.
-     * The local ffmpeg pipeline (below) is the sandbox fallback. */
-    if (agnesConfigured()) {
+    /* ---- AGNES AI path (explicit opt-in only) ----
+     * The FREE local pipeline (FLUX scenes + Edge TTS + ffmpeg) is the
+     * default everywhere — it works in the sandbox AND on Vercel with the
+     * bundled static ffmpeg. Agnes (a paid 3rd-party API) is only used
+     * when the operator explicitly sets USE_AGNES=true; previously any
+     * AGNES_* env pair silently hijacked video generation and failed. */
+    if (agnesConfigured() && process.env.USE_AGNES === 'true') {
       const agnesTask = async (): Promise<void> => {
         try {
           job.status = 'planning'
