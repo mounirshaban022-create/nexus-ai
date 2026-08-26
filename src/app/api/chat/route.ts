@@ -29,16 +29,24 @@ import { zaiStreamChat, zaiOnCooldown, zaiConfigured, getZAI } from '@/lib/zai'
 import { openrouterConfigured, openrouterStreamChatCallback } from '@/lib/openrouter'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
-import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listCliSkills } from '@/lib/cli-skills'
+import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listAllSkills } from '@/lib/cli-skills'
 import { runSkillAction, resolveSkillAction } from '@/lib/skill-actions'
 
 /** Resolves the app's own origin — works on localhost, Vercel previews,
- *  and production (falls back to localhost for direct dev calls). */
+ *  and production (falls back to localhost for direct dev calls).
+ *  Headers FIRST: the request's own host is always reachable (a stale or
+ *  misencoded APP_URL env once made every tool self-fetch an HTML 404 —
+ *  "The page could not be found" — instead of JSON). */
 function appOrigin(req: NextRequest): string {
-  return process.env.APP_URL
-    || (req.headers.get('x-forwarded-host')
-      ? `${req.headers.get('x-forwarded-proto') || 'https'}://${req.headers.get('x-forwarded-host')}`
-      : `http://localhost:${process.env.PORT || 3000}`)
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+  if (host) {
+    const proto =
+      req.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
+    return `${proto}://${host}`
+  }
+  if (process.env.APP_URL) return process.env.APP_URL
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return `http://localhost:${process.env.PORT || 3000}`
 }
 
 
@@ -630,7 +638,7 @@ function parseSkillDirective(message: string): { skill: string; task: string } |
 
 /** Resolve a directive skill name against the catalog (full or short form). */
 async function matchSkillFromCatalog(skill: string) {
-  const catalog = await listCliSkills()
+  const catalog = await listAllSkills()
   const short = skill.replace(/^cli-anything-/, '')
   return (
     catalog.find((s) => s.name === skill) ??

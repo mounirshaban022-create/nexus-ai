@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { listCliSkills } from '@/lib/cli-skills'
+import { listAllSkills } from '@/lib/cli-skills'
 import { runSkillAction, resolveSkillAction } from '@/lib/skill-actions'
 
 export const maxDuration = 120
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   try {
     const { skill, task } = parsed.data
     // Resolve against the catalog (accept full or short names).
-    const catalog = await listCliSkills()
+    const catalog = await listAllSkills()
     const short = skill.replace(/^cli-anything-/, '')
     const entry =
       catalog.find((s) => s.name === skill) ??

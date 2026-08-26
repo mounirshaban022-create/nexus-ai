@@ -37,6 +37,7 @@ import {
   loadKokoro,
 } from '@/components/omni/kokoro-voice'
 import { blobToWavBase64 } from '@/components/omni/audio-utils'
+import { onDeviceTranscribe, onDeviceAsrBroken, warmUpOnDeviceAsr } from '@/lib/whisper-client'
 
 type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking'
 
@@ -586,6 +587,32 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       }
 
       setStateSafe('thinking')
+
+      /* PRIMARY — on-device Whisper (open-source, in-browser): hears the
+       * user in EVERY browser (Firefox/Safari included) and inside
+       * cross-origin iframes where Chrome's Web Speech API is broken.
+       * Falls back to the server ASR path when the engine can't load. */
+      if (!onDeviceAsrBroken()) {
+        try {
+          const text = await onDeviceTranscribe(blob, langRef.current, (pct, note) => {
+            if (asrTokenRef.current === token) {
+              setCaption(pct >= 100 ? 'Listening…' : `${note} ${pct}%`)
+            }
+          })
+          if (!alive()) return
+          if (text) {
+            setCaption('')
+            await runTurnRef.current?.({ message: text })
+            return
+          }
+          // Nothing intelligible on-device — still try the server path
+          // (its ASR is stronger) before reporting "didn't catch that".
+        } catch {
+          /* engine unavailable/timed out → server ASR below */
+        }
+      }
+
+      setCaption('')
       const base64 = await blobToWavBase64(blob)
       if (!alive()) return
       await runTurnRef.current?.({ audioBase64: base64 })
@@ -612,8 +639,18 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           void startAsrLoop()
         } else {
           setStateSafe('idle')
-          if (!micDeniedRef.current && !mutedRef.current && !forceRecorderRef.current) {
-            setError('Voice input is unavailable in this browser — type below and NEXUS will still reply out loud.')
+          if (!micDeniedRef.current && !mutedRef.current) {
+            let framed = false
+            try {
+              framed = window.self !== window.top
+            } catch {
+              framed = true
+            }
+            setError(
+              framed
+                ? 'Microphone is blocked inside this embedded preview — open the app in a new tab (↗) and NEXUS will hear you. You can also type below; replies are still spoken.'
+                : 'Voice input is unavailable in this browser — type below and NEXUS will still reply out loud.'
+            )
           }
         }
         return
@@ -770,7 +807,14 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     mutedRef.current = false
     setMicDenied(false)
     micDeniedRef.current = false
-    forceRecorderRef.current = false
+    // Chrome's SpeechRecognition silently never transcribes inside a
+    // cross-origin iframe (the preview panel). When framed, go straight
+    // to the recorder + on-device Whisper path — it hears the user there.
+    try {
+      forceRecorderRef.current = window.self !== window.top
+    } catch {
+      forceRecorderRef.current = true
+    }
     netErrRef.current = 0
     restartCountRef.current = 0
     setTurns([])
@@ -808,6 +852,11 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     setLang(recLang)
 
     unlockAudio()
+    // Pre-warm the on-device Whisper engine so the one-time ~45 MB model
+    // download overlaps the user's first sentence instead of delaying it.
+    warmUpOnDeviceAsr((pct, note) => {
+      if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
+    })
     let cancelled = false
     const t = window.setTimeout(() => {
       if (cancelled) return
@@ -1289,7 +1338,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                     >
                       {interim}
                     </motion.p>
-                  ) : state === 'speaking' && caption ? (
+                  ) : (state === 'speaking' || state === 'thinking') && caption ? (
                     <motion.p
                       key="caption"
                       initial={{ opacity: 0, y: 4 }}

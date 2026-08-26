@@ -170,15 +170,17 @@
 html:not(.dark) {
   /* Flip the Tailwind zinc text scale so "near-white" utilities become
      dark text and "near-black" utilities become light — keeping the
-     visual hierarchy but inverting for the light surface. */
+     visual hierarchy but inverting for the light surface. The faint end
+     (500-700) stays dark enough to stay readable for small/placeholder
+     text (≥ ~4:1 on ivory). */
   --color-zinc-50: oklch(0.99 0.003 80);
   --color-zinc-100: oklch(0.2 0.005 60);   /* primary text on light */
   --color-zinc-200: oklch(0.25 0.005 60);
   --color-zinc-300: oklch(0.32 0.005 65);  /* mid-emphasis */
   --color-zinc-400: oklch(0.42 0.005 70);  /* muted-foreground */
-  --color-zinc-500: oklch(0.5 0.005 70);
-  --color-zinc-600: oklch(0.6 0.005 70);
-  --color-zinc-700: oklch(0.7 0.005 75);
+  --color-zinc-500: oklch(0.46 0.005 70);
+  --color-zinc-600: oklch(0.5 0.005 70);
+  --color-zinc-700: oklch(0.58 0.005 75);
   --color-zinc-800: oklch(0.85 0.004 80);  /* near-white surface tint */
   --color-zinc-900: oklch(0.92 0.003 80);
   --color-zinc-950: oklch(0.96 0.003 80);
@@ -678,8 +680,12 @@ nav[aria-label="Primary"] {
 
 /* Premium gradient CTA button surface */
 .nx-gradient-surface {
-  background: var(--nx-grad);
+  /* Deepened ramp vs --nx-grad: the pure-orange start (#f5a623) gave
+     white labels only ~1.9:1 contrast ("faint New chat button"). This
+     ramp keeps the brand warmth but stays ≥3:1 under white text. */
+  background: linear-gradient(135deg, #d97706 0%, #ff5a5f 52%, #f4245e 100%);
   color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
   transition: filter 0.2s ease, transform 0.15s ease, box-shadow 0.25s ease;
   box-shadow: 0 4px 18px -6px rgba(255, 90, 95, 0.55);
 }

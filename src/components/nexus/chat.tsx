@@ -992,8 +992,12 @@ export function NexusChat(props: NexusChatProps) {
                         ) : null}
                       </span>
                     ) : (
-                      /* `dark` wrapper activates the existing .dark .omni-prose rules */
-                      <div className="dark text-sm text-zinc-100">
+                      /* Theme-aware prose: in dark mode html.dark activates the
+                       * .dark .omni-prose rules; in light mode the base rules
+                       * render dark text. (A hardcoded `dark` wrapper here used
+                       * to force near-white bold/links on the light background
+                       * — the "invisible words in light mode" bug.) */
+                      <div className="text-sm text-zinc-100">
                         <Markdown content={m.content} />
                         {m.streaming ? (
                           <span

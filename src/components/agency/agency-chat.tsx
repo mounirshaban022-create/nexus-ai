@@ -673,9 +673,9 @@ export function AgencyChat({
                         thinking…
                       </span>
                     ) : (
-                      /* `dark` wrapper: the omni-prose stylesheet ships dark
-                         code/inline-code rules scoped to `.dark .omni-prose` */
-                      <div className="dark text-sm text-zinc-100">
+                      /* Theme-aware prose (no forced `dark` wrapper — it made
+                         bold/links invisible in light mode) */
+                      <div className="text-sm text-zinc-100">
                         <Markdown content={m.content} />
                         {m.streaming && (
                           <span

@@ -57,7 +57,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { tint } from '@/components/nexus/shared'
 import type { CliSkill } from '@/lib/cli-skills'
-import { resolveSkillAction } from '@/lib/skill-map'
+import { resolveSkillAction, CLOUD_SKILLS } from '@/lib/skill-map'
 
 /** localStorage key for the installed-skills set. */
 const INSTALLED_KEY = 'nexus-installed-skills'
@@ -603,6 +603,12 @@ function SkillCard({
             {skill.displayName}
           </h3>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {/* First-party cloud skills get a NEW / PRO ribbon */}
+            {CLOUD_SKILLS.find((c) => c.name === skill.name) ? (
+              <span className="inline-block animate-pulse rounded-full bg-gradient-to-r from-[#d97706] to-[#ff2a68] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                {CLOUD_SKILLS.find((c) => c.name === skill.name)!.badge}
+              </span>
+            ) : null}
             <span
               className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
               style={{ background: tint(color, 0.14), color }}

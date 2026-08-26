@@ -18,6 +18,7 @@
 
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { CLOUD_SKILLS } from '@/lib/skill-map'
 
 const VENDOR_DIR = path.join(process.cwd(), 'cli-anything')
 const SKILLS_DIR = path.join(VENDOR_DIR, 'skills')
@@ -77,9 +78,30 @@ export async function listCliSkills(): Promise<CliSkill[]> {
   return registryCache
 }
 
-/** Keyword search across name/displayName/description/category. */
+/**
+ * The FULL skill catalog: the 79 vendored CLI-Anything skills PLUS the
+ * first-party NEXUS cloud skills (free keyless cloud actions — translate,
+ * weather, charts, QR, passwords, research, narration). Cloud skills lead
+ * the list so they're immediately visible in the directory and in chat
+ * skill-name resolution.
+ */
+export async function listAllSkills(): Promise<CliSkill[]> {
+  const cli = await listCliSkills()
+  const cloud: CliSkill[] = CLOUD_SKILLS.map((s) => ({
+    name: s.name,
+    displayName: s.displayName,
+    description: `${s.description} (Powered by ${s.powered} — free, no setup.)`,
+    category: s.category,
+    homepage: undefined,
+    installCmd: undefined,
+  }))
+  return [...cloud, ...cli]
+}
+
+/** Keyword search across name/displayName/description/category
+ * (includes the first-party cloud skills). */
 export async function searchCliSkills(query: string, limit = 10): Promise<CliSkill[]> {
-  const all = await listCliSkills()
+  const all = await listAllSkills()
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!terms.length) return all.slice(0, limit)
   const scored = all
