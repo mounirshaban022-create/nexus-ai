@@ -29,6 +29,7 @@ import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat, streamExternalChatCompletion } from '@/lib/ai-providers'
 import { zaiStreamChat, zaiOnCooldown, zaiConfigured, getZAI } from '@/lib/zai'
 import { openrouterConfigured, openrouterStreamChatCallback } from '@/lib/openrouter'
+import { hfConfigured, hfStreamChatCompletion, xaiConfigured, xaiChatCompletion } from '@/lib/hf-ai'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listAllSkills } from '@/lib/cli-skills'
@@ -120,8 +121,9 @@ const CHAT_TOOL_DEFS: Array<{
   {
     id: 'create_document',
     description:
-      'Create a real Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) document from content you provide. Returns a download link.',
-    params: 'format (docx|xlsx|pptx, required), title (required), content (required: the document text/structure)',
+      'Create a real Word (.docx), PDF, Excel (.xlsx) or PowerPoint (.pptx) document from content you provide. Returns a download link the user can open — a REAL office file, not text.',
+    params:
+      'format (docx|pdf|xlsx|pptx, required), title (required), content (required: the FULL document body as Markdown text — use # headings, - bullets, 1. numbered lists, | pipe tables |. NEVER send JSON — JSON is written into the document verbatim!)',
   },
   {
     id: 'edit_document',
@@ -142,6 +144,13 @@ const CHAT_TOOL_DEFS: Array<{
       'Create a real Excel (.xlsx) spreadsheet from structured data you provide — with headers, typed cells, number formatting and SUM/AVG formulas. Use when the user wants a spreadsheet, budget, tracker, data table, or asks to convert document data into Excel.',
     params:
       'title (required), sheets (required: JSON array of {name, headers: string[], rows: (string|number)[][], formulas: optional array of {row, col, formula} to add live formulas like SUM/AVERAGE})',
+  },
+  {
+    id: 'edit_image',
+    description:
+      'PROFESSIONALLY EDIT the user\'s attached photo (real image processing, pixel-perfect): crop, resize, rotate, flip, grayscale, sepia, invert, blur, sharpen, brightness, saturation, hue, contrast, tint, vignette, watermark text, format conversion, compression. Use whenever the user attaches an image and wants it CHANGED (not regenerated) — e.g. "make this black and white", "crop to the left half", "brighten it", "add a watermark", "sharpen this".',
+    params:
+      'operations (required: JSON array of one or more operations, applied in order, each like {op: "crop", ...}) — available ops: {op:"resize", width, height}, {op:"crop", left, top, width, height}, {op:"rotate", angle: 90|180|270}, {op:"flipH"}, {op:"flipV"}, {op:"grayscale"}, {op:"sepia"}, {op:"negate"}, {op:"blur", sigma: 0-30}, {op:"sharpen"}, {op:"brightness", value: 0-3}, {op:"saturation", value: 0-3}, {op:"hue", degrees: 0-360}, {op:"contrast", value: -1 to 1}, {op:"tint", color: "#rrggbb"}, {op:"vignette"}, {op:"watermark", text, fontSize: 48, color: "#ffffff", opacity: 0-1, position: "center|bottom-right|bottom-left|top-right|top-left"}, {op:"format", type: "jpeg|png|webp", quality: 1-100}',
   },
   {
     id: 'run_code',
@@ -373,6 +382,7 @@ function buildSystemPrompt(
     '10. When you attach or create a file, ALWAYS present the download link clearly and briefly describe what you produced.',
     '11. SKILLS & EXTERNAL APPS (VERY IMPORTANT): the moment the user wants to control, connect to, or use an EXTERNAL application — notes apps (Obsidian, Joplin), design tools (Blender, GIMP, Inkscape, Krita), office (LibreOffice), automation (n8n), Zoom, mailchimp, media (Audacity, Shotcut, OBS), browsers, or ANY other app — you MUST call use_skill FIRST: TOOL_CALL with skill="search" and the app name, then load the manual (use_skill with the skill name), then FOLLOW it: install the CLI via run_command as `python3 -m pip install <pkg>` (NEVER bare `pip install` — it fails on this system), then run the CLI commands and report real output. Never claim an app is impossible before trying use_skill. For managing the user\'s INBOX from chat (check emails, find messages, organize, mark read, move, delete, star), use email_list / email_search / email_read / email_organize / email_folders directly. For browsing websites with clicks, use browser_action.',
     '12. CURRENT INFORMATION: any question about news, prices, scores, weather, "latest", "today", or anything time-sensitive REQUIRES web_search — never answer from memory alone.',
+    '13. CODING & REAL PRODUCTS: when the user asks for a website, web app, landing page, tool, game, script or any CODE — put the COMPLETE, RUNNABLE source directly in your chat reply as a markdown code block (a full single-file HTML page with inline CSS/JS for websites and apps, or a complete file/component). Do NOT call create_document or any tool for code — code belongs IN THE CHAT so the user can read, copy and run it. Never truncate: include every line. Prefer modern, polished output (responsive layout, hover states, sensible colors). End with one short "How to run" line. Never say "implement this yourself" — build it fully.',
     '',
     // The persona comes LAST and is framed as voice/tone so it can never
     // outweigh the tool protocol above (see SKILLS FIX note).
@@ -620,6 +630,14 @@ interface ActiveDoc {
   dataUrl: string
 }
 
+/** The image the user attached in the CURRENT message — powers the
+ *  edit_image tool (professional photo editing on the real pixels). */
+interface ActiveImage {
+  filename: string
+  dataUrl: string
+  description?: string
+}
+
 /* ------------------------------------------------------------------ */
 /* SKILL DIRECTIVE — deterministic pre-scan for explicit skill runs.   */
 /* Matches the Skills-view hand-off (Use the "X" skill to help me: …)  */
@@ -650,11 +668,167 @@ async function matchSkillFromCatalog(skill: string) {
   )
 }
 
+/* ------------------------------------------------------------------ */
+/* Document content parsing — robust against whatever the LLM sends.   */
+/* A model passing a JSON block array used to end up as a document     */
+/* full of raw JSON text; these helpers turn every shape into real     */
+/* document blocks.                                                    */
+/* ------------------------------------------------------------------ */
+
+type DocBlock = Record<string, unknown>
+
+/** Parses model-provided `content` into office-create blocks.
+ *  Accepts: JSON block arrays, fenced code, markdown, plain text. */
+function parseDocumentContent(raw: string): DocBlock[] {
+  let content = raw.trim()
+
+  // Unwrap a single fenced code block (```...``` or ```markdown ... ```).
+  const fence = content.match(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/)
+  if (fence) content = fence[1].trim()
+
+  // JSON block array? (the classic "fake JSON document" failure)
+  if (content.startsWith('[') || content.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(content)
+      const arr = Array.isArray(parsed) ? parsed : [parsed]
+      const blocks = arr
+        .map((b: Record<string, unknown>): DocBlock | null => {
+          if (!b || typeof b !== 'object') return null
+          const type = String(b.type ?? '')
+          if (type === 'heading')
+            return { type: 'heading', text: String(b.text ?? 'Section').slice(0, 500), level: Math.min(4, Math.max(1, Number(b.level) || 1)) }
+          if (type === 'bullets' && Array.isArray(b.items))
+            return { type: 'bullets', items: b.items.map((i) => String(i).slice(0, 1000)).slice(0, 30) }
+          if (type === 'numbered' && Array.isArray(b.items))
+            return { type: 'bullets', items: b.items.map((i, n) => `${n + 1}. ${String(i).slice(0, 1000)}`).slice(0, 30) }
+          if (type === 'table' && Array.isArray(b.rows))
+            return { type: 'table', rows: b.rows.map((r) => (Array.isArray(r) ? r.map((c) => String(c).slice(0, 500)) : [String(r)])).slice(0, 40) }
+          if (type === 'slide')
+            return { type: 'slide', title: String(b.title ?? 'Slide').slice(0, 200), bullets: (Array.isArray(b.bullets) ? b.bullets : []).map((i) => String(i).slice(0, 500)).slice(0, 12) }
+          if (type === 'paragraph' || b.text)
+            return { type: 'paragraph', text: String(b.text ?? '').slice(0, 4000) }
+          return null
+        })
+        .filter((b): b is DocBlock => b !== null)
+      if (blocks.length > 0) return blocks
+    } catch {
+      /* not JSON — fall through to markdown parsing */
+    }
+  }
+
+  // Markdown / plain text.
+  const blocks: DocBlock[] = []
+  const lines = content.split('\n')
+  let paragraph: string[] = []
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      blocks.push({ type: 'paragraph', text: paragraph.join(' ').slice(0, 4000) })
+      paragraph = []
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushParagraph()
+      continue
+    }
+    // Pipe table: | a | b | with an optional separator row.
+    if (/^\|.*\|/.test(trimmed)) {
+      // collect the full table
+      const rows: string[][] = []
+      let j = i
+      while (j < lines.length && /^\s*\|.*\|/.test(lines[j])) {
+        const cells = lines[j].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+        if (!cells.every((c) => /^:?-{2,}:?$/.test(c) || c === '')) rows.push(cells)
+        j++
+      }
+      if (rows.length) {
+        flushParagraph()
+        blocks.push({ type: 'table', rows: rows.slice(0, 40).map((r) => r.map((c) => c.slice(0, 500))) })
+        i = j - 1
+        continue
+      }
+    }
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
+    if (heading) {
+      flushParagraph()
+      blocks.push({ type: 'heading', text: heading[2].slice(0, 500), level: heading[1].length })
+      continue
+    }
+    // Bold-only lines act as headings too (**Title** / __Title__).
+    const boldTitle = trimmed.match(/^\*\*(.+?)\*\*:?$/)
+    if (boldTitle) {
+      flushParagraph()
+      blocks.push({ type: 'heading', text: boldTitle[1].slice(0, 500), level: 2 })
+      continue
+    }
+    if (/^[-•*]\s+/.test(trimmed)) {
+      flushParagraph()
+      const items: string[] = []
+      let j = i
+      while (j < lines.length && /^\s*[-•*]\s+/.test(lines[j])) {
+        items.push(lines[j].trim().replace(/^\s*[-•*]\s+/, '').slice(0, 1000))
+        j++
+      }
+      blocks.push({ type: 'bullets', items: items.slice(0, 30) })
+      i = j - 1
+      continue
+    }
+    if (/^\d+[.)]\s+/.test(trimmed)) {
+      flushParagraph()
+      const items: string[] = []
+      let j = i
+      while (j < lines.length && /^\s*\d+[.)]\s+/.test(lines[j])) {
+        items.push(lines[j].trim().replace(/^\s*\d+[.)]\s+/, '').slice(0, 1000))
+        j++
+      }
+      blocks.push({ type: 'bullets', items: items.map((t, n) => `${n + 1}. ${t}`).slice(0, 30) })
+      i = j - 1
+      continue
+    }
+    if (/^>\s?/.test(trimmed)) {
+      flushParagraph()
+      blocks.push({ type: 'paragraph', text: trimmed.replace(/^>\s?/, '').slice(0, 4000) })
+      continue
+    }
+    paragraph.push(trimmed)
+  }
+  flushParagraph()
+  if (blocks.length === 0 && content.trim()) {
+    blocks.push({ type: 'paragraph', text: content.trim().slice(0, 4000) })
+  }
+  return blocks
+}
+
+/** Serializes blocks back to clean markdown (for the PDF exporter). */
+function blocksToMarkdown(blocks: DocBlock[]): string {
+  const out: string[] = []
+  for (const b of blocks) {
+    if (b.type === 'heading') out.push(`${'#'.repeat(Math.min(4, Number(b.level) || 1))} ${String(b.text)}`)
+    else if (b.type === 'bullets') out.push((b.items as string[]).map((i) => `- ${i}`).join('\n'))
+    else if (b.type === 'table') {
+      const rows = b.rows as string[][]
+      if (rows.length) {
+        out.push(`| ${rows[0].join(' | ')} |`)
+        out.push(`| ${rows[0].map(() => '---').join(' | ')} |`)
+        for (const r of rows.slice(1)) out.push(`| ${r.join(' | ')} |`)
+      }
+    } else if (b.type === 'slide') {
+      out.push(`# ${String(b.title ?? '')}`)
+      const bullets = (b.bullets as string[]) ?? []
+      if (bullets.length) out.push(bullets.map((i) => `- ${i}`).join('\n'))
+    } else if (b.text) out.push(String(b.text))
+  }
+  return out.join('\n\n')
+}
+
 async function executeChatTool(
   req: NextRequest,
   toolId: string,
   args: Record<string, unknown>,
-  activeDoc: ActiveDoc | null = null
+  activeDoc: ActiveDoc | null = null,
+  activeImage: ActiveImage | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
   const origin = appOrigin(req)
   if (toolId === 'generate_image') {
@@ -673,27 +847,116 @@ async function executeChatTool(
     }
   }
 
+  if (toolId === 'edit_image') {
+    // PROFESSIONAL PHOTO EDITING — real pixel operations (sharp) on the
+    // user's attached image. The model passes an ordered operations list.
+    if (!activeImage) {
+      throw new Error(
+        'No image is attached in this conversation. Ask the user to attach a photo (paperclip button) first.'
+      )
+    }
+    let operations: Array<Record<string, unknown>> = []
+    if (Array.isArray(args.operations)) {
+      operations = args.operations as Array<Record<string, unknown>>
+    } else if (args.operation && typeof args.operation === 'object') {
+      operations = [args.operation as Record<string, unknown>]
+    } else if (typeof args.operations === 'string') {
+      try {
+        const parsed = JSON.parse(args.operations)
+        operations = Array.isArray(parsed) ? parsed : [parsed]
+      } catch {
+        throw new Error('operations must be a JSON array like [{"op":"grayscale"}]')
+      }
+    }
+    if (!operations.length) throw new Error('operations required (JSON array)')
+    const res = await fetch(`${origin}/api/image/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: activeImage.dataUrl,
+        operations,
+        filename: activeImage.filename,
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok || !data.image) throw new Error(data.error || 'Image edit failed')
+    const applied = (data.image.operations ?? []) as string[]
+    return {
+      result: {
+        imageUrl: data.image.url,
+        applied,
+        note: 'Photo edited — show the result inline and describe what changed.',
+      },
+      attachment: {
+        type: 'image',
+        url: data.image.url,
+        title: `Edited · ${applied.join(', ').slice(0, 60) || activeImage.filename}`,
+      },
+    }
+  }
+
   if (toolId === 'create_document') {
     const format = String(args.format ?? 'docx').toLowerCase()
     const title = String(args.title ?? 'Document').slice(0, 200)
-    const content = String(args.content ?? '')
+    // The model may send `content` (markdown/plain) OR a ready-made `blocks`
+    // array — accept both.
+    let content = String(args.content ?? '')
+    if (!content && Array.isArray(args.blocks)) {
+      // Serialize model-provided blocks back to a parseable form.
+      content = (args.blocks as Array<Record<string, unknown>>)
+        .map((b) => {
+          if (b?.type === 'heading') return `${'#'.repeat(Math.min(4, Math.max(1, Number(b.level) || 1)))} ${String(b.text ?? '')}`
+          if (b?.type === 'bullets') return (Array.isArray(b.items) ? b.items : []).map((i: unknown) => `- ${String(i)}`).join('\n')
+          if (b?.type === 'table' && Array.isArray(b.rows))
+            return (b.rows as string[][]).map((r) => `| ${r.join(' | ')} |`).join('\n')
+          if (b?.type === 'slide') return `# ${String(b.title ?? '')}\n${(Array.isArray(b.bullets) ? b.bullets : []).map((i: unknown) => `- ${String(i)}`).join('\n')}`
+          return String(b?.text ?? '')
+        })
+        .filter(Boolean)
+        .join('\n\n')
+    }
     if (!content) throw new Error('content required')
 
-    // Build blocks from plain content (headings via lines starting with #)
-    const blocks: Array<Record<string, unknown>> = []
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      if (trimmed.startsWith('## ')) blocks.push({ type: 'heading', text: trimmed.slice(3), level: 2 })
-      else if (trimmed.startsWith('# ')) blocks.push({ type: 'heading', text: trimmed.slice(2), level: 1 })
-      else if (/^[-•*]\s/.test(trimmed)) {
-        const last = blocks[blocks.length - 1]
-        if (last?.type === 'bullets') (last.items as string[]).push(trimmed.replace(/^[-•*]\s/, ''))
-        else blocks.push({ type: 'bullets', items: [trimmed.replace(/^[-•*]\s/, '')] })
-      } else {
-        blocks.push({ type: 'paragraph', text: trimmed })
+    /* SMART CONTENT PARSER — accepts what LLMs actually send:
+     *   • JSON array of blocks ("[{\"type\":\"heading\",...}]") → real blocks
+     *     (this is what produced "documents full of raw JSON" before)
+     *   • fenced code blocks around the content → unwrapped
+     *   • markdown: #/##/### headings, -/•/* bullets, 1. numbered lists,
+     *     | pipe tables |, > quotes
+     *   • plain paragraphs otherwise */
+    const parsedBlocks = parseDocumentContent(content)
+    const blocks: Array<Record<string, unknown>> = parsedBlocks
+
+    // PDF — the professional pdfkit pipeline from the Studio exporter
+    // (real fonts, headings, lists, page breaks), not a JSON dump.
+    if (format === 'pdf') {
+      const markdown = blocksToMarkdown(blocks)
+      const res = await fetch(`${origin}/api/studio/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format: 'pdf', title, markdown }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.file) throw new Error(data.error || 'PDF creation failed')
+      const artifactId = `doc-${data.file.id ?? Date.now()}`
+      return {
+        result: {
+          downloadUrl: `${data.file.url}?download=1&title=${encodeURIComponent(title)}`,
+          format: 'pdf',
+          note: 'PDF document created — give the user the download link.',
+        },
+        attachment: {
+          type: 'document',
+          url: `${data.file.url}?download=1&title=${encodeURIComponent(title)}`,
+          title,
+          format: 'pdf',
+          size: data.file.size,
+          artifactId,
+          sourceContent: markdown,
+        },
       }
     }
+
     if (format === 'pptx') {
       // Convert to slides: each heading starts a slide
       const slides: Array<Record<string, unknown>> = []
@@ -1376,6 +1639,7 @@ export async function POST(req: NextRequest) {
     const sessionDocs = globalForDocs.chatSessionDocs ?? (globalForDocs.chatSessionDocs = new Map())
 
     let activeDoc: ActiveDoc | null = null
+    let activeImage: ActiveImage | null = null
     let attachmentContextMessage = ''
     if (attachment) {
       const ext = attachment.filename.split('.').pop()?.toLowerCase() ?? ''
@@ -1383,8 +1647,10 @@ export async function POST(req: NextRequest) {
       /* ---------- IMAGE attachments: describe via Z.ai vision ----------
        * Images previously fell into the document parser and failed with
        * "could not be parsed" — now they are analyzed by the vision model
-       * and the description is injected so the AI can discuss the image. */
+       * and the description is injected so the AI can discuss the image,
+       * and remembered as activeImage so edit_image can edit the pixels. */
       if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) {
+        activeImage = { filename: attachment.filename, dataUrl: attachment.dataUrl }
         try {
           const zai = await getZAI()
           const response = await zai.chat.completions.createVision({
@@ -1405,17 +1671,18 @@ export async function POST(req: NextRequest) {
           })
           const description = response.choices[0]?.message?.content ?? ''
           if (description.trim()) {
+            activeImage.description = description.slice(0, 500)
             attachmentContextMessage =
               `[The user attached the image "${attachment.filename}". A vision model described it for you:\n\n` +
               `${description.slice(0, 4000)}\n\n` +
-              'Answer questions about this image directly from the description. If they want it edited or transformed into something new, you can use generate_image to create a new version.]'
+              'Answer questions about this image directly from the description. If they want it EDITED (crop, brighten, grayscale, watermark, resize…), call the edit_image tool with an operations array — it edits the real pixels. If they want something NEW generated from scratch, use generate_image.]'
             console.log(`[api/chat] image attachment described: ${attachment.filename} (${description.length} chars)`)
           } else {
-            attachmentContextMessage = `[The user attached the image "${attachment.filename}" but it could not be analyzed. Ask them what they would like to do with it.]`
+            attachmentContextMessage = `[The user attached the image "${attachment.filename}". If they want it edited (crop, brighten, grayscale, watermark, resize…), call the edit_image tool with an operations array.]`
           }
         } catch (imgErr) {
           console.error('[api/chat] image vision failed:', imgErr)
-          attachmentContextMessage = `[The user attached the image "${attachment.filename}" but it could not be analyzed. Ask them what they would like to do with it.]`
+          attachmentContextMessage = `[The user attached the image "${attachment.filename}". If they want it edited (crop, brighten, grayscale, watermark, resize…), call the edit_image tool with an operations array.]`
         }
       } else {
       /* ---------- DOCUMENT attachments: parse (with legacy conversion) ---------- */
@@ -2061,6 +2328,18 @@ export async function POST(req: NextRequest) {
               send({ type: 'assistant_delta', delta })
             }
 
+            /** Task-aware routing: code requests go to the CODE specialists
+             *  (Qwen2.5-Coder-32B on HF / grok-4-fast / DeepSeek) — markedly
+             *  better real-world code for websites, apps and scripts than
+             *  the general chat models. Detected from the user's message. */
+            const llmTask: 'chat' | 'code' = (() => {
+              const m = trimmed.toLowerCase()
+              if (/```|\bfunction\b|\bclass \w+|=>\s*\{|<\/?[a-z]+>|\bapi\b.*\broute\b/.test(m)) return 'code'
+              if (/\b(write|build|create|make|generate|develop|code|implement|refactor|debug|fix)\b[^.?!]{0,40}\b(website|web ?app|app|landing page|component|react|next\.?js|html|css|javascript|typescript|python|script|function|api|backend|frontend|game|dashboard|form|bot|automation|algorithm|sql|regex|code)\b/.test(m)) return 'code'
+              if (/\b(react|next\.?js|vue|svelte|node|express|django|flask|tailwind|typescript|javascript|python|java|kotlin|swift|rust|go lang|golang|c\+\+|c#|php|ruby|sql)\b/.test(m)) return 'code'
+              return 'chat'
+            })()
+
             // 0) OPENROUTER — the primary LLM on Vercel (replaces Z.ai).
             //    Tried first when configured; emits assistant_delta chunks
             //    exactly like the Z.ai path so the frontend is unchanged.
@@ -2120,6 +2399,50 @@ export async function POST(req: NextRequest) {
               }
             }
 
+            // 0c) PLATFORM PREMIUM POOL — Hugging Face, then Grok. Dedicated
+            //     platform quota that works on Vercel (Z.ai SDK doesn't).
+            //     Task-routed models: Llama-3.3-70B / Qwen2.5-72B / DeepSeek-V3
+            //     for chat (HF stream falls back to non-streaming internally).
+            if (!didStream && hfConfigured()) {
+              try {
+                const r = await hfStreamChatCompletion(
+                  llmMessages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+                  emitDelta,
+                  { maxTokens: 4000, timeoutMs: 60_000, task: llmTask }
+                )
+                content = r.content
+                didStream = true
+                console.log(`[api/chat] served by Hugging Face: ${r.model}`)
+              } catch (hfErr) {
+                if (streamedSoFar.trim()) {
+                  content = streamedSoFar
+                  didStream = true
+                } else {
+                  console.warn(
+                    '[api/chat] Hugging Face failed, falling back:',
+                    hfErr instanceof Error ? hfErr.message : hfErr
+                  )
+                }
+              }
+            }
+            if (!didStream && xaiConfigured()) {
+              try {
+                const r = await xaiChatCompletion(
+                  llmMessages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+                  { maxTokens: 4000, timeoutMs: 60_000, task: llmTask }
+                )
+                content = r.content
+                didStream = true
+                emitDelta(r.content)
+                console.log(`[api/chat] served by Grok: ${r.model}`)
+              } catch (xaiErr) {
+                console.warn(
+                  '[api/chat] Grok failed, falling back:',
+                  xaiErr instanceof Error ? xaiErr.message : xaiErr
+                )
+              }
+            }
+
             // 1) User's connected provider — streamed, with model rotation
             //    left to streamExternalChatCompletion's fallback chain.
             if (!didStream && userProvider) {
@@ -2158,7 +2481,7 @@ export async function POST(req: NextRequest) {
                   {
                     maxTokens: 4000,
                     timeoutMs: 60_000,
-                    task: 'chat',
+                    task: llmTask,
                   }
                 )
                 content = r.content
@@ -2176,7 +2499,7 @@ export async function POST(req: NextRequest) {
                   )
                   // Last resort: non-streamed smartChat (user provider →
                   // free pool chain) and emit the visible prelude as one chunk.
-                  content = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })
+                  content = await smartChat(llmMessages, { maxTokens: 4000, task: llmTask })
                   // Emit only the visible prelude (text before any
                   // TOOL_CALL / ARTIFACT_PATCH directive) — matches the
                   // peek-buffer behaviour of the normal streaming path.
@@ -2231,7 +2554,7 @@ export async function POST(req: NextRequest) {
               let result: unknown
               let attachment: Record<string, unknown> | undefined
               try {
-                const executed = await executeChatTool(req, toolCall.tool, toolCall.args, activeDoc)
+                const executed = await executeChatTool(req, toolCall.tool, toolCall.args, activeDoc, activeImage)
                 result = executed.result
                 attachment = executed.attachment
               } catch (error) {

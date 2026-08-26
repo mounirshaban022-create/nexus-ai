@@ -5,6 +5,12 @@ import {
   openrouterChatCompletion,
   type OpenRouterMessage,
 } from './openrouter'
+import {
+  hfConfigured,
+  hfChatCompletion,
+  xaiConfigured,
+  xaiChatCompletion,
+} from './hf-ai'
 import type { AiTask } from './smart-chat-types'
 
 /**
@@ -224,6 +230,51 @@ export async function smartChat(
       console.warn(
         '[smartChat] Z.ai engine failed, falling through:',
         zaiErr instanceof Error ? zaiErr.message : zaiErr
+      )
+    }
+  }
+
+  /* ---- Layer 0c: platform premium pool (Hugging Face + xAI Grok) ----
+   * Dedicated platform quota that works in EVERY environment (unlike
+   * Z.ai, whose SDK is unreachable on Vercel). HF routes per task —
+   * Qwen2.5-Coder-32B for code, DeepSeek-V3 for documents, Llama-3.3-70B
+   * for chat. Grok (grok-4-fast) is exceptionally strong at coding and
+   * reasoning. Each engine fails fast and falls through to the next. */
+  if (hfConfigured()) {
+    try {
+      const { content } = await hfChatCompletion(messages as ExternalChatMessage[], {
+        maxTokens,
+        temperature,
+        task,
+        timeoutMs: effectiveTimeoutMs,
+      })
+      if (content.trim()) {
+        console.log(`[smartChat] served by Hugging Face (task: ${task})`)
+        return content
+      }
+    } catch (hfErr) {
+      console.warn(
+        '[smartChat] Hugging Face failed, falling through:',
+        hfErr instanceof Error ? hfErr.message : hfErr
+      )
+    }
+  }
+  if (xaiConfigured()) {
+    try {
+      const { content } = await xaiChatCompletion(messages as ExternalChatMessage[], {
+        maxTokens,
+        temperature,
+        task,
+        timeoutMs: effectiveTimeoutMs,
+      })
+      if (content.trim()) {
+        console.log(`[smartChat] served by Grok (task: ${task})`)
+        return content
+      }
+    } catch (xaiErr) {
+      console.warn(
+        '[smartChat] Grok failed, falling through:',
+        xaiErr instanceof Error ? xaiErr.message : xaiErr
       )
     }
   }

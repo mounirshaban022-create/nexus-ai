@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getZAI, zaiConfigured } from '@/lib/zai'
+import { hfAsr, hfConfigured } from '@/lib/hf-ai'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { DEFAULT_VOICE, edgeFallbackFor, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
@@ -142,17 +143,39 @@ export async function POST(req: NextRequest) {
       if (!base64Audio) {
         return NextResponse.json({ error: 'Audio is empty.' }, { status: 400 })
       }
-      try {
-        zai = await getZAI()
-      } catch (e) {
-        console.error('[api/voice/turn] Z.ai SDK unavailable for ASR:', e)
-        return NextResponse.json(
-          { error: 'Voice recognition is unavailable right now. Try typing your message instead.' },
-          { status: 503 }
-        )
+      /* PRIMARY — server-side Whisper-large-v3-turbo (Hugging Face router).
+       * Works on every deployment target (Vercel included — the Z.ai SDK
+       * is unreachable there), which is what makes voice mode actually
+       * HEAR the user in production. Z.ai ASR stays as the dev fallback. */
+      transcript = ''
+      if (hfConfigured()) {
+        try {
+          transcript = await hfAsr(base64Audio, { language: parsed.data.language })
+        } catch (hfErr) {
+          console.warn(
+            '[api/voice/turn] HF Whisper failed, falling back to Z.ai ASR:',
+            hfErr instanceof Error ? hfErr.message : hfErr
+          )
+        }
       }
-      const asr = await zai.audio.asr.create({ file_base64: base64Audio })
-      transcript = asr.text?.trim() ?? ''
+      if (!transcript) {
+        try {
+          zai = await getZAI()
+          const asr = await zai.audio.asr.create({ file_base64: base64Audio })
+          transcript = asr.text?.trim() ?? ''
+        } catch (zaiErr) {
+          console.error('[api/voice/turn] Z.ai ASR unavailable:', zaiErr)
+          // Both server engines failed — the client's on-device Whisper
+          // fallback (if any audio reached it) or a friendly no-speech.
+          return NextResponse.json({
+            transcript: '',
+            reply: '',
+            thinking: '',
+            audio: null,
+            note: 'no-speech',
+          })
+        }
+      }
     } else {
       return NextResponse.json({ error: 'Either audio or message is required.' }, { status: 400 })
     }

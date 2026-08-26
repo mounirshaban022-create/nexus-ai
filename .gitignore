@@ -66,3 +66,10 @@ worklog.md
 
 # agent tool-results (not for the repo)
 tool-results
+
+# heavyweight local tooling binaries — never commit (290MB+)
+/ocr/
+/stirling/
+/agent-ctx/*.png
+*.jar
+/jdk*/

@@ -588,10 +588,23 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
 
       setStateSafe('thinking')
 
-      /* PRIMARY — on-device Whisper (open-source, in-browser): hears the
-       * user in EVERY browser (Firefox/Safari included) and inside
-       * cross-origin iframes where Chrome's Web Speech API is broken.
-       * Falls back to the server ASR path when the engine can't load. */
+      /* PRIMARY — server-side Whisper-large-v3 (Hugging Face): the most
+       * accurate engine, zero client downloads, works in every browser and
+       * inside cross-origin iframes. The server tries HF first and Z.ai
+       * second. Only when the whole server path comes back empty does the
+       * on-device Whisper run (offline / degraded-network fallback). */
+      setCaption('')
+      const base64 = await blobToWavBase64(blob)
+      if (!alive()) return
+      try {
+        await runTurnRef.current?.({ audioBase64: base64 })
+        return
+      } catch (serverErr) {
+        if ((serverErr as Error)?.name === 'AbortError') return
+        // Server path failed entirely — fall through to on-device Whisper.
+        console.warn('[voice] server ASR path failed, trying on-device Whisper:', serverErr)
+      }
+
       if (!onDeviceAsrBroken()) {
         try {
           const text = await onDeviceTranscribe(blob, langRef.current, (pct, note) => {
@@ -605,17 +618,16 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
             await runTurnRef.current?.({ message: text })
             return
           }
-          // Nothing intelligible on-device — still try the server path
-          // (its ASR is stronger) before reporting "didn't catch that".
         } catch {
-          /* engine unavailable/timed out → server ASR below */
+          /* engine unavailable too — report below */
         }
       }
 
-      setCaption('')
-      const base64 = await blobToWavBase64(blob)
-      if (!alive()) return
-      await runTurnRef.current?.({ audioBase64: base64 })
+      // Every engine failed to hear anything.
+      if (alive() && asrTokenRef.current === token) {
+        setNoSpeech(true)
+        window.setTimeout(() => setNoSpeech(false), 2200)
+      }
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return
       if (asrTokenRef.current === token) {
@@ -873,25 +885,11 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     setLang(recLang)
 
     unlockAudio()
-    // Pre-warm the on-device Whisper engine so the one-time ~45 MB model
-    // download overlaps the user's first sentence instead of delaying it.
-    // Only where it's the PRIMARY path: inside frames (Web Speech is broken
-    // there) or browsers without Web Speech. In a first-party Chrome tab the
-    // browser's own instant recognition is used and the 45 MB download is
-    // deferred until/unless a fallback is actually needed (see the
-    // network-error switch in startListening).
-    try {
-      const framed = window.self !== window.top
-      if (framed || !getSpeechRecognition()) {
-        warmUpOnDeviceAsr((pct, note) => {
-          if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
-        })
-      }
-    } catch {
-      warmUpOnDeviceAsr((pct, note) => {
-        if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
-      })
-    }
+    // NOTE: no eager Whisper pre-warm anymore. The PRIMARY recognition path
+    // is now the SERVER-side Whisper-large-v3 (accurate, instant, zero
+    // downloads) — the on-device engine only spins up as an emergency
+    // fallback when the server path fails, so its ~45 MB one-time download
+    // is no longer spent up-front for every user.
     let cancelled = false
     const t = window.setTimeout(() => {
       if (cancelled) return

@@ -482,6 +482,9 @@ export interface AnonymousProvider {
   baseUrl: string
   models: string[]          // ordered by preference (best first)
   rpmNote: string
+  /** Present when the provider needs an Authorization header (env-token
+   * providers — Hugging Face / xAI). Anonymous providers omit it. */
+  apiKey?: string
 }
 
 export const ANONYMOUS_FREE_LLM_FALLBACKS: AnonymousProvider[] = [
@@ -532,6 +535,75 @@ export const ANONYMOUS_PROVIDER_IDS = new Set(
   ANONYMOUS_FREE_LLM_FALLBACKS.map((p) => p.id)
 )
 
+/* ------------------------------------------------------------------ */
+/* ENV-TOKEN PREMIUM PROVIDERS (Hugging Face + xAI Grok)               */
+/* ------------------------------------------------------------------ */
+/**
+ * Providers backed by platform-owned API keys from environment variables.
+ * They join the anonymous race chain at the FRONT — dedicated quota on a
+ * separate account, so the platform's capacity multiplies instead of
+ * sharing the per-IP anonymous budgets. When the env var is absent the
+ * provider simply isn't part of the chain.
+ *
+ *   HF_TOKEN     → Hugging Face Inference router (verified live):
+ *                  Llama-3.3-70B, Qwen2.5-72B, DeepSeek-V3,
+ *                  Qwen2.5-Coder-32B (code), gpt-oss-120b
+ *   XAI_API_KEY  → xAI Grok (OpenAI-compatible): grok-4-fast, grok-3-mini
+ */
+function envTokenProviders(): AnonymousProvider[] {
+  const providers: AnonymousProvider[] = []
+  const hfToken = (process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || '').trim()
+  if (hfToken) {
+    providers.push({
+      id: 'huggingface',
+      label: 'Hugging Face',
+      baseUrl: 'https://router.huggingface.co/v1',
+      apiKey: hfToken,
+      models: [
+        'meta-llama/Llama-3.3-70B-Instruct',
+        'Qwen/Qwen2.5-72B-Instruct',
+        'deepseek-ai/DeepSeek-V3',
+      ],
+      rpmNote: 'Dedicated HF Inference router quota (per-token billing)',
+    })
+  }
+  const xaiKey = (process.env.XAI_API_KEY || process.env.GROK_API_KEY || '').trim()
+  if (xaiKey) {
+    providers.push({
+      id: 'grok',
+      label: 'xAI Grok',
+      baseUrl: 'https://api.x.ai/v1',
+      apiKey: xaiKey,
+      models: ['grok-4-fast', 'grok-3-mini'],
+      rpmNote: 'xAI Grok — fast + strong reasoning/coding',
+    })
+  }
+  return providers
+}
+
+/** Extra model ordering for env-token providers, per task. */
+function envProviderModelsForTask(p: AnonymousProvider, task?: string): string[] {
+  if (p.id === 'huggingface') {
+    switch (task) {
+      case 'code':
+        return ['Qwen/Qwen2.5-Coder-32B-Instruct', 'deepseek-ai/DeepSeek-V3', 'meta-llama/Llama-3.3-70B-Instruct']
+      case 'reasoning':
+      case 'documents':
+        return ['deepseek-ai/DeepSeek-V3', 'meta-llama/Llama-3.3-70B-Instruct', 'Qwen/Qwen2.5-72B-Instruct']
+      case 'voice':
+      case 'fast':
+        return ['meta-llama/Llama-3.1-8B-Instruct', 'meta-llama/Llama-3.3-70B-Instruct']
+      default:
+        return p.models
+    }
+  }
+  if (p.id === 'grok') {
+    if (task === 'voice' || task === 'fast') return ['grok-3-mini', 'grok-4-fast']
+    return p.models
+  }
+  return p.models
+}
+
 /**
  * Calls an anonymous OpenAI-compatible /chat/completions endpoint with
  * NO Authorization header. Returns the assistant text. Throws on any
@@ -557,10 +629,16 @@ export async function anonymousChatCompletion(
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        // OpenRouter-compatible router at Kilo expects a referer/title
-        // for free-tier attribution; harmless elsewhere.
-        'HTTP-Referer': 'https://nexus-ai.app',
-        'X-Title': 'NEXUS AI',
+        // Env-token providers (HF / Grok) authenticate; the anonymous
+        // gateways must NOT receive an Authorization header.
+        ...(provider.apiKey
+          ? { Authorization: `Bearer ${provider.apiKey}` }
+          : {
+              // OpenRouter-compatible router at Kilo expects a referer/title
+              // for free-tier attribution; harmless elsewhere.
+              'HTTP-Referer': 'https://nexus-ai.app',
+              'X-Title': 'NEXUS AI',
+            }),
       },
       body: JSON.stringify({
         model,
@@ -573,10 +651,11 @@ export async function anonymousChatCompletion(
       choices?: Array<{
         message?: { content?: string | null; reasoning?: string | null }
       }>
-      error?: { message?: string }
+      error?: { message?: string } | string
     }
     if (!res.ok) {
-      throw new Error(data.error?.message || `Provider ${provider.id} responded ${res.status}`)
+      const err = typeof data.error === 'string' ? data.error : data.error?.message
+      throw new Error(err || `Provider ${provider.id} responded ${res.status}`)
     }
     const choice = data.choices?.[0]?.message
     const content = choice?.content ?? choice?.reasoning
@@ -605,17 +684,22 @@ function chainOrderForTask(task?: AiTask): AnonymousProvider[] {
   const llm7 = byId.get('llm7')!
   const ovh = byId.get('ovhcloud')!
   const kilo = byId.get('kilocode')!
+  // Premium env-token providers (HF / Grok) join the chain — they lead
+  // with their own dedicated quota; the anonymous free pool follows.
+  const env = envTokenProviders().map((p) => ({
+    ...p,
+    models: envProviderModelsForTask(p, task),
+  }))
   switch (task) {
     case 'reasoning':
     case 'documents':
     case 'code':
-      return [kilo, llm7, ovh] // big-model engines first (120B/550B)
+      return [...env, kilo, llm7, ovh] // premium + big-model engines first
     case 'fast':
-      return [llm7, ovh, kilo] // small instant engines first
+      return [...env, llm7, ovh, kilo] // small instant engines first
     default:
-      // CHAT: quality-first — Kilo's nemotron-120B answers in ~1.4s with
-      // markedly better quality than the small conversational models.
-      return [kilo, llm7, ovh]
+      // CHAT: quality-first — premium pool + Kilo's nemotron-120B.
+      return [...env, kilo, llm7, ovh]
   }
 }
 
@@ -801,8 +885,12 @@ async function streamAnonymousCompletion(
     signal,
     headers: {
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://nexus-ai.app',
-      'X-Title': 'NEXUS AI',
+      ...(provider.apiKey
+        ? { Authorization: `Bearer ${provider.apiKey}` }
+        : {
+            'HTTP-Referer': 'https://nexus-ai.app',
+            'X-Title': 'NEXUS AI',
+          }),
     },
     body: JSON.stringify({
       model,
