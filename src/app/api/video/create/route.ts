@@ -323,8 +323,10 @@ export async function POST(req: NextRequest) {
 
         // Persist the finished video to the library DB — base64 bytes ride
         // along so the file survives Vercel's ephemeral /tmp across lambdas.
-        try {
-          const videoRecord = await db.generatedVideo.create({
+        // If the live DB lacks the `data` column (pre-migration), retry
+        // without it so the video still lands (schema-drift resilience).
+        const persistDone = async (withData: boolean) =>
+          db.generatedVideo.create({
             data: {
               prompt,
               scenes: sceneCount,
@@ -333,9 +335,15 @@ export async function POST(req: NextRequest) {
               url: job.url,
               jobId: id,
               status: 'done',
-              data: finalBuf.toString('base64'),
+              ...(withData ? { data: finalBuf.toString('base64') } : {}),
               userId: user?.id ?? null,
             },
+          })
+        try {
+          const videoRecord = await persistDone(true).catch((e: unknown) => {
+            const msg = e instanceof Error ? e.message : ''
+            if (/data|column/i.test(msg)) return persistDone(false)
+            throw e
           })
           // Mirror to Supabase — no-op when unconfigured
           if (videoRecord.userId) {

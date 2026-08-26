@@ -121,16 +121,35 @@ export async function POST(req: NextRequest) {
     await mkdir(IMAGES_DIR, { recursive: true }).catch(() => {})
     await writeFile(path.join(IMAGES_DIR, `${filename}.png`), buffer_).catch(() => {})
 
-    const record = await db.generatedImage.create({
-      data: {
-        prompt: trimmedPrompt,
-        size: chosenSize,
-        provider: usedEngine,
-        url: `/api/image/file/${filename}`,
-        data: buffer_.toString('base64'),
-        userId: user?.id ?? null,
-      },
-    })
+    // Persist with the base64 payload; if the live DB hasn't been migrated
+    // to the `data` column yet, retry without it (schema-drift resilience —
+    // /tmp still serves warm requests).
+    let record
+    try {
+      record = await db.generatedImage.create({
+        data: {
+          prompt: trimmedPrompt,
+          size: chosenSize,
+          provider: usedEngine,
+          url: `/api/image/file/${filename}`,
+          data: buffer_.toString('base64'),
+          userId: user?.id ?? null,
+        },
+      })
+    } catch (dataColErr) {
+      const msg = dataColErr instanceof Error ? dataColErr.message : ''
+      if (!/data|column/i.test(msg)) throw dataColErr
+      console.warn('[api/image] data column missing — persisting metadata only')
+      record = await db.generatedImage.create({
+        data: {
+          prompt: trimmedPrompt,
+          size: chosenSize,
+          provider: usedEngine,
+          url: `/api/image/file/${filename}`,
+          userId: user?.id ?? null,
+        },
+      })
+    }
     if (record.userId) {
       void supabaseUpsert('library_items', {
         id: record.id,
