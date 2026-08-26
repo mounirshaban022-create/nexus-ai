@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { getSession } from '@/lib/auth'
+import { getVerifiedSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 
 /**
@@ -27,7 +27,7 @@ const createSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to view memories.' }, { status: 401 })
   }
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to save memories.' }, { status: 401 })
   }

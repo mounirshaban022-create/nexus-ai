@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { getSession } from '@/lib/auth'
+import { getVerifiedSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 
 /**
@@ -23,7 +23,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to edit memories.' }, { status: 401 })
   }
@@ -69,7 +69,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to delete memories.' }, { status: 401 })
   }

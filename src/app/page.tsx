@@ -96,6 +96,24 @@ export default function Page() {
   const [directoryOpen, setDirectoryOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
 
+  // ?voice=1 deep link — the voice overlay's "Open voice in a new tab"
+  // escape hatch (for embedded previews where the browser blocks the mic)
+  // lands here and jumps straight into voice mode in a first-party tab,
+  // where the browser will prompt for microphone permission.
+  // NOTE: must stay an effect (not a lazy initializer) — the server-rendered
+  // HTML can't know the query param, so setting it during first render would
+  // cause a hydration mismatch.
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get('voice') === '1') {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- deep-link read is client-only by design
+        setVoiceOpen(true)
+      }
+    } catch {
+      /* no-op */
+    }
+  }, [])
+
   const handleNewChat = useCallback(() => {
     setActiveSessionId(undefined)
     setPinnedAgent(null)
@@ -160,6 +178,9 @@ export default function Page() {
       <>
         <NexusLanding onJoin={() => setShowAuth(true)} onGuest={() => setIsGuest(true)} />
         {showAuth && <NexusAuthModal open onOpenChange={handleAuthOpenChange} />}
+        {/* ?voice=1 deep link works from the landing too — voice chat is a
+            guest-capable flow (sessions are server-side and unauthenticated). */}
+        <VoiceOverlay open={voiceOpen} onOpenChange={setVoiceOpen} />
       </>
     )
   }

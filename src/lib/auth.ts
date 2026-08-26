@@ -71,6 +71,32 @@ export async function getSession(req: NextRequest): Promise<{ userId: string } |
   return verifyToken(token)
 }
 
+/**
+ * DB-verified session: the JWT is valid AND the referenced user row still
+ * exists. Returns null when either check fails.
+ *
+ * WHY: session cookies live for 30 days, but the user row can disappear
+ * under a valid cookie — e.g. the Supabase schema was re-provisioned after
+ * the user signed up. Writing rows with such a stale userId then crashes
+ * with `Foreign key constraint violated on ChatSession_userId_fkey`.
+ * Callers that STAMP rows with userId must use this instead of getSession
+ * so a wiped account degrades to guest/401 instead of a 500.
+ */
+export async function getVerifiedSession(req: NextRequest): Promise<{ userId: string } | null> {
+  const session = await getSession(req)
+  if (!session) return null
+  try {
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      select: { id: true },
+    })
+    return user ? session : null
+  } catch {
+    // DB unreachable — treat as anonymous rather than throwing.
+    return null
+  }
+}
+
 /** Look up the user from the session cookie. Returns the user WITHOUT passwordHash. */
 export async function getCurrentUser(req: NextRequest) {
   const session = await getSession(req)

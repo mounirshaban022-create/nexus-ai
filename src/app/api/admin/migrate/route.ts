@@ -246,6 +246,7 @@ export async function GET(req: NextRequest) {
 
   const statements = parseSqlStatements(sqlText)
   const executed: string[] = []
+  const skipped: string[] = []
   const failed: { index: number; sql: string; error: string }[] = []
   try {
     for (let i = 0; i < statements.length; i++) {
@@ -257,9 +258,16 @@ export async function GET(req: NextRequest) {
         executed.push(head)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        failed.push({ index: i, sql: head, error: msg })
-        // Continue — many failures (e.g., "table doesn't exist" on a
-        // redundant DROP) are non-fatal. We report all of them.
+        // The schema file is idempotent (IF NOT EXISTS everywhere), but
+        // Postgres has no `ADD CONSTRAINT IF NOT EXISTS` — a re-run reports
+        // "already exists" for constraints. That is a benign skip, not a
+        // failure: the object is present either way.
+        if (/already exists/i.test(msg)) {
+          skipped.push(head)
+        } else {
+          failed.push({ index: i, sql: head, error: msg })
+        }
+        // Continue — failures are reported, never fatal.
       }
     }
   } finally {
@@ -314,6 +322,7 @@ export async function GET(req: NextRequest) {
     sqlFile: sqlPath,
     sqlStatements: statements.length,
     executedCount: executed.length,
+    skippedAlreadyExists: skipped.length,
     failed,
     dbUrlOverride: dbUrlOverride ? '(override active)' : '(using process.env.DATABASE_URL)',
     database: info,

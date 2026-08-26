@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { smartChat } from '@/lib/smart-chat'
 import { getActiveAiProvider } from '@/lib/ai-providers'
-import { getSession } from '@/lib/auth'
+import { getVerifiedSession } from '@/lib/auth'
 import { getAgentMeta, buildPersonaSystemPrompt, getDivision } from '@/lib/agency'
 import { routeMessage, type RoutingDecision } from '@/lib/orchestrator'
 import { getSupabaseAdmin, supabaseUpsert } from '@/lib/supabase' 
@@ -14,12 +14,14 @@ import { getSupabaseAdmin, supabaseUpsert } from '@/lib/supabase'
  * where any client could set `x-supabase-user-id: <victim-uuid>` and write
  * to Supabase under another user's id via the service-role client.
  *
- * Returns null when the request is anonymous/guest (no cookie or invalid
- * signature) — guest chat continues to work, just without user attribution
- * or cross-device cloud sync.
+ * Returns null when the request is anonymous/guest (no cookie, invalid
+ * signature, OR the user row no longer exists — e.g. the DB was re-provisioned
+ * after a 30-day cookie was issued) — guest chat continues to work, just
+ * without user attribution or cross-device cloud sync. The DB-existence check
+ * is what prevents `Foreign key constraint violated on ChatSession_userId_fkey`.
  */
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   return session?.userId ?? null
 }
 import { rateLimit, clientKey } from '@/lib/rate-limit'
@@ -1558,22 +1560,43 @@ export async function POST(req: NextRequest) {
         })
       : null
     if (!session) {
-      session = await db.chatSession.create({
-        data: {
-          kind: 'chat',
-          title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
-          // Phase 0 Bug 3: stamp ownership on creation.
-          userId: verifiedUserId,
-          // The Agency: stamp the specialist persona on creation. A persona
-          // provided up-front is PINNED (sticky); otherwise auto mode runs.
-          agentSlug: verifiedAgentSlug,
-          agentPinned: Boolean(verifiedAgentSlug),
-          // Phase 1 P3: stamp the verified project binding on creation.
-          // null when: guest, no projectId provided, or projectId not owned
-          // by this user (verifiedProjectId is null in all three cases).
-          projectId: verifiedProjectId,
-        },
-      })
+      // Belt-and-suspenders: if the user row vanished between the verified
+      // lookup above and this create (row deleted mid-request), the FK would
+      // still throw — retry once as a guest so chat NEVER hard-fails.
+      try {
+        session = await db.chatSession.create({
+          data: {
+            kind: 'chat',
+            title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
+            // Phase 0 Bug 3: stamp ownership on creation.
+            userId: verifiedUserId,
+            // The Agency: stamp the specialist persona on creation. A persona
+            // provided up-front is PINNED (sticky); otherwise auto mode runs.
+            agentSlug: verifiedAgentSlug,
+            agentPinned: Boolean(verifiedAgentSlug),
+            // Phase 1 P3: stamp the verified project binding on creation.
+            // null when: guest, no projectId provided, or projectId not owned
+            // by this user (verifiedProjectId is null in all three cases).
+            projectId: verifiedProjectId,
+          },
+        })
+      } catch (createErr) {
+        const msg = createErr instanceof Error ? createErr.message : String(createErr)
+        if (msg.includes('Foreign key constraint')) {
+          session = await db.chatSession.create({
+            data: {
+              kind: 'chat',
+              title: trimmed.slice(0, 60) + (trimmed.length > 60 ? '…' : ''),
+              userId: null,
+              agentSlug: verifiedAgentSlug,
+              agentPinned: Boolean(verifiedAgentSlug),
+              projectId: null,
+            },
+          })
+        } else {
+          throw createErr
+        }
+      }
       // Mirror to Supabase (cloud) if user is authenticated
       if (verifiedUserId) {
         await supabaseUpsert('chat_sessions', {

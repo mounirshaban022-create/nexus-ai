@@ -29,6 +29,17 @@ async function getPipeline() {
       )
       env.allowLocalModels = false
 
+      // Cross-origin iframes (embedded previews) have no SharedArrayBuffer
+      // (crossOriginIsolated=false) — ORT's multi-threaded wasm then fails
+      // to spawn its workers and the backend never initializes. Forcing a
+      // single thread there is the documented workaround; single-thread
+      // whisper-tiny stays real-time on any real CPU.
+      try {
+        env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? 2 : 1
+      } catch {
+        /* older transformers builds — auto is fine */
+      }
+
       const progress_callback = (p) => {
         if (p && p.status === 'progress' && p.total) {
           const percent = Math.round((p.loaded / p.total) * 100)
@@ -36,23 +47,27 @@ async function getPipeline() {
         }
       }
 
-      // Try WebGPU first (near-instant on supporting GPUs), fall back to WASM.
+      // Try WebGPU first (near-instant on supporting GPUs). The WASM (CPU)
+      // fallback uses whisper-TINY — base saturates weak/low-core devices
+      // for tens of seconds during ONNX compile, while tiny stays real-time
+      // even on 2-core machines (accuracy trade is worth it vs. hanging).
       const attempts = [
-        { device: 'webgpu', dtype: 'q8' },
-        { device: 'wasm', dtype: 'q8' },
+        { model: 'onnx-community/whisper-base', device: 'webgpu', dtype: 'q8' },
+        { model: 'onnx-community/whisper-tiny', device: 'wasm', dtype: 'q8' },
       ]
       let lastErr = null
       for (const cfg of attempts) {
         if (cfg.device === 'webgpu' && !self.navigator.gpu) continue
         try {
-          pipe = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base', {
+          pipe = await pipeline('automatic-speech-recognition', cfg.model, {
             ...cfg,
             progress_callback,
           })
-          self.postMessage({ type: 'ready', device: cfg.device })
+          self.postMessage({ type: 'ready', device: cfg.device, model: cfg.model })
           return pipe
         } catch (e) {
           lastErr = e
+          pipe = null
         }
       }
       throw lastErr || new Error('Could not initialize the speech engine.')

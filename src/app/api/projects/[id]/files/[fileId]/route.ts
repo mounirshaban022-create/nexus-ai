@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getSession } from '@/lib/auth'
+import { getVerifiedSession } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 
 /**
@@ -18,7 +18,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; fileId: string }> }
 ) {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to view project files.' }, { status: 401 })
   }
@@ -56,7 +56,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; fileId: string }> }
 ) {
-  const session = await getSession(req)
+  const session = await getVerifiedSession(req)
   if (!session) {
     return NextResponse.json({ error: 'Sign in to delete project files.' }, { status: 401 })
   }

@@ -638,6 +638,11 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
         if (micStreamRef.current && typeof MediaRecorder !== 'undefined') {
           void startAsrLoop()
         } else {
+          // No mic stream (blocked by the embedding iframe's permission
+          // policy, or denied) and no usable Web Speech — flip to the
+          // micDenied visual state so the prominent card + "open in a new
+          // tab" CTA (which deep-links to ?voice=1) renders, not just the
+          // small error line. Text input stays available below either way.
           setStateSafe('idle')
           if (!micDeniedRef.current && !mutedRef.current) {
             let framed = false
@@ -646,9 +651,12 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
             } catch {
               framed = true
             }
+            micDeniedRef.current = true
+            setMicDenied(true)
+            setInterim('')
             setError(
               framed
-                ? 'Microphone is blocked inside this embedded preview — open the app in a new tab (↗) and NEXUS will hear you. You can also type below; replies are still spoken.'
+                ? 'The microphone is blocked inside this embedded preview. Open the app in a new tab — NEXUS will hear you there. You can also type below; replies are still spoken.'
                 : 'Voice input is unavailable in this browser — type below and NEXUS will still reply out loud.'
             )
           }
@@ -696,9 +704,22 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
         } else if (kind === 'audio-capture' || kind === 'network') {
           netErrRef.current += 1
           if (netErrRef.current >= 3) {
-            stopRecognition()
-            setStateSafe('idle')
-            setError('Could not reach the speech service — type below; replies are still spoken aloud.')
+            if (micStreamRef.current && typeof MediaRecorder !== 'undefined') {
+              // The browser's speech SERVICE is unreachable (common on some
+              // networks) but the raw mic works — switch to the on-device
+              // Whisper engine instead of giving up: NEXUS keeps hearing.
+              stopRecognition()
+              forceRecorderRef.current = true
+              warmUpOnDeviceAsr((pct, note) => {
+                if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
+              })
+              setCaption('Switching to the on-device ear…')
+              window.setTimeout(() => startListeningRef.current?.(), 200)
+            } else {
+              stopRecognition()
+              setStateSafe('idle')
+              setError('Could not reach the speech service — type below; replies are still spoken aloud.')
+            }
           } else {
             setError('Speech service hiccup — retrying…')
           }
@@ -854,9 +875,23 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     unlockAudio()
     // Pre-warm the on-device Whisper engine so the one-time ~45 MB model
     // download overlaps the user's first sentence instead of delaying it.
-    warmUpOnDeviceAsr((pct, note) => {
-      if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
-    })
+    // Only where it's the PRIMARY path: inside frames (Web Speech is broken
+    // there) or browsers without Web Speech. In a first-party Chrome tab the
+    // browser's own instant recognition is used and the 45 MB download is
+    // deferred until/unless a fallback is actually needed (see the
+    // network-error switch in startListening).
+    try {
+      const framed = window.self !== window.top
+      if (framed || !getSpeechRecognition()) {
+        warmUpOnDeviceAsr((pct, note) => {
+          if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
+        })
+      }
+    } catch {
+      warmUpOnDeviceAsr((pct, note) => {
+        if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
+      })
+    }
     let cancelled = false
     const t = window.setTimeout(() => {
       if (cancelled) return
@@ -1307,18 +1342,22 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                   <div className="min-w-0 flex-1">
                     <p className="text-xs leading-relaxed text-zinc-300">
                       {inIframe
-                        ? 'The microphone is blocked in this preview frame. Open the app in a new tab to talk — or type below and NEXUS will still reply out loud.'
+                        ? 'The microphone is blocked in this preview frame. Open the app in a new tab to talk — voice mode starts instantly there.'
                         : 'Microphone access is blocked. Allow the mic in your browser to talk — or type below and NEXUS will still reply out loud.'}
                     </p>
                     {inIframe && (
                       <a
-                        href={typeof window !== 'undefined' ? window.location.href : '#'}
+                        href={
+                          typeof window !== 'undefined'
+                            ? `${window.location.origin}${window.location.pathname}?voice=1`
+                            : '#'
+                        }
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-2 inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[#f5a623]/40 bg-[#f5a623]/15 px-3 text-xs font-semibold text-[#f5a623] transition hover:bg-[#f5a623]/25"
                       >
                         <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                        Open in new tab for voice
+                        Open voice in a new tab
                       </a>
                     )}
                   </div>
