@@ -79,6 +79,7 @@ model GeneratedVideo {
   url       String?
   jobId     String? @unique
   status    String   @default("planning") // planning | images | narration | rendering | done | error
+  error     String?
   data      String?  // base64 bytes of the final MP4 — survives Vercel's ephemeral /tmp
   userId    String?
   user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)

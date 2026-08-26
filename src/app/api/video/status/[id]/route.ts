@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
                 ? 'Video generation failed on the server.'
                 : 'Rendering your video…',
           url: row.url ?? (status === 'done' ? `/api/video/file/${id}` : ''),
-          error: status === 'error' ? 'Video generation failed on the server.' : '',
+          error: status === 'error' ? row.error || 'Video generation failed on the server.' : '',
           prompt: row.prompt,
           scenes: null,
         },

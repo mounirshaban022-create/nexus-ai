@@ -419,9 +419,10 @@ export async function POST(req: NextRequest) {
               url: null,
               jobId: id,
               status: 'error',
+              error: job.error?.slice(0, 500),
               userId: user?.id ?? null,
             },
-            update: { status: 'error' },
+            update: { status: 'error', error: job.error?.slice(0, 500) },
           })
         } catch (e) {
           console.error('[video] db save (error path) failed:', e)
