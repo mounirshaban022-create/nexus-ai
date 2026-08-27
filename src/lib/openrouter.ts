@@ -22,6 +22,8 @@ export interface OpenRouterChatOptions {
   model?: string
   /** Hard timeout for the whole call (default 60s). */
   timeoutMs?: number
+  /** External abort signal (e.g. the premium-pool first-delta watchdog). */
+  signal?: AbortSignal
 }
 
 interface OpenRouterConfig {
@@ -120,15 +122,15 @@ export async function openrouterChatCompletion(
 
   const model = opts.model || cfg.defaultModel
   const timeoutMs = opts.timeoutMs ?? 60_000
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal
 
   let res: Response
   try {
     res = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: buildHeaders(cfg),
-      signal: controller.signal,
+      signal,
       body: JSON.stringify({
         model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -138,14 +140,12 @@ export async function openrouterChatCompletion(
       }),
     })
   } catch (err) {
-    clearTimeout(timer)
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('aborted') || msg.toLowerCase().includes('abort')) {
       throw new Error(`OpenRouter request timed out after ${timeoutMs / 1000}s`)
     }
     throw new Error(`OpenRouter network error: ${msg}`)
   }
-  clearTimeout(timer)
 
   const bodyText = await res.text()
   if (!res.ok) {
@@ -204,15 +204,15 @@ export async function openrouterStreamChat(
 
   const model = opts.model || cfg.defaultModel
   const timeoutMs = opts.timeoutMs ?? 60_000
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal
 
   let res: Response
   try {
     res = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: buildHeaders(cfg),
-      signal: controller.signal,
+      signal,
       body: JSON.stringify({
         model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -222,7 +222,6 @@ export async function openrouterStreamChat(
       }),
     })
   } catch (err) {
-    clearTimeout(timer)
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('aborted') || msg.toLowerCase().includes('abort')) {
       throw new Error(`OpenRouter stream timed out after ${timeoutMs / 1000}s`)
@@ -231,20 +230,17 @@ export async function openrouterStreamChat(
   }
 
   if (!res.ok || !res.body) {
-    clearTimeout(timer)
     const bodyText = await res.text().catch(() => '')
     throw await httpErrorToError(res.status, bodyText, 'stream')
   }
 
   // Pass the upstream SSE bytes straight through so the chat route can
   // reuse the existing `consumeSSEWithPeek` directive-safe consumer.
-  // We hook the upstream ReadableStream to a passthrough that clears the
-  // timer on close and re-emits the raw SSE frames.
+  // The passthrough re-emits the raw SSE frames and appends the OpenAI-style
+  // [DONE] sentinel when the upstream stream ends.
   const upstream = res.body
   const reader = upstream.getReader()
   const encoder = new TextEncoder()
-
-  clearTimeout(timer) // handshake done; per-read timeouts handled by AbortController
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {

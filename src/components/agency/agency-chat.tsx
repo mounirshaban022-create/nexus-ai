@@ -196,8 +196,13 @@ export function AgencyChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const userScrolledUpRef = useRef(false)
   const streamIdRef = useRef<string | null>(null)
-  const pendingDeltaRef = useRef('')
-  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  /** Smooth word-by-word reveal queue (same system as nexus/chat.tsx). */
+  const revealRef = useRef<{ id: string; backlog: string; ended: boolean }>({
+    id: '',
+    backlog: '',
+    ended: true,
+  })
+  const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   /* ---------- prefill a suggested opener into the composer ---------- */
@@ -278,37 +283,72 @@ export function AgencyChat({
 
   /* ---------- streaming helpers ---------- */
 
-  const appendDelta = useCallback((delta: string) => {
-    const id = streamIdRef.current
+  const appendToMessage = useCallback((id: string, delta: string) => {
     if (!id || !delta) return
     setMessages((prev) =>
       prev.map((m) => (m.id === id ? { ...m, content: m.content + delta } : m))
     )
   }, [])
 
-  /** Deltas are buffered and flushed every 80ms so react-markdown is not
-   * re-parsed on every single token — keeps long streams silky. */
-  const startDeltaFlusher = useCallback(() => {
-    if (flushTimerRef.current) return
-    flushTimerRef.current = setInterval(() => {
-      if (!pendingDeltaRef.current) return
-      const chunk = pendingDeltaRef.current
-      pendingDeltaRef.current = ''
-      appendDelta(chunk)
-    }, 80)
-  }, [appendDelta])
+  /* ---------- SMOOTH WORD-BY-WORD REVEAL ----------
+   * Same paced queue as the main chat: a 30ms tick releases a few
+   * characters at a time with automatic catch-up, so text ALWAYS
+   * renders word-by-word regardless of how the provider delivers it. */
+  const ensureRevealLoop = useCallback(() => {
+    if (revealTimerRef.current) return
+    revealTimerRef.current = setInterval(() => {
+      const st = revealRef.current
+      if (!st.id) return
+      if (!st.backlog) {
+        if (st.ended) {
+          if (revealTimerRef.current) clearInterval(revealTimerRef.current)
+          revealTimerRef.current = null
+          st.id = ''
+        }
+        return
+      }
+      let pace = 2 + Math.ceil(st.backlog.length / 40)
+      if (st.ended) pace *= 2
+      const chunk = st.backlog.slice(0, Math.min(80, pace))
+      st.backlog = st.backlog.slice(chunk.length)
+      appendToMessage(st.id, chunk)
+    }, 30)
+  }, [appendToMessage])
 
-  const stopDeltaFlusher = useCallback(() => {
-    if (flushTimerRef.current) {
-      clearInterval(flushTimerRef.current)
-      flushTimerRef.current = null
+  const queueReveal = useCallback(
+    (id: string, text: string, ended = false) => {
+      if (!id || !text) return
+      const st = revealRef.current
+      if (st.id !== id) {
+        if (st.id && st.backlog) appendToMessage(st.id, st.backlog)
+        st.id = id
+        st.backlog = ''
+        st.ended = false
+      }
+      st.backlog += text
+      if (ended) st.ended = true
+      ensureRevealLoop()
+    },
+    [appendToMessage, ensureRevealLoop]
+  )
+
+  const endReveal = useCallback(() => {
+    const st = revealRef.current
+    if (st.id) st.ended = true
+    ensureRevealLoop()
+  }, [ensureRevealLoop])
+
+  const flushRevealNow = useCallback(() => {
+    const st = revealRef.current
+    if (st.id && st.backlog) appendToMessage(st.id, st.backlog)
+    st.backlog = ''
+    st.ended = true
+    if (revealTimerRef.current) {
+      clearInterval(revealTimerRef.current)
+      revealTimerRef.current = null
     }
-    if (pendingDeltaRef.current) {
-      const chunk = pendingDeltaRef.current
-      pendingDeltaRef.current = ''
-      appendDelta(chunk)
-    }
-  }, [appendDelta])
+  }, [appendToMessage])
+
 
   /** Patch the live tool chip that matches (toolName, index). */
   const updateToolMessage = useCallback(
@@ -416,12 +456,12 @@ export function AgencyChat({
                 break
               }
               case 'assistant_delta': {
-                pendingDeltaRef.current += event.delta
-                startDeltaFlusher()
+                const id = streamIdRef.current
+                if (id) queueReveal(id, event.delta)
                 break
               }
               case 'assistant_end': {
-                stopDeltaFlusher()
+                endReveal()
                 const id = streamIdRef.current
                 streamIdRef.current = null
                 if (id) {
@@ -441,34 +481,37 @@ export function AgencyChat({
                 break
               }
               case 'assistant': {
-                // Full-message fallback (non-streaming providers)
-                stopDeltaFlusher()
+                // Full-message fallback (non-streaming providers) -
+                // revealed word-by-word through the same paced queue.
+                const attachments = Array.isArray(event.attachments) ? event.attachments : []
                 const id = streamIdRef.current
                 streamIdRef.current = null
-                const attachments = Array.isArray(event.attachments) ? event.attachments : []
                 if (id) {
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === id
                         ? {
                             ...m,
-                            content: event.content,
+                            content: '',
                             streaming: false,
                             ...(attachments.length > 0 ? { attachments } : {}),
                           }
                         : m
                     )
                   )
+                  queueReveal(id, event.content, true)
                 } else {
+                  const freshId = `a-${Date.now()}`
                   setMessages((prev) => [
                     ...prev,
                     {
-                      id: `a-${Date.now()}`,
+                      id: freshId,
                       role: 'assistant',
-                      content: event.content,
+                      content: '',
                       ...(attachments.length > 0 ? { attachments } : {}),
                     },
                   ])
+                  queueReveal(freshId, event.content, true)
                 }
                 break
               }
@@ -508,6 +551,8 @@ export function AgencyChat({
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        // Error path — stop animating and show whatever text arrived.
+        flushRevealNow()
         setMessages((prev) => [
           ...prev,
           {
@@ -521,13 +566,13 @@ export function AgencyChat({
           },
         ])
       } finally {
-        stopDeltaFlusher()
+        endReveal()
         streamIdRef.current = null
         setStreaming(false)
         setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)))
       }
     },
-    [activeSessionId, streaming, thinkingEnabled, agentSlug, startDeltaFlusher, stopDeltaFlusher, updateToolMessage]
+    [activeSessionId, streaming, thinkingEnabled, agentSlug, queueReveal, endReveal, flushRevealNow, updateToolMessage]
   )
 
   const startNew = () => {

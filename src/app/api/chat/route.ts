@@ -28,8 +28,7 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat, streamExternalChatCompletion } from '@/lib/ai-providers'
 import { zaiStreamChat, zaiOnCooldown, zaiConfigured, getZAI } from '@/lib/zai'
-import { openrouterConfigured, openrouterStreamChatCallback } from '@/lib/openrouter'
-import { hfConfigured, hfStreamChatCompletion, xaiConfigured, xaiChatCompletion } from '@/lib/hf-ai'
+import { premiumStreamChat } from '@/lib/premium-pool'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listAllSkills } from '@/lib/cli-skills'
@@ -2397,39 +2396,9 @@ export async function POST(req: NextRequest) {
               return 'chat'
             })()
 
-            // 0) OPENROUTER — the primary LLM on Vercel (replaces Z.ai).
-            //    Tried first when configured; emits assistant_delta chunks
-            //    exactly like the Z.ai path so the frontend is unchanged.
-            //    On Vercel Z.ai's SDK isn't bundled — this branch handles
-            //    every chat request. In the sandbox it's also tried first
-            //    when OPENROUTER_API_KEY is set (better quality than the
-            //    anonymous free pool); Z.ai remains a fallback below.
-            if (openrouterConfigured()) {
-              try {
-                content = await openrouterStreamChatCallback(
-                  llmMessages as Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string }>,
-                  emitDelta,
-                  { maxTokens: 4000, timeoutMs: 60_000 }
-                )
-                didStream = true
-                console.log('[api/chat] served by OpenRouter (primary)')
-              } catch (orErr) {
-                if (streamedSoFar.trim()) {
-                  // Partial OpenRouter output already on screen — keep it.
-                  content = streamedSoFar
-                  didStream = true
-                } else {
-                  console.warn(
-                    '[api/chat] OpenRouter failed, falling back:',
-                    orErr instanceof Error ? orErr.message : orErr
-                  )
-                }
-              }
-            }
-
-            // 0b) Z.AI BUILT-IN ENGINE — the platform's millisecond-latency
-            //    gateway (GLM). Serves the request FIRST when healthy; the
-            //    circuit breaker skips it automatically after failures.
+            // 0) Z.AI BUILT-IN ENGINE — the platform's millisecond-latency
+            //    gateway (GLM). Serves the request FIRST in the sandbox;
+            //    the circuit breaker skips it automatically after failures.
             //    This is the root fix for "the AI is extremely slow": the
             //    anonymous free pool (5-50s) only runs as a fallback now.
             //    Only attempted in the sandbox (zaiConfigured() === true).
@@ -2456,47 +2425,37 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // 0c) PLATFORM PREMIUM POOL — Hugging Face, then Grok. Dedicated
-            //     platform quota that works on Vercel (Z.ai SDK doesn't).
-            //     Task-routed models: Llama-3.3-70B / Qwen2.5-72B / DeepSeek-V3
-            //     for chat (HF stream falls back to non-streaming internally).
-            if (!didStream && hfConfigured()) {
+            // 0b) PREMIUM AI POOL — ROUND-ROBIN LOAD BALANCING.
+            //     All platform AI accounts (OpenRouter, Hugging Face, xAI
+            //     Grok, Vercel AI Gateway, Agnes) form one rotating pool:
+            //     every request starts at the NEXT provider in the rotation,
+            //     so usage spreads evenly across accounts and no single
+            //     quota runs dry. A provider that fails (429/402/5xx) or
+            //     doesn't emit its first delta within ~14s is skipped
+            //     mid-flight and the next one takes over — seamlessly.
+            //     Every provider streams word-by-word (SSE).
+            if (!didStream) {
               try {
-                const r = await hfStreamChatCompletion(
+                const r = await premiumStreamChat(
                   llmMessages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
                   emitDelta,
-                  { maxTokens: 4000, timeoutMs: 60_000, task: llmTask }
+                  { maxTokens: 4000, timeoutMs: 90_000, task: llmTask }
                 )
                 content = r.content
                 didStream = true
-                console.log(`[api/chat] served by Hugging Face: ${r.model}`)
-              } catch (hfErr) {
+                console.log(`[api/chat] served by premium pool: ${r.providerId}/${r.model}`)
+              } catch (poolErr) {
                 if (streamedSoFar.trim()) {
+                  // A provider streamed part of the answer then died — keep
+                  // the visible partial (retrying would duplicate it).
                   content = streamedSoFar
                   didStream = true
                 } else {
                   console.warn(
-                    '[api/chat] Hugging Face failed, falling back:',
-                    hfErr instanceof Error ? hfErr.message : hfErr
+                    '[api/chat] premium pool failed, falling back:',
+                    poolErr instanceof Error ? poolErr.message : poolErr
                   )
                 }
-              }
-            }
-            if (!didStream && xaiConfigured()) {
-              try {
-                const r = await xaiChatCompletion(
-                  llmMessages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-                  { maxTokens: 4000, timeoutMs: 60_000, task: llmTask }
-                )
-                content = r.content
-                didStream = true
-                emitDelta(r.content)
-                console.log(`[api/chat] served by Grok: ${r.model}`)
-              } catch (xaiErr) {
-                console.warn(
-                  '[api/chat] Grok failed, falling back:',
-                  xaiErr instanceof Error ? xaiErr.message : xaiErr
-                )
               }
             }
 

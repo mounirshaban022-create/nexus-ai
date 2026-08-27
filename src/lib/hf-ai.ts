@@ -98,7 +98,7 @@ interface RouterChatResponse {
  */
 export async function hfChatCompletion(
   messages: HfChatMessage[],
-  opts: { task?: AiTaskKind; maxTokens?: number; temperature?: number; timeoutMs?: number } = {}
+  opts: { task?: AiTaskKind; maxTokens?: number; temperature?: number; timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<{ content: string; model: string }> {
   const token = hfToken()
   if (!token) throw new Error('HF_TOKEN is not configured')
@@ -108,12 +108,12 @@ export async function hfChatCompletion(
   let lastError: unknown = null
 
   for (const model of models) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal
     try {
       const res = await fetch(`${HF_ROUTER}/v1/chat/completions`, {
         method: 'POST',
-        signal: controller.signal,
+        signal,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -141,8 +141,6 @@ export async function hfChatCompletion(
     } catch (err) {
       lastError = err
       // try the next model in the list
-    } finally {
-      clearTimeout(timer)
     }
   }
   throw lastError instanceof Error
@@ -334,7 +332,7 @@ export function xaiModelsForTask(task?: AiTaskKind): string[] {
 
 export async function xaiChatCompletion(
   messages: HfChatMessage[],
-  opts: { task?: AiTaskKind; maxTokens?: number; temperature?: number; timeoutMs?: number } = {}
+  opts: { task?: AiTaskKind; maxTokens?: number; temperature?: number; timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<{ content: string; model: string }> {
   const key = xaiKey()
   if (!key) throw new Error('XAI_API_KEY is not configured')
@@ -344,12 +342,12 @@ export async function xaiChatCompletion(
   let lastError: unknown = null
 
   for (const model of models) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal
     try {
       const res = await fetch(`${XAI_BASE}/chat/completions`, {
         method: 'POST',
-        signal: controller.signal,
+        signal,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${key}`,
@@ -373,11 +371,101 @@ export async function xaiChatCompletion(
     } catch (err) {
       lastError = err
       // try the next model
-    } finally {
-      clearTimeout(timer)
     }
   }
   throw lastError instanceof Error
     ? new Error(`Grok failed: ${lastError.message}`)
     : new Error('Grok failed')
+}
+
+/**
+ * STREAMING chat completion via xAI (SSE, token-by-token, word-by-word).
+ * Mirrors hfStreamChatCompletion's contract: emits deltas through onDelta
+ * as they arrive, returns the full text. Grok reasoning models emit
+ * `delta.reasoning` separately from `delta.content` — reasoning is
+ * collected silently and used only as a fallback when no content
+ * was produced (the user never sees raw reasoning).
+ */
+export async function xaiStreamChatCompletion(
+  messages: HfChatMessage[],
+  onDelta: (delta: string) => void,
+  opts: { task?: AiTaskKind; maxTokens?: number; temperature?: number; timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<{ content: string; model: string }> {
+  const key = xaiKey()
+  if (!key) throw new Error('XAI_API_KEY is not configured')
+
+  const models = xaiModelsForTask(opts.task)
+  const timeoutMs = opts.timeoutMs ?? 60_000
+  let lastError: unknown = null
+
+  for (const model of models) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal
+    try {
+      const res = await fetch(`${XAI_BASE}/chat/completions`, {
+        method: 'POST',
+        signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          temperature: opts.temperature ?? 0.7,
+          max_tokens: opts.maxTokens ?? 4000,
+        }),
+      })
+      if (!res.ok || !res.body) {
+        const body = (await res.json().catch(() => ({}))) as RouterChatResponse
+        const err = typeof body.error === 'string' ? body.error : body.error?.message
+        throw new Error(err || `xAI responded ${res.status}`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let full = ''
+      let reasoningBuf = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+          try {
+            const json = JSON.parse(payload) as RouterChatResponse
+            const delta = json.choices?.[0]?.delta
+            const text = delta?.content
+            if (text) {
+              full += text
+              onDelta(text)
+            }
+            if (delta?.reasoning) reasoningBuf += delta.reasoning
+          } catch {
+            /* keep-alive / partial line — ignore */
+          }
+        }
+      }
+      if (full.trim()) return { content: full, model }
+      if (reasoningBuf.trim()) return { content: reasoningBuf, model }
+      throw new Error(`Stream produced nothing from ${model}`)
+    } catch (err) {
+      lastError = err
+      // try the next model
+    }
+  }
+  // Last resort: non-streaming completion (some proxies dislike SSE).
+  try {
+    return await xaiChatCompletion(messages, opts)
+  } catch {
+    throw lastError instanceof Error
+      ? new Error(`Grok stream failed: ${lastError.message}`)
+      : new Error('Grok stream failed')
+  }
 }

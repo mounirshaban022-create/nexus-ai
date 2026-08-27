@@ -1,39 +1,32 @@
 import { getActiveAiProvider, externalChatCompletion, anonymousFallbackChat, type ExternalChatMessage } from './ai-providers'
 import { zaiChatCompletion, zaiOnCooldown, zaiConfigured } from './zai'
-import {
-  openrouterConfigured,
-  openrouterChatCompletion,
-  type OpenRouterMessage,
-} from './openrouter'
-import {
-  hfConfigured,
-  hfChatCompletion,
-  xaiConfigured,
-  xaiChatCompletion,
-} from './hf-ai'
+import { premiumChatCompletion } from './premium-pool'
 import type { AiTask } from './smart-chat-types'
 
 /**
- * MULTI-AI SMART ROUTER — task-aware, Z.ai-free.
+ * MULTI-AI SMART ROUTER — task-aware, load-balanced.
  *
- * NEXUS runs on a POOL of free AI engines. Every task is routed to the
- * models that do it best (specialist routing), and each provider has its
- * own independent rate-limit budget — so the platform never depends on a
- * single engine.
+ * NEXUS runs on a ROTATING POOL of AI engines. Platform accounts
+ * (OpenRouter, Hugging Face, xAI Grok, Vercel AI Gateway, Agnes) are
+ * load-balanced ROUND-ROBIN by the premium pool (see premium-pool.ts):
+ * every request starts at the next provider in the rotation, so quota
+ * spreads evenly across all accounts instead of draining one dry.
+ * Any failure fails over to the next provider instantly.
  *
- * Engine pool (all verified live, no API keys required):
- *   - LLM7.io     (mistral-Nemo, DeepSeek-V4-Flash, minimax-m2.7)
- *   - OVHcloud    (Mistral-7B/Small, Qwen3-32B, Llama-3.3-70B)
- *   - Kilo Code   (openrouter/free router, nemotron-550B, north-code)
- * Plus any provider the user connected with their own key (OpenRouter,
- * Groq, Gemini, Cohere, NVIDIA NIM, Ollama Cloud…) — those always go first.
+ * Chain:
+ *   0.  Premium pool (round-robin: OpenRouter / HF / Grok / Vercel
+ *       Gateway / Agnes — whichever accounts are configured)
+ *   0b. Z.ai built-in engine (sandbox only — millisecond latency)
+ *   1.  The user's own connected provider (their key, their quota)
+ *   2.  Anonymous free-LLM pool (LLM7.io ∥ OVHcloud ∥ Kilo Code —
+ *       raced in parallel, first token wins)
  *
- * Task routing (which engine family gets which job):
- *   CHAT/VOICE   → conversational models (mistral-Nemo class)
- *   REASONING    → large reasoning models (nemotron-550B, minimax class)
- *   DOCUMENTS    → strong writers (DeepSeek-V4-Flash class)
- *   CODE         → code specialists (north-mini-code, Qwen class)
- *   FAST         → tiny instant models (Mistral-7B, LFM class)
+ * Task routing (which models get which job):
+ *   CHAT/VOICE   → conversational models (Llama-70B / gpt-4o-mini class)
+ *   REASONING    → large reasoning models (DeepSeek-V3 class)
+ *   DOCUMENTS    → strong writers (DeepSeek-V3 class)
+ *   CODE         → code specialists (Qwen-Coder / GPT-4.1 class)
+ *   FAST         → tiny instant models (Llama-8B class)
  */
 
 export type { AiTask }
@@ -167,6 +160,33 @@ const TASK_SPECIALISTS_BY_PROVIDER: Record<string, Record<AiTask, string[]>> = {
     documents: ['deepseek-v4-pro', 'kimi-k3'],
     fast: ['deepseek-v4-flash'],
   },
+  // Hugging Face (user-connected key) — task-routed like the platform pool.
+  huggingface: {
+    code: ['Qwen/Qwen2.5-Coder-32B-Instruct', 'deepseek-ai/DeepSeek-V3'],
+    reasoning: ['deepseek-ai/DeepSeek-V3', 'meta-llama/Llama-3.3-70B-Instruct'],
+    chat: ['meta-llama/Llama-3.3-70B-Instruct', 'Qwen/Qwen2.5-72B-Instruct'],
+    voice: ['meta-llama/Llama-3.1-8B-Instruct', 'meta-llama/Llama-3.3-70B-Instruct'],
+    documents: ['deepseek-ai/DeepSeek-V3', 'meta-llama/Llama-3.3-70B-Instruct'],
+    fast: ['meta-llama/Llama-3.1-8B-Instruct'],
+  },
+  // xAI Grok (user-connected key).
+  grok: {
+    code: ['grok-4-fast', 'grok-3-mini'],
+    reasoning: ['grok-4-fast', 'grok-3-mini'],
+    chat: ['grok-4-fast', 'grok-3-mini'],
+    voice: ['grok-3-mini'],
+    documents: ['grok-4-fast', 'grok-3-mini'],
+    fast: ['grok-3-mini'],
+  },
+  // Vercel AI Gateway (user-connected key) — one gateway, every model.
+  'vercel-gateway': {
+    code: ['openai/gpt-4.1-mini', 'openai/gpt-4o-mini'],
+    reasoning: ['openai/gpt-4.1-mini', 'openai/gpt-4o-mini'],
+    chat: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'x-ai/grok-3-mini'],
+    voice: ['openai/gpt-4o-mini', 'meta-llama/llama-3.3-70b-instruct'],
+    documents: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku'],
+    fast: ['openai/gpt-4o-mini'],
+  },
 }
 
 const TASK_SPECIALISTS: Record<AiTask, string[]> = TASK_SPECIALISTS_BY_PROVIDER.openrouter
@@ -180,42 +200,38 @@ export async function smartChat(
   const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
   const maxModelAttempts = isVoiceTask ? 2 : 4
 
-  /* ---- Layer 0: OpenRouter (primary on Vercel) ----
-   * When OPENROUTER_API_KEY is set, OpenRouter is tried FIRST for every
-   * task. It's a high-quality, well-rounded gateway (Claude, GPT, etc.)
-   * that works the same in sandbox and on Vercel. Z.ai remains as a
-   * Layer 0b fallback for the sandbox dev environment (faster, free).
-   * On Vercel the Z.ai SDK is unavailable — `zaiConfigured()` returns
-   * false and Layer 0b is skipped automatically. */
-  if (openrouterConfigured()) {
-    try {
-      const content = await openrouterChatCompletion(
-        messages as OpenRouterMessage[],
-        {
-          maxTokens,
-          temperature,
-          timeoutMs: effectiveTimeoutMs ?? 60_000,
-        }
-      )
-      if (content.trim()) {
-        console.log(`[smartChat] served by OpenRouter (task: ${task})`)
-        return content
+  /* ---- Layer 0: PREMIUM AI POOL (round-robin load balancing) ----
+   * All platform AI accounts (OpenRouter, Hugging Face, xAI Grok,
+   * Vercel AI Gateway, Agnes) form one ROTATING pool: each request
+   * starts at the next provider in the rotation, so usage — and quota
+   * — spreads evenly instead of draining the first account dry. Any
+   * provider failure fails over to the next instantly. Works in every
+   * environment (plain fetch, no SDK). */
+  try {
+    const { content, providerId, model } = await premiumChatCompletion(
+      messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+      {
+        maxTokens,
+        temperature,
+        task,
+        timeoutMs: effectiveTimeoutMs,
       }
-    } catch (orErr) {
-      console.warn(
-        '[smartChat] OpenRouter failed, falling through:',
-        orErr instanceof Error ? orErr.message : orErr
-      )
+    )
+    if (content.trim()) {
+      console.log(`[smartChat] served by premium pool: ${providerId}/${model} (task: ${task})`)
+      return content
     }
+  } catch (poolErr) {
+    console.warn(
+      '[smartChat] premium pool failed, falling through:',
+      poolErr instanceof Error ? poolErr.message : poolErr
+    )
   }
 
   /* ---- Layer 0b: the platform's built-in Z.ai engine (GLM) ----
    * Millisecond-latency gateway shipped with the sandbox — by far the
    * fastest engine available. Only attempted in the sandbox dev
-   * environment (the SDK isn't bundled on Vercel). Tried first for
-   * EVERY task when OpenRouter isn't configured; the free pool and
-   * user providers only serve as fallbacks when Z.ai is cooling down
-   * (circuit breaker) or fails. This is the root fix for "AI is slow". */
+   * environment (the SDK isn't bundled on Vercel). */
   if (!zaiOnCooldown() && (await zaiConfigured())) {
     try {
       const content = await zaiChatCompletion(
@@ -230,51 +246,6 @@ export async function smartChat(
       console.warn(
         '[smartChat] Z.ai engine failed, falling through:',
         zaiErr instanceof Error ? zaiErr.message : zaiErr
-      )
-    }
-  }
-
-  /* ---- Layer 0c: platform premium pool (Hugging Face + xAI Grok) ----
-   * Dedicated platform quota that works in EVERY environment (unlike
-   * Z.ai, whose SDK is unreachable on Vercel). HF routes per task —
-   * Qwen2.5-Coder-32B for code, DeepSeek-V3 for documents, Llama-3.3-70B
-   * for chat. Grok (grok-4-fast) is exceptionally strong at coding and
-   * reasoning. Each engine fails fast and falls through to the next. */
-  if (hfConfigured()) {
-    try {
-      const { content } = await hfChatCompletion(messages as ExternalChatMessage[], {
-        maxTokens,
-        temperature,
-        task,
-        timeoutMs: effectiveTimeoutMs,
-      })
-      if (content.trim()) {
-        console.log(`[smartChat] served by Hugging Face (task: ${task})`)
-        return content
-      }
-    } catch (hfErr) {
-      console.warn(
-        '[smartChat] Hugging Face failed, falling through:',
-        hfErr instanceof Error ? hfErr.message : hfErr
-      )
-    }
-  }
-  if (xaiConfigured()) {
-    try {
-      const { content } = await xaiChatCompletion(messages as ExternalChatMessage[], {
-        maxTokens,
-        temperature,
-        task,
-        timeoutMs: effectiveTimeoutMs,
-      })
-      if (content.trim()) {
-        console.log(`[smartChat] served by Grok (task: ${task})`)
-        return content
-      }
-    } catch (xaiErr) {
-      console.warn(
-        '[smartChat] Grok failed, falling through:',
-        xaiErr instanceof Error ? xaiErr.message : xaiErr
       )
     }
   }

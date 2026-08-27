@@ -1,6 +1,7 @@
 import { createDecipheriv, scryptSync } from 'crypto'
 import { db } from '@/lib/db'
 import { consumeSSEWithPeek } from './llm-stream'
+import { vercelGatewayKey, vercelGatewayModelsForTask } from './premium-pool'
 import type { AiTask } from './smart-chat-types'
 
 /* ------------------------------------------------------------------ */
@@ -248,6 +249,49 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4', 'gpt-3.5-turbo'],
     freeNote: 'Putra AI (Malaysia) — 500 free API calls on the free plan. OpenAI-compatible endpoint.',
     keyUrl: 'https://putra.ai/dashboard',
+  },
+  {
+    id: 'vercel-gateway',
+    label: 'Vercel AI Gateway',
+    baseUrl: 'https://ai-gateway.vercel.sh/v1',
+    defaultModel: 'openai/gpt-4o-mini',
+    models: [
+      'openai/gpt-4o-mini', // fast + cheap
+      'openai/gpt-4.1-mini', // stronger reasoning
+      'anthropic/claude-3.5-haiku', // Claude quality
+      'x-ai/grok-3-mini', // Grok
+      'deepseek/deepseek-v3-0324', // DeepSeek V3
+      'meta-llama/llama-3.3-70b-instruct', // open 70B
+    ],
+    freeNote:
+      'ONE key → GPT-4.1, Claude, Grok, DeepSeek, Llama and more (per-token billing, no markup). Also joins the platform\'s automatic round-robin pool when configured server-side.',
+    keyUrl: 'https://vercel.com/ai-gateway',
+  },
+  {
+    id: 'huggingface',
+    label: 'Hugging Face',
+    baseUrl: 'https://router.huggingface.co/v1',
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct',
+    models: [
+      'meta-llama/Llama-3.3-70B-Instruct',
+      'Qwen/Qwen2.5-72B-Instruct',
+      'deepseek-ai/DeepSeek-V3',
+      'Qwen/Qwen2.5-Coder-32B-Instruct',
+      'openai/gpt-oss-120b',
+      'meta-llama/Llama-3.1-8B-Instruct',
+    ],
+    freeNote:
+      'HF Inference router — one token routes to hundreds of open models (Llama 70B, Qwen 72B, DeepSeek V3, gpt-oss). Small monthly credit included with HF accounts.',
+    keyUrl: 'https://huggingface.co/settings/tokens',
+  },
+  {
+    id: 'grok',
+    label: 'xAI Grok',
+    baseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-4-fast',
+    models: ['grok-4-fast', 'grok-3-mini', 'grok-4'],
+    freeNote: 'Grok 4 / Grok 3 Mini — exceptionally strong at coding + reasoning, very low latency.',
+    keyUrl: 'https://console.x.ai',
   },
 ]
 
@@ -552,6 +596,17 @@ export const ANONYMOUS_PROVIDER_IDS = new Set(
  */
 function envTokenProviders(): AnonymousProvider[] {
   const providers: AnonymousProvider[] = []
+  const vgKey = vercelGatewayKey()
+  if (vgKey) {
+    providers.push({
+      id: 'vercel-gateway',
+      label: 'Vercel AI Gateway',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      apiKey: vgKey,
+      models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku'],
+      rpmNote: 'Vercel AI Gateway — unified GPT/Claude/Grok access',
+    })
+  }
   const hfToken = (process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || '').trim()
   if (hfToken) {
     providers.push({
@@ -583,6 +638,9 @@ function envTokenProviders(): AnonymousProvider[] {
 
 /** Extra model ordering for env-token providers, per task. */
 function envProviderModelsForTask(p: AnonymousProvider, task?: string): string[] {
+  if (p.id === 'vercel-gateway') {
+    return vercelGatewayModelsForTask(task as AiTask | undefined)
+  }
   if (p.id === 'huggingface') {
     switch (task) {
       case 'code':

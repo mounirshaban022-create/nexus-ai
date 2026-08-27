@@ -143,13 +143,6 @@ export function NexusChat(props: NexusChatProps) {
   }
 
   const [messages, setMessages] = useState<NxMsg[]>([])
-  /** Mirror of `messages` for read-inside-callback checks (burst detection
-   *  reads the CURRENT bubble content inside the stream loop without
-   *  re-creating the send callback on every delta). */
-  const messagesRef = useRef<NxMsg[]>([])
-  useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
   const [streaming, setStreaming] = useState(false)
   const [sessionId, setSessionId] = useState<string | undefined>(props.sessionId)
   const [input, setInput] = useState(props.prefill ?? '')
@@ -162,16 +155,19 @@ export function NexusChat(props: NexusChatProps) {
   const fileRef = useRef<HTMLInputElement>(null)
   const stickToBottomRef = useRef(true)
   const streamIdRef = useRef<string | null>(null)
-  const pendingDeltaRef = useRef('')
-  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const assignRef = useRef<AgentAssignEvent | null>(null)
   const seqRef = useRef(0)
   /** Live status line from the server ("Picking the right specialist…") —
    *  shown next to the typing dots so waiting never feels dead. */
   const [statusText, setStatusText] = useState('')
-  /** Typewriter reveal state — animates one-shot bursts word-by-word. */
-  const typewriterRef = useRef<{ timer: ReturnType<typeof setInterval> | null }>({ timer: null })
+  /** Smooth word-by-word reveal queue (see queueReveal below). */
+  const revealRef = useRef<{ id: string; backlog: string; ended: boolean }>({
+    id: '',
+    backlog: '',
+    ended: true,
+  })
+  const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
 
   const nextId = (prefix: string) => `${prefix}-${Date.now()}-${seqRef.current++}`
@@ -235,8 +231,7 @@ export function NexusChat(props: NexusChatProps) {
   useEffect(() => {
     return () => {
       abortRef.current?.abort()
-      if (flushTimerRef.current) clearInterval(flushTimerRef.current)
-      if (typewriterRef.current.timer) clearInterval(typewriterRef.current.timer)
+      if (revealTimerRef.current) clearInterval(revealTimerRef.current)
       if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
     }
   }, [])
@@ -296,62 +291,86 @@ export function NexusChat(props: NexusChatProps) {
 
   /* ---------- streaming helpers ---------- */
 
-  const appendDelta = useCallback((delta: string) => {
-    const id = streamIdRef.current
+  const appendToMessage = useCallback((id: string, delta: string) => {
     if (!id || !delta) return
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: m.content + delta } : m)))
   }, [])
 
-  /** Deltas are buffered and flushed every 80ms so react-markdown is not
-   * re-parsed on every single token — keeps long streams silky. */
-  const startDeltaFlusher = useCallback(() => {
-    if (flushTimerRef.current) return
-    flushTimerRef.current = setInterval(() => {
-      if (!pendingDeltaRef.current) return
-      const chunk = pendingDeltaRef.current
-      pendingDeltaRef.current = ''
-      appendDelta(chunk)
-    }, 80)
-  }, [appendDelta])
-
-  const stopDeltaFlusher = useCallback(() => {
-    if (flushTimerRef.current) {
-      clearInterval(flushTimerRef.current)
-      flushTimerRef.current = null
-    }
-    if (pendingDeltaRef.current) {
-      const chunk = pendingDeltaRef.current
-      pendingDeltaRef.current = ''
-      appendDelta(chunk)
-    }
-  }, [appendDelta])
-
-  /* ---------- typewriter reveal (the "alive" effect) ----------
-   * When the backend hands us a finished text in ONE burst (non-streaming
-   * fallback path, or a coalesced mega-delta), animating it word-by-word
-   * keeps the ChatGPT feel instead of a jarring wall of text. Reveal is
-   * chunked so even long answers finish in ~1.2s. */
-  const revealTypewriter = useCallback((id: string, fullText: string) => {
-    if (typewriterRef.current.timer) {
-      clearInterval(typewriterRef.current.timer)
-      typewriterRef.current.timer = null
-    }
-    if (!fullText) return
-    const total = fullText.length
-    // ~70 ticks × 16ms ≈ 1.1s regardless of length; min 2 chars/tick.
-    const chunk = Math.max(2, Math.ceil(total / 70))
-    let pos = 0
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: '' } : m)))
-    typewriterRef.current.timer = setInterval(() => {
-      pos = Math.min(total, pos + chunk)
-      const slice = fullText.slice(0, pos)
-      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: slice } : m)))
-      if (pos >= total) {
-        if (typewriterRef.current.timer) clearInterval(typewriterRef.current.timer)
-        typewriterRef.current.timer = null
+  /* ---------- SMOOTH WORD-BY-WORD REVEAL (the "alive" feel) ----------
+   * EVERY piece of assistant text - fast token streams, chunky
+   * multi-word deltas, or ONE giant burst from a non-streaming
+   * provider - is fed into a paced reveal queue. A 30ms tick
+   * releases a few characters at a time with automatic catch-up
+   * when the backlog grows, so the UI ALWAYS renders word-by-word:
+   * the AI feels instant and never slams a wall of text.
+   *
+   *   pace = 2 chars + backlog/40 per 30ms tick (capped at 80)
+   *   - slow streams  -> steady word-by-word typing (~1s buffer)
+   *   - fast streams  -> backlog grows -> pace grows -> never lags
+   *   - one-shot text -> drained in <= ~1.2s at 2x pace
+   */
+  const ensureRevealLoop = useCallback(() => {
+    if (revealTimerRef.current) return
+    revealTimerRef.current = setInterval(() => {
+      const st = revealRef.current
+      if (!st.id) return
+      if (!st.backlog) {
+        if (st.ended) {
+          // Fully drained - park the loop until the next stream.
+          if (revealTimerRef.current) clearInterval(revealTimerRef.current)
+          revealTimerRef.current = null
+          st.id = ''
+        }
+        return
       }
-    }, 16)
-  }, [])
+      let pace = 2 + Math.ceil(st.backlog.length / 40)
+      if (st.ended) pace *= 2 // stream over -> finish briskly
+      const chunk = st.backlog.slice(0, Math.min(80, pace))
+      st.backlog = st.backlog.slice(chunk.length)
+      appendToMessage(st.id, chunk)
+    }, 30)
+  }, [appendToMessage])
+
+  /** Feed text into the reveal queue for the active bubble. */
+  const queueReveal = useCallback(
+    (id: string, text: string, ended = false) => {
+      if (!id || !text) return
+      const st = revealRef.current
+      if (st.id !== id) {
+        // New bubble - flush anything left from the previous one
+        // instantly so no text is ever lost.
+        if (st.id && st.backlog) appendToMessage(st.id, st.backlog)
+        st.id = id
+        st.backlog = ''
+        st.ended = false
+      }
+      st.backlog += text
+      if (ended) st.ended = true
+      ensureRevealLoop()
+    },
+    [appendToMessage, ensureRevealLoop]
+  )
+
+  /** Mark the active reveal as finished - drain the rest briskly. */
+  const endReveal = useCallback(() => {
+    const st = revealRef.current
+    if (st.id) st.ended = true
+    ensureRevealLoop()
+  }, [ensureRevealLoop])
+
+  /** Dump everything pending instantly (error / teardown paths). */
+  const flushRevealNow = useCallback(() => {
+    const st = revealRef.current
+    if (st.id && st.backlog) appendToMessage(st.id, st.backlog)
+    st.backlog = ''
+    st.ended = true
+    if (revealTimerRef.current) {
+      clearInterval(revealTimerRef.current)
+      revealTimerRef.current = null
+    }
+  }, [appendToMessage])
+
+
 
   /** Patch the live tool chip that matches (toolName, index). */
   const updateTool = useCallback(
@@ -507,23 +526,13 @@ export function NexusChat(props: NexusChatProps) {
               case 'assistant_delta': {
                 setStatusText('')
                 const id = streamIdRef.current
-                // BURST DETECTION: a huge first delta means the backend
-                // handed us a finished text in one shot (non-streaming
-                // fallback) — reveal it with the typewriter instead of
-                // slamming a wall of text on screen.
-                if (id && event.delta.length > 160) {
-                  const bubbleEmpty = !messagesRef.current.find((m) => m.id === id)?.content
-                  if (bubbleEmpty && !typewriterRef.current.timer) {
-                    revealTypewriter(id, event.delta)
-                    break
-                  }
-                }
-                pendingDeltaRef.current += event.delta
-                startDeltaFlusher()
+                // Paced reveal — every delta (tiny token or giant burst)
+                // flows through the same word-by-word queue.
+                if (id) queueReveal(id, event.delta)
                 break
               }
               case 'assistant_end': {
-                stopDeltaFlusher()
+                endReveal()
                 const id = streamIdRef.current
                 streamIdRef.current = null
                 if (id) {
@@ -544,13 +553,10 @@ export function NexusChat(props: NexusChatProps) {
               }
               case 'assistant': {
                 // Full-message fallback (non-streaming providers).
-                stopDeltaFlusher()
+                const attachments = Array.isArray(event.attachments) ? event.attachments : []
                 const id = streamIdRef.current
                 streamIdRef.current = null
-                const attachments = Array.isArray(event.attachments) ? event.attachments : []
                 if (id) {
-                  // Typewriter reveal — the full text arrived in one shot;
-                  // animate it word-by-word so it feels alive.
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === id
@@ -562,7 +568,8 @@ export function NexusChat(props: NexusChatProps) {
                         : m
                     )
                   )
-                  revealTypewriter(id, event.content)
+                  // Word-by-word reveal — same paced queue as live deltas.
+                  queueReveal(id, event.content, true)
                 } else {
                   const freshId = nextId('a')
                   setMessages((prev) => [
@@ -575,7 +582,7 @@ export function NexusChat(props: NexusChatProps) {
                       ...(attachments.length > 0 ? { attachments } : {}),
                     },
                   ])
-                  revealTypewriter(freshId, event.content)
+                  queueReveal(freshId, event.content, true)
                 }
                 break
               }
@@ -672,6 +679,8 @@ export function NexusChat(props: NexusChatProps) {
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        // Error path — stop animating and show whatever text arrived.
+        flushRevealNow()
         setMessages((prev) => [
           ...prev,
           {
@@ -687,7 +696,7 @@ export function NexusChat(props: NexusChatProps) {
         ])
       } finally {
         disarmWatchdog()
-        stopDeltaFlusher()
+        endReveal()
         streamIdRef.current = null
         setStreaming(false)
         setStatusText('')
@@ -704,7 +713,7 @@ export function NexusChat(props: NexusChatProps) {
         )
       }
     },
-    [attach, sessionId, streaming, pinnedAgent, t, lang, startDeltaFlusher, stopDeltaFlusher, updateTool, onSessionCreated, revealTypewriter]
+    [attach, sessionId, streaming, pinnedAgent, t, lang, queueReveal, endReveal, flushRevealNow, updateTool, onSessionCreated]
   )
 
   /* ---------- attachments (composer) ---------- */
