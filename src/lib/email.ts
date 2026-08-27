@@ -12,7 +12,17 @@ const globalForSecret = globalThis as unknown as { nexusEmailKey?: Buffer }
 
 function getKey(): Buffer {
   if (!globalForSecret.nexusEmailKey) {
-    const secret = process.env.NEXUS_EMAIL_SECRET ?? 'nexus-local-email-secret-v1'
+    // In production, NEXUS_EMAIL_SECRET MUST be set — a known dev fallback
+    // would let anyone decrypt stored credentials with a public secret.
+    // Mirrors the AUTH_SECRET guard in src/lib/auth.ts. Thrown lazily at
+    // encryption/decryption time so unrelated routes never crash at import.
+    let secret = process.env.NEXUS_EMAIL_SECRET
+    if (!secret || secret.trim() === '') {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('NEXUS_EMAIL_SECRET environment variable is required in production')
+      }
+      secret = 'nexus-local-email-secret-v1'
+    }
     globalForSecret.nexusEmailKey = scryptSync(secret, 'nexus-email-salt-v1', 32)
   }
   return globalForSecret.nexusEmailKey

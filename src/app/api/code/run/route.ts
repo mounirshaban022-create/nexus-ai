@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto'
 import { mkdtemp, writeFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
+import { getVerifiedSession } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 export const maxDuration = 60
@@ -42,11 +43,15 @@ function execWithTimeout(
     const started = Date.now()
     const child = spawn(command, args, {
       cwd,
+      // Minimal, explicitly allow-listed env — the child must NOT inherit
+      // the server's secrets (DB URLs, API keys, tokens). Cast because
+      // Next's ProcessEnv augmentation demands NODE_ENV, which we
+      // deliberately do not expose to sandboxed user code.
       env: {
         PATH: process.env.PATH,
-        HOME: cwd,
-        LANG: 'en_US.UTF-8',
-      },
+        HOME: process.env.HOME,
+        LANG: 'C.UTF-8',
+      } as unknown as NodeJS.ProcessEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -89,6 +94,13 @@ function execWithTimeout(
 
 export async function POST(req: NextRequest) {
   try {
+    // Code execution is a signed-in feature — never expose the sandbox to
+    // anonymous traffic.
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     const limit = rateLimit(`code-run:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {
       return NextResponse.json(

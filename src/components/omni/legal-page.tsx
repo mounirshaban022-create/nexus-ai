@@ -85,7 +85,7 @@ export function LegalPage({ type, onClose, language }: {
   const content = type === 'privacy' ? PRIVACY[language] : TERMS[language]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-label={content.title}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center nx-scrim backdrop-blur-sm" role="dialog" aria-label={content.title}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

@@ -58,6 +58,7 @@ server.log
 db/
 generated-images/
 generated-videos/
+generated-documents/
 upload/
 *.pid
 .env.example.local

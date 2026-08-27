@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
+import { createHmac, timingSafeEqual } from 'crypto'
 import { db } from '@/lib/db'
 import {
   getWhatsAppAccount,
@@ -53,6 +54,10 @@ export async function GET(req: NextRequest) {
 
 /* ------------------------- POST: events --------------------------- */
 
+/** Warn once per process when the webhook runs unsigned (no app secret
+ *  configured) — per-call logging would spam Meta's retry traffic. */
+let warnedNoSignature = false
+
 interface WaWebhookPayload {
   object?: string
   entry?: {
@@ -89,9 +94,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Too many events.' }, { status: 429 })
   }
 
+  // Read the RAW body first — the HMAC must be computed over the exact
+  // bytes Meta sent (req.json() would re-serialize and break the hash).
+  const rawBody = await req.text()
+
+  // Signature verification: when WHATSAPP_APP_SECRET is set, Meta's
+  // X-Hub-Signature-256 header must equal sha256=HMAC(rawBody, secret).
+  const appSecret = process.env.WHATSAPP_APP_SECRET
+  if (appSecret) {
+    const signature = req.headers.get('x-hub-signature-256') ?? ''
+    const expected =
+      'sha256=' + createHmac('sha256', appSecret).update(rawBody, 'utf8').digest('hex')
+    const a = Buffer.from(signature, 'utf8')
+    const b = Buffer.from(expected, 'utf8')
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      console.warn('[whatsapp-webhook] invalid X-Hub-Signature-256 — rejected')
+      return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
+    }
+  } else if (!warnedNoSignature) {
+    warnedNoSignature = true
+    console.warn(
+      '[whatsapp-webhook] WHATSAPP_APP_SECRET is not set — accepting webhooks WITHOUT signature verification. Set it in env vars to enable Meta signature validation.'
+    )
+  }
+
   let payload: WaWebhookPayload
   try {
-    payload = (await req.json()) as WaWebhookPayload
+    payload = JSON.parse(rawBody) as WaWebhookPayload
   } catch {
     return NextResponse.json({ received: true }, { status: 200 })
   }

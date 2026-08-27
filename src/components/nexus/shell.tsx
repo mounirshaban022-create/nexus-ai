@@ -364,7 +364,7 @@ function SidebarContent({
             label={t('nav.whatsapp')}
             active={view.type === 'whatsapp'}
             onClick={() => go({ type: 'whatsapp' })}
-            iconClassName="text-emerald-400"
+            iconClassName="text-emerald-600 dark:text-emerald-400"
           />
           <NavItem
             icon={Puzzle}

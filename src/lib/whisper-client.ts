@@ -8,17 +8,35 @@
  *
  * Usage:
  *   const text = await onDeviceTranscribe(audioBlob, 'en-US', (pct) => …)
+ *
+ * Protocol: every transcribe request carries a unique `seq`; the worker
+ * echoes it back on result/error. Responses are routed through a seq map,
+ * so a background warm-up can never clobber an in-flight transcription
+ * (the old single-slot resolver race delivered the warm-up's empty result
+ * to the waiting caller).
  */
 
 export type WhisperProgress = (percent: number, note: string) => void
 
+interface PendingJob {
+  resolve: (t: string) => void
+  reject: (e: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
 let worker: Worker | null = null
 let workerBroken = false
-let pending: { resolve: (t: string) => void; reject: (e: Error) => void } | null = null
+const jobs = new Map<number, PendingJob>()
 let progressCb: WhisperProgress | null = null
 let seq = 0
-let activeResolve: ((t: string) => void) | null = null
-let activeReject: ((e: Error) => void) | null = null
+
+function settle(jobSeq: number, fn: (job: PendingJob) => void) {
+  const job = jobs.get(jobSeq)
+  if (!job) return
+  jobs.delete(jobSeq)
+  clearTimeout(job.timer)
+  fn(job)
+}
 
 function ensureWorker(): Worker | null {
   if (workerBroken) return null
@@ -33,22 +51,20 @@ function ensureWorker(): Worker | null {
       } else if (d.type === 'ready') {
         if (progressCb) progressCb(100, 'ready')
       } else if (d.type === 'result') {
-        activeResolve?.(String(d.text || ''))
-        activeResolve = null
-        activeReject = null
+        settle(Number(d.seq), (job) => job.resolve(String(d.text || '')))
       } else if (d.type === 'error') {
-        activeReject?.(new Error(String(d.message || 'Speech engine failed.')))
-        activeResolve = null
-        activeReject = null
+        settle(Number(d.seq), (job) => job.reject(new Error(String(d.message || 'Speech engine failed.'))))
       }
     }
     worker.onerror = () => {
       // CDN blocked / worker crashed — mark broken so callers skip to the
       // server ASR path immediately from now on.
       workerBroken = true
-      activeReject?.(new Error('On-device speech engine unavailable.'))
-      activeResolve = null
-      activeReject = null
+      for (const [, job] of jobs) {
+        clearTimeout(job.timer)
+        job.reject(new Error('On-device speech engine unavailable.'))
+      }
+      jobs.clear()
       try {
         worker?.terminate()
       } catch {
@@ -68,15 +84,23 @@ export function onDeviceAsrBroken(): boolean {
   return workerBroken
 }
 
-/** Kick off model download immediately (call when the voice UI opens so
- *  the ~45 MB one-time load overlaps the user's first sentence). */
+/**
+ * Kick off the model download immediately (call when the voice UI opens so
+ * the ~45 MB one-time load overlaps the user's first sentence). Safe to call
+ * at any time: it is a seq-tagged job whose (empty) result is discarded, so
+ * it can never interfere with a live transcription.
+ */
 export function warmUpOnDeviceAsr(onProgress?: WhisperProgress): void {
   const w = ensureWorker()
   if (!w) return
-  progressCb = onProgress ?? null
-  // A zero-length "transcribe" primes the pipeline; the worker posts
-  // progress/ready messages but returns '' for empty audio instantly.
-  w.postMessage({ type: 'transcribe', audio: new Float32Array(0), lang: 'en', seq: ++seq })
+  if (onProgress) progressCb = onProgress
+  const warmSeq = ++seq
+  jobs.set(warmSeq, {
+    resolve: () => {},
+    reject: () => {},
+    timer: setTimeout(() => jobs.delete(warmSeq), 120_000),
+  })
+  w.postMessage({ type: 'transcribe', audio: new Float32Array(0), lang: 'en', seq: warmSeq })
 }
 
 /** Decode any recorded blob (webm/ogg/mp4/wav) → mono Float32Array @16kHz. */
@@ -122,21 +146,16 @@ export async function onDeviceTranscribe(
   if (audio.length < 1600) return '' // < 0.1s of audio — nothing said
 
   return new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      activeResolve = null
-      activeReject = null
-      reject(new Error('On-device recognition timed out.'))
-    }, timeoutMs)
-    progressCb = onProgress ?? null
-    activeResolve = (t) => {
-      clearTimeout(timer)
-      resolve(t)
-    }
-    activeReject = (e) => {
-      clearTimeout(timer)
-      reject(e)
-    }
-    seq++
-    w.postMessage({ type: 'transcribe', audio, lang, seq })
+    const jobSeq = ++seq
+    if (onProgress) progressCb = onProgress
+    jobs.set(jobSeq, {
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        jobs.delete(jobSeq)
+        reject(new Error('On-device recognition timed out.'))
+      }, timeoutMs),
+    })
+    w.postMessage({ type: 'transcribe', audio, lang, seq: jobSeq })
   })
 }

@@ -74,6 +74,7 @@
     "html-to-text": "^10.0.1",
     "imapflow": "^1.7.2",
     "input-otp": "^1.4.2",
+    "jose": "^6.2.10",
     "jszip": "^3.10.1",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^0.525.0",

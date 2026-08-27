@@ -165,14 +165,16 @@ export async function POST(req: NextRequest) {
           transcript = asr.text?.trim() ?? ''
         } catch (zaiErr) {
           console.error('[api/voice/turn] Z.ai ASR unavailable:', zaiErr)
-          // Both server engines failed — the client's on-device Whisper
-          // fallback (if any audio reached it) or a friendly no-speech.
+          // Both server engines FAILED (quota / outage / misconfig) — that is
+          // an ENGINE failure, not silence. Tell the client explicitly so it
+          // can fall back to its on-device Whisper instead of looping on
+          // "Didn't catch that" (the old bug: failure masqueraded as silence).
           return NextResponse.json({
             transcript: '',
             reply: '',
             thinking: '',
             audio: null,
-            note: 'no-speech',
+            note: 'asr-engine-failed',
           })
         }
       }

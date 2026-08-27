@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getVerifiedSession } from '@/lib/auth'
 import { getWhatsAppAccount } from '@/lib/whatsapp'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 /* ------------------------------------------------------------------ */
 /* /api/whatsapp/messages — inbox feed for the WhatsApp mode UI.      */
 /* Optional ?from=<number> filter returns one conversation.           */
+/* Account-scoped feature — requires a verified session.              */
 /* ------------------------------------------------------------------ */
 
 export async function GET(req: NextRequest) {
+  const session = await getVerifiedSession(req)
+  if (!session) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+  }
+
   const limit = rateLimit(`wa-messages:${clientKey(req)}`, 60, 60_000)
   if (!limit.ok) {
     return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })

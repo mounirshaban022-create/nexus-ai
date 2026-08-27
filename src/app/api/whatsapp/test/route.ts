@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { getVerifiedSession } from '@/lib/auth'
 import {
   getWhatsAppAccount,
   waSendText,
@@ -13,6 +14,7 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 /* number to any verified recipient. Phase 1: Meta's test number can  */
 /* only reach numbers that were verified with an OTP inside the Meta  */
 /* console (max 5). The user's own number is the first one.           */
+/* Account-scoped feature — requires a verified session.              */
 /* ------------------------------------------------------------------ */
 
 const testSchema = z.object({
@@ -21,6 +23,11 @@ const testSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  const session = await getVerifiedSession(req)
+  if (!session) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+  }
+
   const limit = rateLimit(`wa-test:${clientKey(req)}`, 10, 60_000)
   if (!limit.ok) {
     return NextResponse.json(

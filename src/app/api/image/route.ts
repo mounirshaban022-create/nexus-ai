@@ -8,7 +8,7 @@ import { supabaseUpsert } from '@/lib/supabase'
 import { getZAI, zaiConfigured } from '@/lib/zai'
 import { openrouterConfigured, openrouterGenerateImage } from '@/lib/openrouter'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { getCurrentUser } from '@/lib/auth'
+import { getVerifiedSession, getCurrentUser } from '@/lib/auth'
 
 const requestSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -177,8 +177,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    // The gallery listing is account data — generation (POST) stays open
+    // to guests, but browsing saved images requires a session.
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     const images = await db.generatedImage.findMany({
       orderBy: { createdAt: 'desc' },
       take: 60,

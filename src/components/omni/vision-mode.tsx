@@ -144,7 +144,7 @@ export function VisionMode() {
                     setAnalysis('')
                   }}
                   aria-label="Remove image"
-                  className="absolute right-2.5 top-2.5 rounded-full bg-black/60 p-1.5 text-white/90 backdrop-blur transition hover:bg-destructive"
+                  className="nx-scrim absolute right-2.5 top-2.5 rounded-full p-1.5 text-white/90 backdrop-blur transition hover:bg-destructive"
                 >
                   <X className="h-4 w-4" />
                 </button>

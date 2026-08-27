@@ -8,7 +8,8 @@ import remarkGfm from 'remark-gfm'
 // token. (Was: `Prism` from 'react-syntax-highlighter' which bundles all
 // grammars synchronously — ~500KB upfront and re-tokenizes per render.)
 import { PrismAsyncLight as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { useTheme } from 'next-themes'
 import { Check, Copy } from 'lucide-react'
 
 // Memoized CodeBlock — during streaming, `Markdown` re-renders on every
@@ -17,6 +18,12 @@ import { Check, Copy } from 'lucide-react'
 // own `language` or `code` props actually change.
 const CodeBlock = memo(function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false)
+  /* Light-mode readability: the block used to hardcode the dark surface +
+   * oneDark tokens in BOTH themes. Follow next-themes instead — dark keeps
+   * the original look, light gets a warm-gray surface + oneLight tokens
+   * (dark zinc-800-ish code text). Undefined (SSR/first paint) → dark. */
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme !== 'light'
 
   const copy = useCallback(async () => {
     try {
@@ -41,7 +48,7 @@ const CodeBlock = memo(function CodeBlock({ language, code }: { language: string
         >
           {copied ? (
             <>
-              <Check className="h-3 w-3 text-emerald-400" aria-hidden /> Copied
+              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" aria-hidden /> Copied
             </>
           ) : (
             <>
@@ -51,12 +58,12 @@ const CodeBlock = memo(function CodeBlock({ language, code }: { language: string
         </button>
       </div>
       <SyntaxHighlighter
-        style={oneDark}
+        style={isDark ? oneDark : oneLight}
         language={language || 'text'}
         PreTag="div"
         customStyle={{
           margin: 0,
-          background: 'oklch(0.16 0.015 295)',
+          background: isDark ? 'oklch(0.16 0.015 295)' : 'oklch(0.97 0.003 80)',
           padding: '0.85rem 1rem',
           fontSize: '0.8rem',
           borderRadius: '0 0 0.6rem 0.6rem',

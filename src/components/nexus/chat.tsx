@@ -1057,7 +1057,7 @@ export function NexusChat(props: NexusChatProps) {
           ) : null}
           {attach ? (
             <div className="nx-rise mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-300">
-              <FileText className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+              <FileText className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{attach.filename}</span>
               <button
                 type="button"

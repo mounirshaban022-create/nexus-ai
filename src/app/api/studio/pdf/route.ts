@@ -194,14 +194,18 @@ export async function POST(req: NextRequest) {
     }
     const { operation, file, file2, params = {} } = parsed.data
 
-    // Self-heal the engine before use (only when running locally with a
-    // JVM — on Vercel serverless there's no JVM, so we fail gracefully)
-    if (process.env.VERCEL) {
+    // On Vercel there's no local JVM — but an explicitly configured remote
+    // Stirling instance (STIRLING_URL) works fine from serverless. Only
+    // fail when we're on Vercel WITHOUT a remote engine configured.
+    if (process.env.VERCEL && !process.env.STIRLING_URL) {
       throw new Error(
         'PDF tools require the Stirling-PDF engine, which needs a JVM server. ' +
         'Deploy Stirling-PDF separately (Railway/Render free tier) and set STIRLING_URL in your environment variables to enable PDF tools.'
       )
     }
+    // Local (or Vercel + STIRLING_URL): make sure the engine is up. With a
+    // remote URL this is just a health probe; the local self-heal spawn is
+    // skipped automatically when the JAR isn't installed.
     await ensureStirling()
 
     const fileBuf = decodeDataUrl(file)

@@ -17,6 +17,21 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     'src/app/api/video/create/route.ts': ['./assets/fonts/**'],
   },
+  // Security headers applied to every response. NOTE: intentionally NO
+  // X-Frame-Options / frame-ancestors — the app must stay embeddable in
+  // the preview iframe.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "microphone=(self), geolocation=()" },
+        ],
+      },
+    ];
+  },
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,

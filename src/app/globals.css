@@ -218,10 +218,31 @@ html:not(.dark) .bg-white\/\[0\.05\] { background-color: color-mix(in oklab, var
 html:not(.dark) .bg-white\/\[0\.06\] { background-color: color-mix(in oklab, var(--foreground) 6%, transparent) !important; }
 
 /* `bg-black/X` was used for input fields (dark-tinted on dark bg).
-   Light mode: lift to a hairline gray (matches the input token). */
+   Light mode: lift to a hairline gray (matches the input token).
+   Task 2-c: added /25, /50 and /60 — surfaces using them (settings rows,
+   skills install-command box + doc code fences, chat attachment chips)
+   previously stayed pitch-black translucent over the light canvas. */
 html:not(.dark) .bg-black\/20 { background-color: var(--input) !important; }
+html:not(.dark) .bg-black\/25 { background-color: var(--input) !important; }
 html:not(.dark) .bg-black\/30 { background-color: var(--input) !important; }
 html:not(.dark) .bg-black\/40 { background-color: var(--input) !important; }
+html:not(.dark) .bg-black\/50 { background-color: var(--input) !important; }
+html:not(.dark) .bg-black\/60 { background-color: var(--input) !important; }
+/* The `hover:` variant emits a DIFFERENT class token (hover:bg-black/50),
+   so the rules above don't catch it — without this, hovering a settings
+   row flashed 50%-black in light mode. Ink-10% tint = proper hover depth. */
+html:not(.dark) .hover\:bg-black\/50:hover { background-color: color-mix(in oklab, var(--foreground) 10%, transparent) !important; }
+
+/* True modal scrims must stay a translucent black veil in BOTH themes.
+   Task 2-c: the remaps above correctly flip bg-black/X *surfaces* (chips,
+   inputs, code boxes) to light grays — but overlay veils that use the same
+   utilities (dialog/sheet/drawer overlays, custom modal backdrops, media
+   close-buttons) would become opaque light gray. Those elements opt out by
+   using `.nx-scrim` instead of bg-black/X. Defined inside the utilities
+   layer so Tailwind hover: utilities (e.g. hover:bg-destructive) still win. */
+@layer utilities {
+  .nx-scrim { background-color: rgb(0 0 0 / 0.5); }
+}
 
 /* White-opacity borders (used as hairlines + chip outlines) → light
    semantic border. Task 8-B: expanded the set — `/6`, `/12`, `/30`,

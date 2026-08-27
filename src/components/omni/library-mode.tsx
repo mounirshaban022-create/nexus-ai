@@ -267,7 +267,7 @@ export function LibraryMode({ active = true }: { active?: boolean }) {
                         <Icon className="h-8 w-8 text-muted-foreground/60" />
                       </div>
                     )}
-                    <div className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/40 opacity-0 transition group-hover:opacity-100">
+                    <div className="nx-scrim absolute inset-0 flex items-center justify-center gap-1.5 opacity-0 transition group-hover:opacity-100">
                       <a
                         href={downloadHref}
                         download

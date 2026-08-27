@@ -1128,7 +1128,7 @@ function ProjectFormModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
+      <div className="nx-scrim fixed inset-0 z-50" onClick={onClose} />
       <motion.form
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1237,7 +1237,7 @@ function DeleteConfirmModal({
   const [busy, setBusy] = useState(false)
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={busy ? undefined : onClose} />
+      <div className="nx-scrim fixed inset-0 z-50" onClick={busy ? undefined : onClose} />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

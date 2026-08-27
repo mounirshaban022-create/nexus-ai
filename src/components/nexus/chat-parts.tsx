@@ -625,7 +625,7 @@ function TtsAttachment({ text }: { text: string }) {
         </button>
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
-            <Volume2 className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+            <Volume2 className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
             Neural speech
           </p>
           <p className="mt-0.5 truncate text-[11px] text-zinc-500">{text}</p>
@@ -739,7 +739,7 @@ function AttachmentCard({ item }: { item: unknown }) {
     return (
       <div className="w-full max-w-md rounded-xl border border-white/10 bg-black/30 p-3">
         <div className="flex items-center gap-2 text-xs text-zinc-400">
-          <Terminal className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+          <Terminal className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
           <span className="truncate font-medium text-zinc-300">Code result</span>
           {language ? (
             <span className="shrink-0 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] text-zinc-400">{language}</span>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { getVerifiedSession } from '@/lib/auth'
 import { encryptSecret } from '@/lib/email'
 import {
   getWhatsAppAccount,
@@ -17,6 +18,10 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 /* POST   → create or replace credentials (validates via Meta API)     */
 /* PATCH  → update settings (autoReply, agentPrompt, businessName)     */
 /* DELETE → disconnect                                                 */
+/*                                                                      */
+/* Account-scoped feature — every handler requires a verified session.  */
+/* (The Meta webhook under /api/whatsapp/webhook is separate and NOT    */
+/* gated — Meta's servers call it with no session cookie.)              */
 /* ------------------------------------------------------------------ */
 
 /** Resolve the public origin for webhook URLs. */
@@ -27,6 +32,11 @@ function resolveAppUrl(req: NextRequest): string {
 }
 
 export async function GET(req: NextRequest) {
+  const session = await getVerifiedSession(req)
+  if (!session) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+  }
+
   const account = await getWhatsAppAccount()
   const appUrl = resolveAppUrl(req)
   return NextResponse.json({
@@ -47,6 +57,11 @@ const createSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  const session = await getVerifiedSession(req)
+  if (!session) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+  }
+
   const limit = rateLimit(`wa-account-save:${clientKey(req)}`, 12, 60_000)
   if (!limit.ok) {
     return NextResponse.json({ error: 'Too many attempts. Wait a moment.' }, { status: 429 })
@@ -134,6 +149,11 @@ const patchSchema = z.object({
 })
 
 export async function PATCH(req: NextRequest) {
+  const session = await getVerifiedSession(req)
+  if (!session) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+  }
+
   const account = await getWhatsAppAccount()
   if (!account) {
     return NextResponse.json({ error: 'No WhatsApp account connected yet.' }, { status: 404 })
@@ -161,7 +181,12 @@ export async function PATCH(req: NextRequest) {
 
 /* ------------------------------ DELETE ------------------------------ */
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const session = await getVerifiedSession(req)
+  if (!session) {
+    return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+  }
+
   await db.whatsAppAccount.deleteMany({})
   return NextResponse.json({ ok: true })
 }

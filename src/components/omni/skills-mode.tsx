@@ -532,7 +532,7 @@ function CategoryChip({
       aria-selected={active}
       className={`flex min-h-[34px] shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
         active
-          ? 'text-white'
+          ? 'text-zinc-100'
           : 'border-white/10 text-zinc-400 hover:border-white/25 hover:text-zinc-200'
       }`}
       style={active ? { background: tint(accent, 0.2), borderColor: tint(accent, 0.6) } : undefined}
@@ -616,7 +616,7 @@ function SkillCard({
               {categoryLabel(skill.category)}
             </span>
             {/* Cloud-executable badge — every skill maps to a free action */}
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
               <Zap className="h-2.5 w-2.5" aria-hidden />
               {action.chip}
             </span>
@@ -648,7 +648,7 @@ function SkillCard({
                 transition={{ type: 'spring', stiffness: 500, damping: 22 }}
                 className="grid place-items-center"
               >
-                <Check className="h-4 w-4 text-emerald-400" aria-hidden />
+                <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
               </motion.span>
             ) : (
               <motion.span
@@ -658,7 +658,7 @@ function SkillCard({
                 exit={{ scale: 0.4, opacity: 0 }}
                 className="grid place-items-center"
               >
-                <Wand2 className="h-4 w-4 text-zinc-500 transition group-hover:text-[#ff8a8d]" aria-hidden />
+                <Wand2 className="h-4 w-4 text-zinc-500 transition group-hover:text-rose-600 dark:group-hover:text-[#ff8a8d]" aria-hidden />
               </motion.span>
             )}
           </AnimatePresence>
@@ -670,7 +670,7 @@ function SkillCard({
       </p>
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-        <span className="pointer-events-none flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-zinc-300 transition group-hover:border-[#ff5a5f]/40 group-hover:text-[#ff8a8d]">
+        <span className="pointer-events-none flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-zinc-300 transition group-hover:border-[#ff5a5f]/40 group-hover:text-rose-600 dark:group-hover:text-[#ff8a8d]">
           <BookOpen className="h-3.5 w-3.5" aria-hidden />
           View manual
         </span>
@@ -756,7 +756,7 @@ function SkillDetailDialog({
                 className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 text-zinc-400 transition hover:border-white/25 hover:text-zinc-100"
               >
                 {copied === 'name' ? (
-                  <Check className="h-4 w-4 text-emerald-400" aria-hidden />
+                  <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
                 ) : (
                   <Copy className="h-4 w-4" aria-hidden />
                 )}
@@ -787,14 +787,14 @@ function SkillDetailDialog({
                       {action.emoji}
                     </motion.span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-emerald-300">
+                      <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                         Runs in NEXUS cloud — free
                       </p>
                       <p className="mt-0.5 truncate text-[11px] text-zinc-400">
                         Mapped to: {action.label.replace(' with FLUX', '')} · {action.chip}
                       </p>
                     </div>
-                    <Zap className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+                    <Zap className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
                   </div>
                 )
               })()}
@@ -814,7 +814,7 @@ function SkillDetailDialog({
                   className="flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-white/15 px-4 text-sm font-medium text-zinc-300 transition hover:border-white/30 hover:bg-white/5"
                 >
                   {copied === 'name' ? (
-                    <Check className="h-4 w-4 text-emerald-400" aria-hidden />
+                    <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
                   ) : (
                     <Copy className="h-4 w-4" aria-hidden />
                   )}
@@ -839,7 +839,7 @@ function SkillDetailDialog({
                       className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-white/8 hover:text-zinc-100"
                     >
                       {copied === 'cmd' ? (
-                        <Check className="h-4 w-4 text-emerald-400" aria-hidden />
+                        <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
                       ) : (
                         <Copy className="h-4 w-4" aria-hidden />
                       )}
@@ -852,7 +852,7 @@ function SkillDetailDialog({
                 <div className="flex flex-col gap-1.5 text-xs text-zinc-500 sm:flex-row sm:flex-wrap sm:gap-x-5">
                   {skill.requires && (
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400/80" aria-hidden />
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400/80" aria-hidden />
                       <span className="truncate">
                         Requires: <span className="text-zinc-400">{skill.requires}</span>
                       </span>
@@ -863,7 +863,7 @@ function SkillDetailDialog({
                       href={skill.homepage}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex min-w-0 items-center gap-1.5 text-[#ff8a8d] transition hover:text-[#ffb3b5] hover:underline"
+                      className="flex min-w-0 items-center gap-1.5 text-rose-600 transition hover:text-rose-500 hover:underline dark:text-[#ff8a8d] dark:hover:text-[#ffb3b5]"
                     >
                       <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       {hostOf(skill.homepage)}
@@ -881,7 +881,7 @@ function SkillDetailDialog({
               {docLoading ? (
                 <DocSkeleton />
               ) : docError ? (
-                <p className="rounded-xl border border-[#ff5a5f]/25 bg-[#ff5a5f]/5 px-4 py-3 text-xs text-[#ff8a8d]">
+                <p className="rounded-xl border border-[#ff5a5f]/25 bg-[#ff5a5f]/5 px-4 py-3 text-xs text-rose-600 dark:text-[#ff8a8d]">
                   {docError}
                 </p>
               ) : doc ? (
@@ -970,7 +970,7 @@ function inline(text: string): React.ReactNode[] {
       }
       if (t.startsWith('`') && t.endsWith('`') && t.length > 2) {
         return (
-          <code key={i} className="rounded bg-white/8 px-1 py-0.5 font-mono text-[11px] text-[#ffb3b5]">
+          <code key={i} className="rounded bg-white/8 px-1 py-0.5 font-mono text-[11px] text-rose-600 dark:text-[#ffb3b5]">
             {t.slice(1, -1)}
           </code>
         )

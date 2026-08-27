@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { getVerifiedSession } from '@/lib/auth'
 import { encryptSecret } from '@/lib/email'
 import {
   AI_PROVIDER_PRESETS,
@@ -10,8 +11,13 @@ import {
 } from '@/lib/ai-providers'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     const providers = await db.aiProvider.findMany({
       orderBy: { createdAt: 'asc' },
       select: {
@@ -41,6 +47,11 @@ const createSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     const limit = rateLimit(`ai-provider-add:${clientKey(req)}`, 10, 60_000)
     if (!limit.ok) {
       return NextResponse.json({ error: 'Too many attempts. Wait a moment.' }, { status: 429 })

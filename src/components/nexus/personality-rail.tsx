@@ -108,7 +108,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
     <div className="mb-2 flex items-center gap-2" role="group" aria-label={t('personality.label')}>
       {/* Label — names the selector exactly "Personality" */}
       <span className="hidden shrink-0 select-none items-center gap-1.5 ps-1 text-[11px] font-medium text-zinc-500 sm:flex">
-        <Sparkles className="h-3 w-3 text-[#ff8a8d]" aria-hidden />
+        <Sparkles className="h-3 w-3 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
         {t('personality.label')}
       </span>
 

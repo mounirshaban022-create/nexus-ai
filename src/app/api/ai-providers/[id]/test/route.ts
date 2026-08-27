@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getVerifiedSession } from '@/lib/auth'
 import {
   decryptApiKey,
   verifyAiProvider,
@@ -17,6 +18,11 @@ type RouteContext = { params: Promise<{ id: string }> }
  */
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     const rl = rateLimit(`provider-test:${clientKey(req)}`, 30, 60_000)
     if (!rl.ok) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })

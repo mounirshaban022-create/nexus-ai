@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { getVerifiedSession } from '@/lib/auth'
 import { getPrimaryAccount, sendEmail } from '@/lib/email'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
@@ -15,6 +16,11 @@ const sendSchema = z.object({
  */
 export async function POST(req: NextRequest) {
   try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     // Rate limit first — stricter (10 per 60s) since sending is sensitive
     const rl = rateLimit(`email-send:${clientKey(req)}`, 10, 60_000)
     if (!rl.ok) {

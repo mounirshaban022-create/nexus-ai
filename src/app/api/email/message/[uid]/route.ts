@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getVerifiedSession } from '@/lib/auth'
 import { getPrimaryAccount, readEmail } from '@/lib/email'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
@@ -10,6 +11,11 @@ type RouteContext = { params: Promise<{ uid: string }> }
  */
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     // Rate limit first (30 per 60s per client)
     const rl = rateLimit(`email-read:${clientKey(req)}`, 30, 60_000)
     if (!rl.ok) {

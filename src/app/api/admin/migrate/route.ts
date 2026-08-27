@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync } from 'node:fs'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { join } from 'node:path'
 import { PrismaClient } from '@prisma/client'
 import { db as defaultDb } from '@/lib/db'
@@ -24,14 +25,17 @@ export const dynamic = 'force-dynamic'
  *
  * AUTH
  * ----
- * `?token=<T>` must match ONE of:
+ * The token arrives via `Authorization: Bearer <token>` (preferred) or
+ * `?token=<T>` (backward compat) and must match ONE of:
  *   - `process.env.ADMIN_MIGRATION_TOKEN` (preferred — set this on Vercel), OR
  *   - `process.env.SUPABASE_SERVICE_ROLE_KEY` (fallback — already set on Vercel
  *     for cloud sync, so the user doesn't need to add a new env var for the
  *     one-shot migration).
  * Either unlocks the endpoint. Both are server-side secrets the caller
- * wouldn't know without privileged access. In dev (`NODE_ENV !== 'production'`)
- * the token check is skipped.
+ * wouldn't know without privileged access. Comparison is timing-safe
+ * (sha256-normalized buffers + crypto.timingSafeEqual). In dev
+ * (`NODE_ENV !== 'production'`) the token check is skipped when no secrets
+ * are configured; in production at least one secret MUST be set.
  *
  * DB URL OVERRIDE
  * --------------
@@ -52,6 +56,26 @@ export const dynamic = 'force-dynamic'
  */
 
 const SQL_FILE_NAME = 'supabase-schema.sql'
+
+/** Timing-safe secret comparison: hash both sides with sha256 first so the
+ *  buffers always have equal length, then compare with timingSafeEqual. */
+function tokenMatches(provided: string, expected: string): boolean {
+  if (!provided || !expected) return false
+  const a = createHash('sha256').update(provided, 'utf8').digest()
+  const b = createHash('sha256').update(expected, 'utf8').digest()
+  return timingSafeEqual(a, b)
+}
+
+/** Extract the admin token: `Authorization: Bearer <token>` header first,
+ *  `?token=` query param as backward-compatible fallback. */
+function extractToken(req: NextRequest, url: URL): string {
+  const authHeader = req.headers.get('authorization') ?? ''
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    const bearer = authHeader.slice(7).trim()
+    if (bearer) return bearer
+  }
+  return url.searchParams.get('token') ?? ''
+}
 
 /** Strip line comments + split a SQL file into individual statements. */
 function parseSqlStatements(rawSql: string): string[] {
@@ -111,7 +135,7 @@ function getClient(overrideUrl?: string): { client: PrismaClient; isOverride: bo
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
-  const token = url.searchParams.get('token') ?? ''
+  const token = extractToken(req, url)
   const expectedAdmin = process.env.ADMIN_MIGRATION_TOKEN ?? ''
   const expectedServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
   const isProd = process.env.NODE_ENV === 'production'
@@ -120,9 +144,10 @@ export async function GET(req: NextRequest) {
   const dbUrlOverride = url.searchParams.get('db_url') ?? ''
 
   // Auth gate. Two acceptable secrets: ADMIN_MIGRATION_TOKEN (preferred)
-  // OR SUPABASE_SERVICE_ROLE_KEY (fallback — already on Vercel for cloud sync).
-  const matchesAdmin = expectedAdmin && token === expectedAdmin
-  const matchesServiceRole = expectedServiceRole && token === expectedServiceRole
+  // OR SUPABASE_SERVICE_ROLE_KEY (fallback — already on Vercel for cloud
+  // sync). Timing-safe comparison on both.
+  const matchesAdmin = tokenMatches(token, expectedAdmin)
+  const matchesServiceRole = tokenMatches(token, expectedServiceRole)
 
   if (isProd) {
     if (!expectedAdmin && !expectedServiceRole) {
@@ -142,7 +167,9 @@ export async function GET(req: NextRequest) {
       )
     }
   } else {
-    // Dev: still prefer a token, but allow it if unset (for local convenience).
+    // Dev: still prefer a token, but allow it if unset (for local
+    // convenience). Never reachable in production — the isProd branch
+    // above is the only other path.
     if ((expectedAdmin || expectedServiceRole) && !matchesAdmin && !matchesServiceRole) {
       return NextResponse.json(
         { ok: false, error: 'Invalid token.' },

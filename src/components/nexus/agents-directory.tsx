@@ -220,7 +220,7 @@ function DirectoryBody({
           </p>
           <button
             onClick={onUnpin}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ff5a5f]/35 px-2.5 py-1.5 text-xs font-medium text-[#ff8a8d] transition hover:bg-[#ff5a5f]/10"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#ff5a5f]/35 px-2.5 py-1.5 text-xs font-medium text-rose-600 transition hover:bg-[#ff5a5f]/10 dark:text-[#ff8a8d]"
           >
             <PinOff className="h-3.5 w-3.5" />
             {t('agents.unpin')}
@@ -386,7 +386,7 @@ function AgentCard({
         {pinned ? (
           <button
             onClick={onUnpin}
-            className="flex items-center gap-1.5 rounded-lg border border-[#ff5a5f]/40 px-3 py-1.5 text-xs font-medium text-[#ff8a8d] transition hover:bg-[#ff5a5f]/10"
+            className="flex items-center gap-1.5 rounded-lg border border-[#ff5a5f]/40 px-3 py-1.5 text-xs font-medium text-rose-600 transition hover:bg-[#ff5a5f]/10 dark:text-[#ff8a8d]"
           >
             <PinOff className="h-3.5 w-3.5" />
             {t('agents.unpin')}

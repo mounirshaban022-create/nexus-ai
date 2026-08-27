@@ -576,7 +576,7 @@ function AddAccountSheet({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center nx-scrim backdrop-blur-sm sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label="Connect email account"

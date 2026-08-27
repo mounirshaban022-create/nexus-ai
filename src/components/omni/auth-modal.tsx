@@ -91,7 +91,7 @@ export function AuthModal({ open, onClose, initialMode = 'signin' }: AuthModalPr
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center nx-scrim p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={isSignup ? 'Create account' : 'Sign in'}

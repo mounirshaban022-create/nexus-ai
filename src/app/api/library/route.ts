@@ -8,6 +8,12 @@ import { getCurrentUser } from '@/lib/auth'
  *
  * GET  /api/library            → { items: [{ id, type, name, preview, size, url, downloadUrl?, createdAt, status? }] }
  * DELETE /api/library          → body { id, type } → { ok: true }
+ *
+ * SECURITY: the GET feed is already owner-scoped (caller's rows + the
+ * guest pool of unclaimed userId=null rows — guests generate images too,
+ * so the listing stays available signed-out). The DELETE handler verifies
+ * ownership: only unclaimed (guest-pool) rows or rows stamped with the
+ * caller's userId can be removed — never another user's files.
  */
 
 type ItemType = 'image' | 'video' | 'document'
@@ -105,6 +111,25 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/** Ownership check: unclaimed (userId null) rows are guest-pool items and
+ *  may be removed by anyone who can see them; claimed rows only by their
+ *  owner. Returns false when the row belongs to a different user or when
+ *  the row doesn't exist. */
+async function callerOwnsItem(
+  type: ItemType,
+  id: string,
+  callerUserId: string | null
+): Promise<boolean> {
+  const row =
+    type === 'image'
+      ? await db.generatedImage.findUnique({ where: { id }, select: { userId: true } })
+      : type === 'video'
+        ? await db.generatedVideo.findUnique({ where: { id }, select: { userId: true } })
+        : await db.generatedDocument.findUnique({ where: { id }, select: { userId: true } })
+  if (!row) return false
+  return row.userId === null || row.userId === callerUserId
+}
+
 export async function DELETE(req: NextRequest) {
   try {
     const body = (await req.json()) as { id?: string; type?: ItemType }
@@ -112,6 +137,11 @@ export async function DELETE(req: NextRequest) {
     const type = body?.type
     if (!id || !type || !['image', 'video', 'document'].includes(type)) {
       return NextResponse.json({ error: 'Body must be { id, type }.' }, { status: 400 })
+    }
+
+    const user = await getCurrentUser(req)
+    if (!(await callerOwnsItem(type, id, user?.id ?? null))) {
+      return NextResponse.json({ error: 'Item not found.' }, { status: 404 })
     }
 
     if (type === 'image') {

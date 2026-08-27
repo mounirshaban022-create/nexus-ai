@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { getVerifiedSession } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
+    // Auth gate + ownership scoping: conversation history is per-account.
+    // Signed-out (guest) clients get 401 — their chats still work, they
+    // just aren't listed server-side.
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     // Rate limit: 60 reads per minute per client (prevents scraping/DoS)
     const rl = rateLimit(`file-read:${clientKey(req)}`, 60, 60_000)
     if (!rl.ok) {
@@ -12,7 +21,7 @@ export async function GET(req: NextRequest) {
   try {
     const kind = req.nextUrl.searchParams.get('kind') === 'agent' ? 'agent' : 'chat'
     const sessions = await db.chatSession.findMany({
-      where: { kind },
+      where: { kind, userId: session.userId },
       orderBy: { updatedAt: 'desc' },
       take: 50,
       include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },

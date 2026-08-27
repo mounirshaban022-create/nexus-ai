@@ -41,6 +41,11 @@ import { onDeviceTranscribe, onDeviceAsrBroken, warmUpOnDeviceAsr } from '@/lib/
 
 type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking'
 
+/** What happened in a turn — lets the recorder path fall back to the
+ * on-device Whisper engine when the SERVER speech engines fail (the old
+ * code swallowed failures, so the fallback was unreachable dead code). */
+type TurnOutcome = 'ok' | 'no-speech' | 'asr-failed' | 'aborted' | 'error'
+
 interface Turn {
   id: string
   user: string
@@ -155,11 +160,26 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const lastStartRef = useRef(0)
   const manualStopRef = useRef(false)
   const netErrRef = useRef(0)
+  // Voice-glitch fixes (session 2026-08):
+  //  - micGenRef: mic-acquisition generation — a getUserMedia promise that
+  //    resolves AFTER the overlay closed/reopened is discarded (no leaks).
+  //  - recorderActiveRef: double-recorder lock (two MediaRecorders on one
+  //    stream caused glitchy overlapping turns).
+  //  - srLastHeardRef/speechEnergyRef/watchdogFiredRef: the Web Speech
+  //    watchdog — Chrome's SR can fail SILENTLY (mic works, service answers,
+  //    but no transcript ever arrives). When the user has clearly spoken for
+  //    ~2s with zero SR output, we auto-switch to the proven
+  //    recorder+server-Whisper path instead of leaving the user unheard.
+  const micGenRef = useRef(0)
+  const recorderActiveRef = useRef(false)
+  const srLastHeardRef = useRef(0)
+  const speechEnergyRef = useRef(0)
+  const watchdogFiredRef = useRef(false)
   const waveRef = useRef<HTMLDivElement | null>(null)
   const orbScaleRef = useRef<HTMLDivElement | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
   const startListeningRef = useRef<((langOverride?: string) => void) | null>(null)
-  const runTurnRef = useRef<((input: { message?: string; audioBase64?: string }) => Promise<void>) | null>(null)
+  const runTurnRef = useRef<((input: { message?: string; audioBase64?: string }) => Promise<TurnOutcome>) | null>(null)
 
   const setStateSafe = useCallback((s: VoiceState) => {
     stateRef.current = s
@@ -422,9 +442,9 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   /* --------------------------------------------------------------- */
 
   const runTurn = useCallback(
-    async (input: { message?: string; audioBase64?: string }): Promise<void> => {
+    async (input: { message?: string; audioBase64?: string }): Promise<TurnOutcome> => {
       const message = input.message?.trim()
-      if ((!message && !input.audioBase64) || busyRef.current || !openRef.current) return
+      if ((!message && !input.audioBase64) || busyRef.current || !openRef.current) return 'no-speech'
       busyRef.current = true
       stopRecognition()
       stopAsrLoop()
@@ -434,28 +454,44 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       setError('')
       setCaption('')
       turnControllerRef.current = new AbortController()
+      // When the SERVER speech engines fail, the recorder path (startAsrLoop)
+      // must get control back to try the on-device Whisper — so this turn
+      // must NOT auto-restart listening in its finally block.
+      let suppressRestart = false
       try {
         const data = await think({ message, audioBase64: input.audioBase64 })
         if (data.sessionId) sessionIdRef.current = data.sessionId
+        if (data.note === 'asr-engine-failed') {
+          // Both server ASR engines failed (quota / outage). Return control
+          // to the caller WITHOUT restarting the loop — it falls back to the
+          // on-device Whisper engine.
+          suppressRestart = true
+          return 'asr-failed'
+        }
         const reply = (data.reply ?? '').trim()
         const shown = message || (data.transcript ?? '').trim()
         if (!reply || !shown || data.note === 'no-speech') {
           setNoSpeech(true)
           window.setTimeout(() => setNoSpeech(false), 2200)
-          return
+          return 'no-speech'
         }
         historyRef.current.push({ role: 'user', content: shown })
         historyRef.current.push({ role: 'assistant', content: reply })
         setTurns((prev) => [...prev.slice(-5), { id: crypto.randomUUID(), user: shown, reply }])
         await speak(reply, data.audio, data.audioFormat)
+        return 'ok'
       } catch (e) {
-        if ((e as Error)?.name === 'AbortError') return
+        if ((e as Error)?.name === 'AbortError') return 'aborted'
         const msg = e instanceof Error ? e.message : 'Something went wrong — try again.'
         setError(msg)
         toast({ title: 'Voice error', description: msg, variant: 'destructive' })
+        return 'error'
       } finally {
         busyRef.current = false
-        if (openRef.current && !mutedRef.current && !micDeniedRef.current) {
+        if (suppressRestart) {
+          // Caller decides what happens next (on-device fallback) — leave
+          // the state machine to it.
+        } else if (openRef.current && !mutedRef.current && !micDeniedRef.current) {
           startListeningRef.current?.() // hands-free loop: listen again
         } else {
           setStateSafe('idle')
@@ -478,13 +514,19 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     const stream = micStreamRef.current
     if (!stream || typeof MediaRecorder === 'undefined' || busyRef.current) return
     if (!openRef.current || mutedRef.current) return
+    if (recorderActiveRef.current) return // double-recorder lock
     const token = ++asrTokenRef.current
+    recorderActiveRef.current = true
+    const release = () => {
+      recorderActiveRef.current = false
+    }
     const alive = () =>
       asrTokenRef.current === token && openRef.current && !mutedRef.current && !busyRef.current
 
     try {
       const ctx = ensureAudioCtx()
       if (!ctx || ctx.state === 'closed') throw new Error('Audio context unavailable')
+      if (ctx.state === 'suspended') await ctx.resume().catch(() => {})
 
       const source = ctx.createMediaStreamSource(stream)
       const analyser = ctx.createAnalyser()
@@ -504,16 +546,22 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       setCaption('')
       netErrRef.current = 0
 
-      // VAD — resolve(true) once speech is followed by ~1.5s of silence.
+      // ADAPTIVE VAD — the old fixed 0.008 threshold mistook ambient noise
+      // for speech (false "Didn't catch that" loops) or missed quiet talkers.
+      // Calibrate on the first ~600 ms of ambient audio, then require
+      // sustained speech and ~1.2 s of trailing silence to close the turn.
       const spoke = await new Promise<boolean>((resolve) => {
         const data = new Uint8Array(analyser.fftSize)
         let speechStart: number | null = null
         let lastSound = performance.now()
+        let speechMs = 0
         const startedAt = performance.now()
-        const THRESHOLD = 0.008
-        const SILENCE_MS = 1500
-        const MIN_SPEECH = 450
-        const MAX_WAIT = 12_000
+        let noiseFloor = 0
+        let noiseSamples = 0
+        let noiseSum = 0
+        const SILENCE_MS = 1200
+        const MIN_SPEECH_MS = 240
+        const MAX_WAIT = 15_000
         let raf = 0
         const loop = () => {
           if (!alive()) {
@@ -529,14 +577,26 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           }
           const rms = Math.sqrt(sum / data.length)
           const now = performance.now()
-          if (rms > THRESHOLD) {
-            if (speechStart === null) speechStart = now
+          // Ambient calibration — first ~36 frames (≈600 ms) while silent.
+          if (noiseSamples < 36 && speechStart === null) {
+            noiseSum += rms
+            noiseSamples++
+            if (noiseSamples === 36) noiseFloor = Math.max(0.002, noiseSum / 36)
+          }
+          const threshold = Math.max(0.01, noiseFloor > 0 ? noiseFloor * 2.5 : 0.012)
+          if (rms > threshold) {
+            speechMs += 16 // rAF frame ≈ 16 ms
+            if (speechStart === null && speechMs >= MIN_SPEECH_MS) {
+              speechStart = now - speechMs
+            }
             lastSound = now
+          } else if (speechStart === null) {
+            speechMs = 0 // below threshold before any speech — reset
           }
           if (
             speechStart !== null &&
             now - lastSound > SILENCE_MS &&
-            now - speechStart > MIN_SPEECH
+            speechMs >= MIN_SPEECH_MS
           ) {
             cancelAnimationFrame(raf)
             resolve(true)
@@ -576,12 +636,15 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
         /* already disconnected */
       }
       if (mediaRecorderRef.current === rec) mediaRecorderRef.current = null
-      if (!alive()) return
+      if (!alive()) {
+        release()
+        return
+      }
 
       if (!spoke || blob.size < 1000) {
-        // Gentle cue — nothing was said — then keep listening.
-        setNoSpeech(true)
-        window.setTimeout(() => setNoSpeech(false), 2000)
+        // Pure silence — restart the loop WITHOUT the "Didn't catch that"
+        // nag (nothing was said; nagging every 15 s felt glitchy).
+        release()
         startListeningRef.current?.()
         return
       }
@@ -591,20 +654,21 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       /* PRIMARY — server-side Whisper-large-v3 (Hugging Face): the most
        * accurate engine, zero client downloads, works in every browser and
        * inside cross-origin iframes. The server tries HF first and Z.ai
-       * second. Only when the whole server path comes back empty does the
-       * on-device Whisper run (offline / degraded-network fallback). */
+       * second. When BOTH server engines fail it replies with
+       * note:'asr-engine-failed' and we fall back to on-device Whisper. */
       setCaption('')
       const base64 = await blobToWavBase64(blob)
-      if (!alive()) return
-      try {
-        await runTurnRef.current?.({ audioBase64: base64 })
+      if (!alive()) {
+        release()
         return
-      } catch (serverErr) {
-        if ((serverErr as Error)?.name === 'AbortError') return
-        // Server path failed entirely — fall through to on-device Whisper.
-        console.warn('[voice] server ASR path failed, trying on-device Whisper:', serverErr)
+      }
+      const outcome = await runTurnRef.current?.({ audioBase64: base64 })
+      if (outcome !== 'asr-failed') {
+        release()
+        return
       }
 
+      /* FALLBACK — on-device Whisper (offline / server engines down). */
       if (!onDeviceAsrBroken()) {
         try {
           const text = await onDeviceTranscribe(blob, langRef.current, (pct, note) => {
@@ -612,9 +676,9 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
               setCaption(pct >= 100 ? 'Listening…' : `${note} ${pct}%`)
             }
           })
-          if (!alive()) return
           if (text) {
             setCaption('')
+            release()
             await runTurnRef.current?.({ message: text })
             return
           }
@@ -624,11 +688,15 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       }
 
       // Every engine failed to hear anything.
-      if (alive() && asrTokenRef.current === token) {
+      release()
+      if (openRef.current && asrTokenRef.current === token) {
         setNoSpeech(true)
         window.setTimeout(() => setNoSpeech(false), 2200)
+        setError('Speech engines are unreachable right now — check your connection, or type below.')
+        setStateSafe('idle')
       }
     } catch (e) {
+      release()
       if ((e as Error)?.name === 'AbortError') return
       if (asrTokenRef.current === token) {
         setError('Voice capture failed — check your microphone, or type below.')
@@ -690,6 +758,9 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           if (r.isFinal) finalTranscript += r[0].transcript
           else interimText += r[0].transcript
         }
+        // The SR watchdog bookkeeping — SR IS producing output.
+        srLastHeardRef.current = performance.now()
+        speechEnergyRef.current = 0
         if (interimText) {
           netErrRef.current = 0
           setInterim(interimText)
@@ -751,8 +822,16 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           restartCountRef.current += 1
           if (restartCountRef.current >= 10) {
             stopRecognition()
-            setStateSafe('idle')
-            setError('Voice recognition keeps stopping in this browser — type below; replies are still spoken.')
+            if (micStreamRef.current && typeof MediaRecorder !== 'undefined') {
+              // SR is thrashing in this browser — the recorder + server
+              // Whisper path works everywhere. SWITCH to it instead of
+              // giving up (was: a dead "type below" error message).
+              forceRecorderRef.current = true
+              window.setTimeout(() => startListeningRef.current?.(), 150)
+            } else {
+              setStateSafe('idle')
+              setError('Voice recognition keeps stopping in this browser — type below; replies are still spoken.')
+            }
             return
           }
           if (restartCountRef.current >= 5 && micStreamRef.current && typeof MediaRecorder !== 'undefined') {
@@ -776,6 +855,9 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       recognitionRef.current = rec
       manualStopRef.current = false
       restartCountRef.current = 0
+      // Watchdog bookkeeping — give SR a fair startup window.
+      srLastHeardRef.current = performance.now()
+      speechEnergyRef.current = 0
       try {
         rec.start()
         lastStartRef.current = performance.now()
@@ -800,13 +882,21 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const acquireMic = useCallback(async (): Promise<boolean> => {
     if (micStreamRef.current) return true
     if (!navigator.mediaDevices?.getUserMedia) return false
+    // Generation token — if the overlay closes (or reopens) while the
+    // permission prompt is still up, the late-resolving stream is discarded
+    // instead of leaked (the old 6-second race aborted while the user was
+    // still READING the prompt, then leaked the mic when it resolved later).
+    const gen = ++micGenRef.current
     try {
-      const stream = await Promise.race([
-        navigator.mediaDevices.getUserMedia({ audio: true }),
-        new Promise<never>((_, reject) =>
-          window.setTimeout(() => reject(new Error('Microphone is busy')), 6000)
-        ),
-      ])
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (gen !== micGenRef.current || !openRef.current) {
+        try {
+          stream.getTracks().forEach((tr) => tr.stop())
+        } catch {
+          /* already stopped */
+        }
+        return false
+      }
       micStreamRef.current = stream
       // Waveform analyser (kept separate from the VAD analyser).
       try {
@@ -850,6 +940,11 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     }
     netErrRef.current = 0
     restartCountRef.current = 0
+    watchdogFiredRef.current = false
+    speechEnergyRef.current = 0
+    srLastHeardRef.current = performance.now()
+    recorderActiveRef.current = false
+    micGenRef.current++
     setTurns([])
     setInterim('')
     setError('')
@@ -917,8 +1012,10 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       cancelled = true
       window.clearTimeout(t)
       manualStopRef.current = true
+      micGenRef.current++ // invalidate any in-flight getUserMedia
       stopRecognition()
       stopAsrLoop()
+      recorderActiveRef.current = false
       stopSpeaking()
       turnControllerRef.current?.abort()
       turnControllerRef.current = null
@@ -960,14 +1057,23 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   }, [open])
 
   // Waveform + orb pulse — one rAF loop, direct DOM writes (no re-renders).
+  // Also hosts the WEB SPEECH WATCHDOG: Chrome's SpeechRecognition can fail
+  // SILENTLY (mic works, no errors, but no transcript ever arrives — the
+  // reported "voice doesn't hear me" glitch). When the user has clearly
+  // spoken for ~2s with zero SR output, we auto-switch to the proven
+  // recorder + server-Whisper path.
   useEffect(() => {
     if (!open) return
     let raf = 0
+    let lastFrame = performance.now()
     const loop = () => {
+      const now = performance.now()
+      const dt = Math.min(100, now - lastFrame)
+      lastFrame = now
       const bars = waveRef.current?.children
       if (bars && bars.length > 0) {
         const n = bars.length
-        const t = performance.now() / 1000
+        const t = now / 1000
         const st = stateRef.current
 
         let levels: number[] | null = null
@@ -977,6 +1083,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           an.getByteTimeDomainData(data)
           const seg = Math.floor(data.length / n) || 1
           levels = []
+          let energySum = 0
           for (let i = 0; i < n; i++) {
             let sum = 0
             const from = i * seg
@@ -985,7 +1092,28 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
               sum += v * v
             }
             const rms = Math.sqrt(sum / seg)
+            energySum += rms
             levels.push(Math.min(1, rms * 6))
+          }
+
+          // ---- Web Speech watchdog (SR mode only) ----
+          if (recognitionRef.current && !watchdogFiredRef.current) {
+            const overallRms = energySum / n
+            if (overallRms > 0.012) {
+              speechEnergyRef.current += dt
+            }
+            if (
+              speechEnergyRef.current > 2200 &&
+              now - srLastHeardRef.current > 3000
+            ) {
+              watchdogFiredRef.current = true
+              speechEnergyRef.current = 0
+              stopRecognition()
+              forceRecorderRef.current = true
+              setCaption('')
+              setInterim('')
+              window.setTimeout(() => startListeningRef.current?.(), 150)
+            }
           }
         }
 
@@ -1021,7 +1149,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [open])
+  }, [open, stopRecognition])
 
   // Escape closes the overlay.
   useEffect(() => {
@@ -1099,6 +1227,11 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       mutedRef.current = false
       setError('')
       startListening()
+    } else if (stateRef.current === 'idle') {
+      // Paused (engine fell back / SR bailed) — the mic button RESUMES
+      // listening directly (was: required a confusing mute→unmute dance).
+      setError('')
+      startListening()
     } else {
       setMuted(true)
       mutedRef.current = true
@@ -1150,7 +1283,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
             ? 'Speaking…'
             : muted
               ? 'Mic muted'
-              : 'Starting…'
+              : 'Voice paused — tap the mic to resume'
 
   const recentTurns = turns.slice(-VISIBLE_TURNS)
   const busy = state === 'thinking' || state === 'speaking'

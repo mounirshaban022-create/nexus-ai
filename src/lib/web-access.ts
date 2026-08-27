@@ -290,40 +290,81 @@ export function htmlToReadableText(html: string): string {
     .trim()
 }
 
+/** Max redirect hops readPageDirect will follow — each one re-validated
+ *  through the SSRF guard so a public URL can't bounce to an internal one. */
+const MAX_REDIRECT_HOPS = 3
+
 /** Fetches any public URL directly and extracts readable content.
  *  UA negotiation: wikimedia hosts get the descriptive bot UA (they block
  *  browser UAs from server IPs); everything else gets a browser UA first,
- *  with a bot-UA retry if blocked (403/429). */
+ *  with a bot-UA retry if blocked (403/429). Redirects are followed
+ *  MANUALLY — every hop goes back through assertPublicUrl, so a public
+ *  page can't redirect the fetch into a private/internal address. */
 export async function readPageDirect(url: string): Promise<PageContent> {
-  const parsed = assertPublicUrl(url) // SSRF guard
-  const useBotUa = BOT_UA_HOSTS.some((re) => re.test(parsed.hostname))
+  const initial = assertPublicUrl(url) // SSRF guard
+  const useBotUa = BOT_UA_HOSTS.some((re) => re.test(initial.hostname))
   const headerSets = useBotUa
     ? [BOT_HEADERS, BROWSER_HEADERS] // wikimedia: bot UA first
     : [BROWSER_HEADERS, BOT_HEADERS] // others: browser UA first, bot retry
 
   let res: Response | null = null
   let lastStatus = 0
+  let finalUrl = initial
+
   for (const headers of headerSets) {
-    try {
-      const attempt = await fetch(parsed.toString(), {
-        headers,
-        signal: AbortSignal.timeout(20_000),
-        redirect: 'follow',
-      })
+    let current = initial
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+      let attempt: Response
+      try {
+        attempt = await fetch(current.toString(), {
+          headers,
+          signal: AbortSignal.timeout(20_000),
+          redirect: 'manual',
+        })
+      } catch {
+        // network error — try the next header set
+        lastStatus = 0
+        break
+      }
+      lastStatus = attempt.status
+
+      // Redirect hop — resolve + RE-VALIDATE before following.
+      if ([301, 302, 303, 307, 308].includes(attempt.status)) {
+        if (hop === MAX_REDIRECT_HOPS) {
+          throw new Error('Too many redirects')
+        }
+        const location = attempt.headers.get('location')
+        let next: URL | null = null
+        if (location) {
+          try {
+            next = new URL(location, current) // resolves relative redirects
+          } catch {
+            next = null
+          }
+        }
+        if (!next) {
+          res = attempt
+          break
+        }
+        current = assertPublicUrl(next.toString()) // SSRF guard, every hop
+        finalUrl = current
+        void attempt.body?.cancel().catch(() => {})
+        continue
+      }
+
       if (attempt.ok) {
         res = attempt
         break
       }
-      lastStatus = attempt.status
       // Only retry on blocking statuses; 404/5xx won't improve with a new UA
       if (attempt.status !== 403 && attempt.status !== 429 && attempt.status !== 401) {
         res = attempt
         break
       }
-    } catch {
-      // network error — try the next header set
-      lastStatus = 0
+      // 403/429/401 → break to the next header set
+      break
     }
+    if (res) break
   }
   if (!res || !res.ok) {
     throw new Error(`Page responded ${lastStatus || 'unreachable'}`)
@@ -340,8 +381,8 @@ export async function readPageDirect(url: string): Promise<PageContent> {
   const text = htmlToReadableText(html)
   if (text.length < 40) throw new Error('Page had no readable text (likely JS-rendered)')
   return {
-    title: titleMatch ? decodeEntities(titleMatch[1]) : parsed.hostname,
-    url: parsed.toString(),
+    title: titleMatch ? decodeEntities(titleMatch[1]) : finalUrl.hostname,
+    url: finalUrl.toString(),
     html: html.slice(0, 200_000),
     text: text.slice(0, 60_000),
     publishedTime: timeMatch?.[1],

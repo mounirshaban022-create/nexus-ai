@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getVerifiedSession } from '@/lib/auth'
 import { getPrimaryAccount, listEmails } from '@/lib/email'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 /**
  * GET /api/email/inbox?limit=10&folder=INBOX
  * Lists recent emails from the primary connected account.
+ * Account-scoped feature — requires a verified session.
  */
 export async function GET(req: NextRequest) {
   try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
+    }
+
     // Rate limit first (20 per 60s per client)
     const rl = rateLimit(`inbox:${clientKey(req)}`, 20, 60_000)
     if (!rl.ok) {

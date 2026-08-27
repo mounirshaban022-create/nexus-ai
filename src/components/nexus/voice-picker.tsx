@@ -115,7 +115,7 @@ export function VoicePicker({
           aria-label={`Voice: ${voiceLabel(value)}. Change voice.`}
           className="flex h-9 max-w-[62vw] items-center gap-1.5 rounded-full border border-white/12 bg-white/5 pl-2.5 pr-2 text-xs font-medium text-zinc-200 transition hover:border-[#ff5a5f]/45 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5a5f]/50 sm:max-w-none"
         >
-          <AudioLines className="h-3.5 w-3.5 shrink-0 text-[#ff8a8d]" aria-hidden />
+          <AudioLines className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
           <span className="truncate">
             <span className="hidden text-zinc-500 sm:inline">Voice:&nbsp;</span>
             {voiceLabel(value)}
@@ -189,10 +189,10 @@ export function VoicePicker({
                         aria-hidden
                         className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[10px] font-bold uppercase ${
                           v.provider === 'kokoro'
-                            ? 'bg-[#f5a623]/15 text-[#f5a623]'
+                            ? 'bg-[#f5a623]/15 text-amber-700 dark:text-[#f5a623]'
                             : v.provider === 'nexus'
-                              ? 'bg-[#ff2a68]/15 text-[#ff7a9e]'
-                              : 'bg-[#ff5a5f]/15 text-[#ff8a8d]'
+                              ? 'bg-[#ff2a68]/15 text-rose-600 dark:text-[#ff7a9e]'
+                              : 'bg-[#ff5a5f]/15 text-rose-600 dark:text-[#ff8a8d]'
                         }`}
                       >
                         {v.provider === 'kokoro' ? <WifiOff className="h-3.5 w-3.5" /> : v.label.slice(0, 2)}

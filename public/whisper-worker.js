@@ -9,11 +9,15 @@
  * so this worker adds ZERO weight to the app bundle. The model (~45 MB,
  * quantized) is downloaded once and cached by the browser's Cache API.
  *
- * Messages IN : { type: 'transcribe', audio: Float32Array@16kHz, lang: 'en' }
+ * Messages IN : { type: 'transcribe', audio: Float32Array@16kHz, lang: 'en', seq }
  * Messages OUT: { type: 'progress', percent, note }
  *               { type: 'ready' }
- *               { type: 'result', text }
- *               { type: 'error', message }
+ *               { type: 'result', text, seq }
+ *               { type: 'error', message, seq }
+ *
+ * The seq echo lets the client route responses when a warm-up and a real
+ * transcription overlap — the old single-slot protocol delivered the
+ * warm-up's empty result to the waiting caller (race bug).
  */
 
 let pipePromise = null
@@ -80,7 +84,7 @@ async function getPipeline() {
 }
 
 self.onmessage = async (e) => {
-  const { type, audio, lang } = e.data || {}
+  const { type, audio, lang, seq } = e.data || {}
   if (type !== 'transcribe' || !audio) return
   try {
     const recognizer = await getPipeline()
@@ -94,8 +98,8 @@ self.onmessage = async (e) => {
     ]
     if (supported.includes(short)) opts.language = short
     const out = await recognizer(audio, opts)
-    self.postMessage({ type: 'result', text: (out && out.text ? String(out.text) : '').trim() })
+    self.postMessage({ type: 'result', text: (out && out.text ? String(out.text) : '').trim(), seq })
   } catch (err) {
-    self.postMessage({ type: 'error', message: err && err.message ? err.message : 'Speech engine failed.' })
+    self.postMessage({ type: 'error', message: err && err.message ? err.message : 'Speech engine failed.', seq })
   }
 }
