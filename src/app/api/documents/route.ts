@@ -261,10 +261,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[api/documents] POST error:', error)
     const msg = error instanceof Error ? error.message : 'Upload failed.'
-    // User-friendly errors → 400; technical failures → 500
+    // User-friendly errors → 400 (message shown); technical failures → 500
+    // (generic message — internal details stay in the server log only)
     const isUserError = /not a valid|No text|Could not read|corrupted|password|scanned/i.test(msg)
     return NextResponse.json(
-      { error: msg },
+      { error: isUserError ? msg : 'Upload failed. Please try a different file.' },
       { status: isUserError ? 400 : 500 }
     )
   }
@@ -317,8 +318,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ answer })
   } catch (error) {
+    console.error('[api/documents] query error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Query failed.' },
+      { error: 'Could not answer that question from the document. Please try again.' },
       { status: 500 }
     )
   }
@@ -444,8 +446,9 @@ export async function PUT(req: NextRequest) {
       },
     })
   } catch (error) {
+    console.error('[api/documents] edit error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Edit failed.' },
+      { error: 'Could not edit that document. Please try again.' },
       { status: 500 }
     )
   }

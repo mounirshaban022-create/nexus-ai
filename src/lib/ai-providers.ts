@@ -302,7 +302,17 @@ export const AI_PROVIDER_MAP = new Map(AI_PROVIDER_PRESETS.map((p) => [p.id, p])
 /* ------------------------------------------------------------------ */
 
 function getKey(): Buffer {
-  const secret = process.env.NEXUS_EMAIL_SECRET ?? 'nexus-local-email-secret-v1'
+  // In production, NEXUS_EMAIL_SECRET MUST be set — a known dev fallback
+  // would let anyone decrypt stored provider API keys with a public secret.
+  // Mirrors the guard in src/lib/email.ts (thrown lazily at encrypt/decrypt
+  // time so unrelated routes never crash at import).
+  let secret = process.env.NEXUS_EMAIL_SECRET
+  if (!secret || secret.trim() === '') {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('NEXUS_EMAIL_SECRET environment variable is required in production')
+    }
+    secret = 'nexus-local-email-secret-v1'
+  }
   return scryptSync(secret, 'nexus-email-salt-v1', 32)
 }
 

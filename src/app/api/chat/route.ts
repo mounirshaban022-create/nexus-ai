@@ -1372,11 +1372,37 @@ async function executeChatTool(
 
   /* ---- run_command: CLI sandbox (bash, blocked dangerous ops) ---- */
   if (toolId === 'run_command') {
+    // The command tool executes real shell on this server. Anonymous chat is
+    // allowed, but running commands is not — a guest could otherwise steer
+    // the model into reading server secrets (env files, the SQLite DB).
+    if (!userId) {
+      return {
+        result: {
+          error: 'Sign in required',
+          note: 'The command tool is available to signed-in users only. Ask the user to sign in, and continue without running commands.',
+        },
+      }
+    }
     const command = String(args.command ?? '').slice(0, 2000)
     if (!command.trim()) throw new Error('command required')
-    const blocked = /\b(rm\s+-rf\s+\/|mkfs|shutdown|reboot|init\s+0|curl[^|]*\|\s*(ba)?sh|wget[^|]*\|\s*(ba)?sh|nc\s+-l|ncat|chmod\s+777\s+\/|kill\s+-9\s+1\b|pkill\s+-9|>\/dev\/sd[a-z])|\(\)\s*\{.*\}\s*;?\s*:/i
+    const blocked = /(rm\s+-rf\s+\/|mkfs|shutdown|reboot|init\s+0|curl[^|]*\|\s*(ba)?sh|wget[^|]*\|\s*(ba)?sh|nc\s+-l|ncat|chmod\s+777\s+\/|kill\s+-9\s+1\b|pkill\s+-9|>\/dev\/sd[a-z])|\(\)\s*\{.*\}\s*;?\s*:/i
     if (blocked.test(command)) {
       throw new Error('Command blocked by the NEXUS safety filter (destructive or remote-code injection pattern).')
+    }
+    // Secret-exfiltration guards. The bash cwd is the shared workspace, so
+    // every pattern below targets ABSOLUTE paths or parent traversal —
+    // workspace-local files with similar names keep working.
+    const secretProbe = [
+      /\.\.\//,                                                    // parent-dir traversal
+      /\/[^\s'"&;|]*\.env\b/i,                                     // server .env files by absolute path
+      /\/proc\/[\s\S]*environ/i,                                   // other processes' environment
+      /\/[^\s'"&;|]*(id_rsa|\.ssh\b|\.aws\b|\.kube\b|\.gnupg|\.netrc|git-credentials|\.git\/config)/i,
+      /\/[^\s'"&;|]*(custom\.db|\/db\/)/i,                        // app SQLite DB by absolute path
+      /\/[^\s'"&;|]*\/db\/[^\s'"&;|]*\.sqlite3?\b/i,
+      /\bsudo\b/,                                                   // must never be needed; blocks passwordless-sudo escapes
+    ]
+    if (secretProbe.some((re) => re.test(command))) {
+      throw new Error('Command blocked by the NEXUS safety filter (access to server credentials or system internals).')
     }
     // SKILLS FIX: the model tends to emit bare `pip install …`. The SYSTEM
     // pip blocks those (PEP 668 externally-managed environment) and the
@@ -1426,15 +1452,25 @@ async function executeChatTool(
           cwd,
           env: { PATH: `${process.env.PATH}:${cwd}/.local/bin:${cwd}/node_modules/.bin`, HOME: cwd, LANG: 'en_US.UTF-8', NEXUS_SANDBOX: '1' } as unknown as NodeJS.ProcessEnv,
           stdio: ['ignore', 'pipe', 'pipe'] as Array<'ignore' | 'pipe'>,
+          // Own process group so the timeout kill reaps background children.
+          detached: true,
         })
         let stdout = ''
         let stderr = ''
         let timedOut = false
-        const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, TIMEOUT_MS)
+        const killTree = () => {
+          if (!child.pid) return
+          try {
+            process.kill(-child.pid, 'SIGKILL') // negative pid = whole group
+          } catch {
+            try { child.kill('SIGKILL') } catch { /* already gone */ }
+          }
+        }
+        const timer = setTimeout(() => { timedOut = true; killTree() }, TIMEOUT_MS)
         child.stdout?.on('data', (d: Buffer) => { if (stdout.length < 60_000) stdout += d.toString().slice(0, 60_000 - stdout.length) })
         child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 20_000) stderr += d.toString().slice(0, 20_000 - stderr.length) })
         child.on('error', (err) => { clearTimeout(timer); resolve({ stdout, stderr: stderr + err.message, code: null, timedOut }) })
-        child.on('close', (code) => { clearTimeout(timer); resolve({ stdout, stderr, code, timedOut }) })
+        child.on('close', (code) => { clearTimeout(timer); killTree(); resolve({ stdout, stderr, code, timedOut }) })
       })
       return {
         result: {
@@ -1509,13 +1545,22 @@ async function executeChatTool(
             cwd: workspace,
             env: { PATH: `${process.env.PATH}:${workspace}/.local/bin`, HOME: workspace, LANG: 'en_US.UTF-8', NEXUS_SANDBOX: '1' } as unknown as NodeJS.ProcessEnv,
             stdio: ['ignore', 'pipe', 'pipe'] as Array<'ignore' | 'pipe'>,
+            detached: true,
           })
           let out = ''
           child.stdout?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
           child.stderr?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
-          const timer = setTimeout(() => child.kill('SIGKILL'), 150_000)
+          const killTree = () => {
+            if (!child.pid) return
+            try {
+              process.kill(-child.pid, 'SIGKILL')
+            } catch {
+              try { child.kill('SIGKILL') } catch { /* already gone */ }
+            }
+          }
+          const timer = setTimeout(() => killTree(), 150_000)
           child.on('error', (err) => { clearTimeout(timer); resolve({ stdout: out + err.message, stderr: '', code: null }) })
-          child.on('close', (code) => { clearTimeout(timer); resolve({ stdout: out, stderr: '', code }) })
+          child.on('close', (code) => { clearTimeout(timer); killTree(); resolve({ stdout: out, stderr: '', code }) })
         })
         installOutput = `exit=${exec.code}\n${exec.stdout.slice(0, 2000)}`
       } catch (err) {

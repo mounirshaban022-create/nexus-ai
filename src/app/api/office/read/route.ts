@@ -115,7 +115,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ document: extracted })
   } catch (error) {
     console.error('[api/office/read] POST error:', error)
-    const message = error instanceof Error ? error.message : 'Could not read that file.'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: 'Could not read that file. Make sure it is a valid Word, Excel, or PowerPoint document.' }, { status: 500 })
   }
 }
