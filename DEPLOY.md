@@ -1,5 +1,9 @@
 # Deploying NEXUS AI — Supabase + Vercel (2 services only)
 
+> **NOTE:** This is the quick-start summary. `DEPLOYMENT.md` is the
+> authoritative deployment guide (full env var list, direct-vs-pooler
+> connection details, troubleshooting matrix).
+
 You already have Supabase. You only need Vercel for hosting.
 **No Neon. No Railway. Just these two.**
 
@@ -19,11 +23,12 @@ You already have Supabase. You only need Vercel for hosting.
 ## Step 1: Get Your Supabase Database Password (1 min)
 
 1. Go to [supabase.com/dashboard](https://supabase.com/dashboard)
-2. Open your project (`wpzantzdnobajjlzwzl`)
+2. Open your project (`wopzantzdnobajjlzwzl`)
 3. Go to **Settings → Database**
 4. Find **Connection string (URI)** — it looks like:
    ```
-   postgresql://postgres.wpzantzdnobajjlzwzl:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+   postgresql://postgres:<DB-PASSWORD>@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres  
+   (direct connection — the pooler rejected this tenant; see DEPLOYMENT.md §2)
    ```
 5. Click to reveal/copy it. **If you don't know your database password:**
    - Settings → Database → **Reset database password** (creates a new one)
@@ -60,7 +65,7 @@ In Vercel → your project → **Settings → Environment Variables**:
 |----------|----------------|
 | `DATABASE_URL` | Step 1 connection string |
 | `AUTH_SECRET` | Run `openssl rand -base64 32` in terminal |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://wpzantzdnobajjlzwzl.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://wopzantzdnobajjlzwzl.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Settings → API → `anon` key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → `service_role` key |
 

@@ -179,6 +179,11 @@ export function NexusChat(props: NexusChatProps) {
   // must NOT re-trigger a refetch that would clobber the live transcript
   // (handoff pills, tool cards and attachments are stream-only state).
   const [resumeId] = useState(props.sessionId)
+  // True once the user sends a message in THIS mount. A still-in-flight
+  // resume fetch must never clobber a conversation that already started
+  // (fast typist on a slow network): its late setMessages/setSessionId
+  // would replace the live transcript and rebind the session.
+  const hasSentRef = useRef(false)
   useEffect(() => {
     // Mirror the bound session for the shell (delete-the-active-chat reset).
     useActiveChatSession.getState().setSession(resumeId)
@@ -191,7 +196,9 @@ export function NexusChat(props: NexusChatProps) {
         const data = (await res.json().catch(() => null)) as { session?: unknown } | null
         const s =
           data && typeof data.session === 'object' ? (data.session as Record<string, unknown>) : null
-        if (cancelled || !s) return
+        // The user already started talking — ignore the late resume entirely
+        // (send() created a fresh session; the old one stays in the sidebar).
+        if (cancelled || !s || hasSentRef.current) return
         const rowsRaw = Array.isArray(s.messages) ? s.messages : []
         const sessionAgentSlug = typeof s.agentSlug === 'string' ? s.agentSlug : null
         const rows: NxMsg[] = rowsRaw
@@ -410,6 +417,9 @@ export function NexusChat(props: NexusChatProps) {
       const hasAttach = attach != null
       if (streaming) return
       if (!trimmed && !hasAttach) return
+      // Mark interaction BEFORE any await so the in-flight resume fetch
+      // (if still pending) will drop its result instead of clobbering us.
+      hasSentRef.current = true
 
       const userMsg: NxMsg = {
         id: nextId('local'),

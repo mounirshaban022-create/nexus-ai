@@ -35,7 +35,33 @@ type ZaiSdk = {
         | { choices?: Array<{ message?: { content?: string } }> }
         | AsyncIterable<unknown>
       >
+      /** Vision-capable completion (present on the SDK instance at runtime;
+       *  the shipped .d.ts does not declare it). Accepts multimodal content
+       *  parts ({type:'text'} / {type:'image_url'}) and extra options. */
+      createVision: (args: {
+        model?: string
+        messages: Array<{
+          role: 'user' | 'assistant' | 'system'
+          content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
+        }>
+        max_tokens?: number
+        temperature?: number
+        thinking?: { type: string }
+      }) => Promise<{ choices?: Array<{ message?: { content?: string } }> }>
     }
+  }
+  /** Image generation (present at runtime; not in the shipped typings). */
+  images: {
+    generations: {
+      create: (args: { prompt: string; size?: string }) => Promise<{
+        data?: Array<{ base64?: string; url?: string }>
+      }>
+    }
+    search?: unknown
+  }
+  /** Server-side tool invocations, e.g. 'web_search' / 'page_reader'. */
+  functions: {
+    invoke: (name: string, args?: Record<string, unknown>) => Promise<unknown>
   }
   audio: {
     tts: {
@@ -83,7 +109,7 @@ async function loadZaiSdk(): Promise<ZaiSdk | null> {
   if (globalForZAI.zai) return globalForZAI.zai
   if (globalForZAI.zaiInitFailed) return null
   try {
-    const mod = (await import('z-ai-web-dev-sdk')) as {
+    const mod = (await import('z-ai-web-dev-sdk')) as unknown as {
       default?: {
         create: () => Promise<ZaiSdk>
         new: (config: ZaiConfig) => ZaiSdk

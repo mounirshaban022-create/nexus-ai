@@ -703,7 +703,9 @@ function AttachmentCard({ item }: { item: unknown }) {
   /* Document — Word / Excel / PowerPoint / PDF download card. */
   if (type === 'document') {
     const url = str(a.url)
-    if (!url) return null
+    // Only allow http(s) absolute or same-origin relative URLs — a
+    // server-supplied `javascript:`/`data:` href must never render.
+    if (!url || !/^(https?:\/\/|\/)/i.test(url)) return null
     const title = str(a.title) || 'Document'
     const format = str(a.format).toUpperCase()
     const size = formatBytes(a.size)
@@ -783,7 +785,7 @@ function AttachmentCard({ item }: { item: unknown }) {
                 <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/80" aria-hidden />
                 {url ? (
                   <a
-                    href={url}
+                    href={/^(https?:\/\/|\/)/i.test(url) ? url : undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="min-w-0 flex-1 truncate text-muted-foreground transition hover:text-foreground"

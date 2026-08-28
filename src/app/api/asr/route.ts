@@ -11,6 +11,56 @@ const requestSchema = z.object({
 
 export const maxDuration = 60
 
+/* ------------------------------------------------------------------ */
+/* Groq Whisper — OpenAI-compatible transcription endpoint. Accepts   */
+/* webm/opus, mp4/aac, ogg, wav and mp3 directly (no transcode step), */
+/* so it works on Vercel serverless where ffmpeg is unavailable.      */
+/* ------------------------------------------------------------------ */
+function groqAsrConfigured(): boolean {
+  return (process.env.GROQ_API_KEY || '').trim().length > 0
+}
+
+function mimeToExt(mime: string): string {
+  const m = mime.toLowerCase()
+  if (m.includes('mp4') || m.includes('aac') || m.includes('m4a')) return 'mp4'
+  if (m.includes('ogg')) return 'ogg'
+  if (m.includes('wav')) return 'wav'
+  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3'
+  if (m.includes('flac')) return 'flac'
+  return 'webm'
+}
+
+async function groqAsr(base64Audio: string, language?: string): Promise<string> {
+  const apiKey = (process.env.GROQ_API_KEY || '').trim()
+
+  // Recover the container mime from the data URL when present; MediaRecorder
+  // produces audio/webm (Chrome/Android/Firefox) or audio/mp4 (Safari/iOS).
+  let mime = 'audio/webm'
+  if (base64Audio.startsWith('data:') && base64Audio.includes(',')) {
+    const header = base64Audio.slice(5, base64Audio.indexOf(','))
+    if (header.includes('audio') || header.includes('video')) mime = header.split(';')[0]
+  }
+
+  const bytes = Buffer.from(base64Audio, 'base64')
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(bytes)], { type: mime }), `speech.${mimeToExt(mime)}`)
+  form.append('model', 'whisper-large-v3-turbo')
+  form.append('response_format', 'json')
+  if (language) form.append('language', language)
+
+  const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`Groq ASR ${res.status}: ${detail.slice(0, 200)}`)
+  }
+  const json = (await res.json()) as { text?: string }
+  return (json.text ?? '').trim()
+}
+
 export async function POST(req: NextRequest) {
   try {
     const limit = rateLimit(`asr:${clientKey(req)}`, 30, 60_000)
@@ -60,7 +110,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Fallback — the platform's Z.ai ASR (sandbox/dev environments).
+    // Fallback 1 — Groq Whisper (configured via GROQ_API_KEY). Runs on
+    // Vercel serverless, no ffmpeg needed, and doubles the transcription
+    // capacity when HF is rate-limited or down.
+    if (groqAsrConfigured()) {
+      try {
+        const transcript = await groqAsr(base64Audio, parsed.data.language)
+        if (transcript) return NextResponse.json({ transcript, engine: 'groq-whisper' })
+        return NextResponse.json({
+          transcript: '',
+          note: 'No speech detected in this audio.',
+          engine: 'groq-whisper',
+        })
+      } catch (groqErr) {
+        console.warn('[api/asr] Groq Whisper failed, trying Z.ai ASR:', groqErr instanceof Error ? groqErr.message : groqErr)
+      }
+    }
+
+    // Fallback 2 — the platform's Z.ai ASR (sandbox/dev environments).
     const zai = await getZAI()
     const response = await zai.audio.asr.create({
       file_base64: base64Audio,

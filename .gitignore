@@ -52,13 +52,20 @@ dev.out.log
 prompt
 
 server.log
+# dev screenshots / session artifacts — never commit
+/*.png
+/agent-ctx/
+/tool-results/
+*.bak
+/download/
 # Skills directory
 /skills/
 # NEXUS: never commit runtime data, secrets, or generated files
 db/
 generated-images/
 generated-videos/
-generated-documents/
+generated-documents/*
+!generated-documents/.gitkeep
 upload/
 *.pid
 .env.example.local

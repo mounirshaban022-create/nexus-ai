@@ -33,10 +33,11 @@ const nextConfig: NextConfig = {
     ];
   },
   /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  reactStrictMode: false,
+  // Type errors now FAIL the build — the codebase typechecks clean
+  // (tsc --noEmit = 0 errors) and shipping silent type regressions is how
+  // the bugs in connectors.ts/email.ts survived. Keep this off.
+  // reactStrictMode stays false for now: the streaming/voice effects are
+  // written for single-mount semantics; revisit before enabling.
 };
 
 export default nextConfig;

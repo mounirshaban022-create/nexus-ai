@@ -37,7 +37,11 @@ import { useToast } from '@/hooks/use-toast'
 /* The owner's own number is pre-filled as the first test recipient.   */
 /* ------------------------------------------------------------------ */
 
-const OWNER_NUMBER = '971509376042'
+/* Owner's WhatsApp number, used only for the test-recipient prefill and the
+ * wizard helper copy. Kept out of the shipped JS bundle unless explicitly
+ * provided at build time via NEXT_PUBLIC_OWNER_NUMBER — never hard-code
+ * personal data here. */
+const OWNER_NUMBER = process.env.NEXT_PUBLIC_OWNER_NUMBER ?? ''
 
 interface WaAccount {
   id: string
@@ -288,7 +292,18 @@ export function WhatsAppMode() {
 
   const disconnect = useCallback(async () => {
     try {
-      await fetch('/api/whatsapp/account', { method: 'DELETE' })
+      const res = await fetch('/api/whatsapp/account', { method: 'DELETE' })
+      // Only clear local state when the server actually disconnected the
+      // account — otherwise the UI would show the setup wizard while the
+      // account (and its webhook) is still live on the server.
+      if (!res.ok) {
+        toast({
+          title: 'Could not disconnect',
+          description: 'The server rejected the request — your WhatsApp account is still connected. Please try again.',
+          variant: 'destructive',
+        })
+        return
+      }
       setAccount(null)
       setMessages([])
       setConversations([])
@@ -798,9 +813,15 @@ function SetupWizard(props: {
         icon={<PaperPlaneTilt className="h-4 w-4 text-emerald-400" aria-hidden />}
       >
         <p className="text-xs leading-relaxed text-muted-foreground">
-          After connecting, NEXUS can send to numbers you verified in the Meta console. Your number{' '}
-          <strong>{fmtPhone(ownerNumber)}</strong> is pre-filled — in the Meta console (API Setup →{' '}
-          <em>To</em> field → <em>Manage phone number list</em>) add it and enter the OTP WhatsApp
+          After connecting, NEXUS can send to numbers you verified in the Meta console.{' '}
+          {ownerNumber ? (
+            <>
+              Your number <strong>{fmtPhone(ownerNumber)}</strong> is pre-filled — in the Meta console{' '}
+            </>
+          ) : (
+            <>In the Meta console{' '}</>
+          )}
+          (API Setup → <em>To</em> field → <em>Manage phone number list</em>) add it and enter the OTP WhatsApp
           sends you. Then hit <strong>Send test</strong>.
         </p>
       </WizardStep>
@@ -874,8 +895,13 @@ function EmptyInbox(props: { ownerNumber: string }) {
       <ChatCircleDots className="mx-auto mb-3 h-8 w-8 text-emerald-400/60" aria-hidden />
       <h4 className="text-sm font-semibold">No conversations yet</h4>
       <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
-        Send a test message to <strong>{fmtPhone(props.ownerNumber)}</strong> from the{' '}
-        <em>Test</em> tab. Once the webhook is configured, every customer message lands here and
+        Send a test message{' '}
+        {props.ownerNumber ? (
+          <>
+            to <strong>{fmtPhone(props.ownerNumber)}</strong>{' '}
+          </>
+        ) : null}
+        from the <em>Test</em> tab. Once the webhook is configured, every customer message lands here and
         NEXUS replies automatically.
       </p>
     </div>
@@ -940,8 +966,9 @@ function TestPanel(props: {
       </div>
       <p className="mt-3 flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <ArrowSquareOut className="h-3 w-3" aria-hidden />
-        Your number {fmtPhone(props.ownerNumber)} must be added under Meta console → WhatsApp →
-        API Setup → To → Manage phone number list (OTP verification).
+        {props.ownerNumber
+          ? `Your number ${fmtPhone(props.ownerNumber)} must be added under Meta console → WhatsApp → API Setup → To → Manage phone number list (OTP verification).`
+          : 'Your WhatsApp number must be added under Meta console → WhatsApp → API Setup → To → Manage phone number list (OTP verification).'}
       </p>
     </section>
   )

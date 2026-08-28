@@ -442,9 +442,11 @@ export async function POST(req: NextRequest) {
         objects: [
           // Top accent bar
           { rect: { x: 0, y: 0, w: 10, h: 0.09, fill: { color: theme.accent } } },
-          // Decorative circle cluster (right)
-          { oval: { x: 8.7, y: 0.5, w: 1.7, h: 1.7, fill: { color: theme.primary }, line: { color: theme.accent, width: 0.75 } } },
-          { oval: { x: 9.35, y: 1.25, w: 0.85, h: 0.85, fill: { color: theme.accent } } },
+          // Decorative accent cluster (right) — pptxgenjs master objects only
+          // support rect/line/text/image/chart/placeholder (ellipse/oval were
+          // silently ignored), so these render as thin accent bars.
+          { rect: { x: 8.7, y: 0.5, w: 1.7, h: 0.09, fill: { color: theme.accent } } },
+          { rect: { x: 8.7, y: 0.72, w: 0.85, h: 0.07, fill: { color: theme.primary } } },
           // Bottom brand footer
           { rect: { x: 0, y: 5.16, w: 10, h: 0.24, fill: { color: theme.primary } } },
           { text: { text: 'NEXUS AI  ·  ' + title.slice(0, 60), options: { x: 0.5, y: 5.13, w: 7, h: 0.3, fontSize: 9, color: theme.surfaceAlt, align: 'left' } } },
@@ -458,9 +460,10 @@ export async function POST(req: NextRequest) {
           // Left accent rail with gradient feel (two-tone)
           { rect: { x: 0, y: 0, w: 0.14, h: 2.9, fill: { color: theme.primary } } },
           { rect: { x: 0, y: 2.9, w: 0.14, h: 2.73, fill: { color: theme.accent } } },
-          // Corner decorative circles (subtle)
-          { oval: { x: 8.85, y: 4.35, w: 1.9, h: 1.9, fill: { color: theme.surface }, line: { color: theme.border, width: 0.5 } } },
-          { oval: { x: 9.5, y: 4.95, w: 0.75, h: 0.75, fill: { color: theme.surfaceAlt } } },
+          // Corner decorative accents (subtle) — rects render; the previous
+          // ellipse shapes were ignored by pptxgenjs master objects.
+          { rect: { x: 8.85, y: 4.35, w: 1.9, h: 0.07, fill: { color: theme.surface }, line: { color: theme.border, width: 0.5 } } },
+          { rect: { x: 9.5, y: 4.55, w: 0.75, h: 0.06, fill: { color: theme.surfaceAlt } } },
           // Bottom-right brand chip
           { rect: { x: 8.35, y: 0.32, w: 1.1, h: 0.34, fill: { color: theme.surface }, line: { color: theme.border, width: 0.5 } } },
           { text: { text: 'NEXUS', options: { x: 8.35, y: 0.32, w: 1.1, h: 0.34, fontSize: 10, bold: true, color: theme.primary, align: 'center', fontFace: 'Segoe UI' } } },
@@ -475,8 +478,8 @@ export async function POST(req: NextRequest) {
         background: { color: theme.primary },
         objects: [
           { rect: { x: 0, y: 0, w: 10, h: 0.09, fill: { color: theme.accent } } },
-          { oval: { x: -1.2, y: 3.4, w: 4.4, h: 4.4, fill: { color: theme.primaryDark } } },
-          { oval: { x: 8.2, y: -1.6, w: 3.6, h: 3.6, fill: { color: theme.accent, transparency: 55 } } },
+          { rect: { x: 0, y: 5.16, w: 4.4, h: 0.09, fill: { color: theme.primaryDark } } },
+          { rect: { x: 8.2, y: 0, w: 1.8, h: 0.09, fill: { color: theme.accent, transparency: 55 } } },
         ],
       })
 
@@ -584,16 +587,21 @@ export async function POST(req: NextRequest) {
           fontSize: 24, bold: true, color: theme.primaryDark, fontFace: 'Segoe UI',
         })
         slide.addShape('rect', { x: 0.58, y: 1.25, w: 1.15, h: 0.055, fill: { color: theme.accent } })
-        const tableRows = rows.map((row, i) => ({
-          options: {
-            bold: i === 0,
-            color: i === 0 ? theme.white : theme.text,
-            fill: { color: i === 0 ? theme.primary : i % 2 === 1 ? theme.surface : theme.white },
-            fontSize: 13,
-            valign: 'middle' as const,
-          },
-          text: row.map((c) => c.replace(/\|/g, '/')),
-        }))
+        const tableRows = rows.map((row, i) =>
+          row.map((c) => ({
+            // pptxgenjs v4 table API: each row is an array of cells,
+            // each cell { text, options } — the previous {options, text: string[]}
+            // row shape was never recognized and rendered unstyled.
+            text: c.replace(/\|/g, '/'),
+            options: {
+              bold: i === 0,
+              color: i === 0 ? theme.white : theme.text,
+              fill: { color: i === 0 ? theme.primary : i % 2 === 1 ? theme.surface : theme.white },
+              fontSize: 13,
+              valign: 'middle' as const,
+            },
+          }))
+        )
         slide.addTable(tableRows, {
           x: 0.55, y: 1.6, w: 8.9, fontSize: 13,
           border: { pt: 0.5, color: theme.border },

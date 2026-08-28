@@ -259,7 +259,6 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error('[api/studio/pdf] POST error:', error)
-    const message = error instanceof Error ? error.message : 'PDF operation failed.'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: 'PDF operation failed. Please try again.' }, { status: 500 })
   }
 }

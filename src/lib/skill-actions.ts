@@ -26,6 +26,7 @@
  */
 
 import { randomInt } from 'crypto'
+import type { NextRequest } from 'next/server'
 import { smartChat } from '@/lib/smart-chat'
 import { persistImage } from '@/lib/media-store'
 import { getCurrentUser } from '@/lib/auth'
@@ -466,7 +467,7 @@ async function fetchBuffer(url: string, timeoutMs = 25_000): Promise<Buffer> {
 /* ------------------------------------------------------------------ */
 
 export async function runSkillAction(
-  req: Request,
+  req: NextRequest,
   skillName: string,
   skillCategory: string | undefined,
   userTask: string,

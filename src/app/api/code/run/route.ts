@@ -53,15 +53,28 @@ function execWithTimeout(
         LANG: 'C.UTF-8',
       } as unknown as NodeJS.ProcessEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Own process group → the timeout kill below reaps user-spawned
+      // grandchildren (background processes, workers) too, not just the
+      // direct child.
+      detached: true,
     })
 
     let stdout = ''
     let stderr = ''
     let timedOut = false
 
+    const killTree = () => {
+      if (!child.pid) return
+      try {
+        process.kill(-child.pid, 'SIGKILL') // negative pid = whole group
+      } catch {
+        try { child.kill('SIGKILL') } catch { /* already gone */ }
+      }
+    }
+
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGKILL')
+      killTree()
     }, TIMEOUT_MS)
 
     child.stdout.on('data', (data: Buffer) => {
@@ -82,6 +95,8 @@ function execWithTimeout(
     })
     child.on('close', (code) => {
       clearTimeout(timer)
+      // Reap any background processes the code left behind after exiting.
+      killTree()
       resolve({ stdout, stderr, exitCode: code, timedOut, durationMs: Date.now() - started })
     })
 
@@ -155,7 +170,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error('[api/code/run] POST error:', error)
-    const message = error instanceof Error ? error.message : 'Execution failed.'
-    return NextResponse.json({ error: message }, { status: 500 })
+    // Generic message — internal error details stay in the server log only.
+    return NextResponse.json({ error: 'Execution failed. Please try again.' }, { status: 500 })
   }
 }

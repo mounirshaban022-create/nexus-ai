@@ -126,21 +126,48 @@ export async function POST(req: NextRequest) {
       // table with a detected header row — LLMs reason about markdown
       // tables far better than pipe-joined lines. Numbers keep their
       // formatting; sheets get row counts; multi-sheet docs get an index.
-      const XLSX = await import('xlsx')
-      const wb = XLSX.read(buffer, { type: 'buffer' })
-      metadata.sheetNames = wb.SheetNames
-      const parts: string[] = []
-      if (wb.SheetNames.length > 1) {
-        parts.push(`*Workbook with ${wb.SheetNames.length} sheets: ${wb.SheetNames.join(', ')}.*`)
+      const ExcelJS = await import('exceljs')
+      const wb = new ExcelJS.Workbook()
+      await wb.xlsx.load(buffer as unknown as Parameters<typeof wb.xlsx.load>[0])
+      // exceljs cell values are unions (string | number | Date | rich text |
+      // formula/hyperlink objects) — flatten to display strings the way
+      // sheet_to_json(raw:false) used to.
+      const cellToString = (v: unknown): string => {
+        if (v == null) return ''
+        if (typeof v === 'string') return v
+        if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+        if (v instanceof Date) return v.toISOString().slice(0, 10)
+        if (typeof v === 'object') {
+          const o = v as Record<string, unknown>
+          const rich = o.richText
+          if (Array.isArray(rich)) {
+            return rich
+              .map((t) => (t && typeof t === 'object' && 'text' in t ? String((t as { text?: unknown }).text ?? '') : ''))
+              .join('')
+          }
+          if ('result' in o && o.result != null) return cellToString(o.result)
+          if ('formula' in o) {
+            // exceljs may or may not keep the leading '=' — normalize to one.
+            const f = String(o.formula ?? '')
+            return f.startsWith('=') ? f : `=${f}`
+          }
+          if ('text' in o) return cellToString(o.text)
+          if ('hyperlink' in o && typeof o.hyperlink === 'string') return o.hyperlink
+        }
+        return String(v)
       }
-      for (const name of wb.SheetNames) {
-        const sheet = wb.Sheets[name]
-        const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
-        const totalRows = range ? range.e.r - range.s.r + 1 : 0
-        const rows = XLSX.utils.sheet_to_json<string[]>(sheet, {
-          header: 1,
-          raw: false,
-          defval: '',
+      metadata.sheetNames = wb.worksheets.map((s) => s.name)
+      const parts: string[] = []
+      if (wb.worksheets.length > 1) {
+        parts.push(`*Workbook with ${wb.worksheets.length} sheets: ${metadata.sheetNames.join(', ')}.*`)
+      }
+      for (const sheet of wb.worksheets) {
+        const name = sheet.name
+        const totalRows = sheet.actualRowCount
+        const rows: string[][] = []
+        sheet.eachRow({ includeEmpty: false }, (row) => {
+          const values = (row.values as unknown[]) ?? []
+          rows.push(values.slice(1).map(cellToString))
         })
         if (rows.length === 0) continue
 
@@ -261,10 +288,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[api/documents] POST error:', error)
     const msg = error instanceof Error ? error.message : 'Upload failed.'
-    // User-friendly errors → 400; technical failures → 500
+    // User-friendly errors → 400 (message shown); technical failures → 500
+    // (generic message — internal details stay in the server log only)
     const isUserError = /not a valid|No text|Could not read|corrupted|password|scanned/i.test(msg)
     return NextResponse.json(
-      { error: msg },
+      { error: isUserError ? msg : 'Upload failed. Please try a different file.' },
       { status: isUserError ? 400 : 500 }
     )
   }
@@ -317,8 +345,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ answer })
   } catch (error) {
+    console.error('[api/documents] query error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Query failed.' },
+      { error: 'Could not answer that question from the document. Please try again.' },
       { status: 500 }
     )
   }
@@ -374,7 +403,7 @@ export async function PUT(req: NextRequest) {
 
     if (outputFormat === 'docx') {
       const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx')
-      const children: Paragraph[] = []
+      const children: Array<InstanceType<typeof Paragraph>> = []
       for (const line of edited.split('\n')) {
         const trimmed = line.trim()
         if (trimmed.startsWith('## ')) {
@@ -444,8 +473,9 @@ export async function PUT(req: NextRequest) {
       },
     })
   } catch (error) {
+    console.error('[api/documents] edit error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Edit failed.' },
+      { error: 'Could not edit that document. Please try again.' },
       { status: 500 }
     )
   }

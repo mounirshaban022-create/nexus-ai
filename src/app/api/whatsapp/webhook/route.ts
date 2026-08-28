@@ -112,11 +112,21 @@ export async function POST(req: NextRequest) {
       console.warn('[whatsapp-webhook] invalid X-Hub-Signature-256 — rejected')
       return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
     }
-  } else if (!warnedNoSignature) {
-    warnedNoSignature = true
-    console.warn(
-      '[whatsapp-webhook] WHATSAPP_APP_SECRET is not set — accepting webhooks WITHOUT signature verification. Set it in env vars to enable Meta signature validation.'
-    )
+  } else {
+    if (!warnedNoSignature) {
+      warnedNoSignature = true
+      console.warn(
+        '[whatsapp-webhook] WHATSAPP_APP_SECRET is not set — accepting webhooks WITHOUT signature verification. Set it in env vars to enable Meta signature validation.'
+      )
+    }
+    // Fail closed in production: unsigned webhooks let anyone forge inbound
+    // messages and trigger unbounded auto-reply LLM spend.
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(
+        { error: 'WHATSAPP_APP_SECRET is not configured — webhook rejected in production.' },
+        { status: 401 }
+      )
+    }
   }
 
   let payload: WaWebhookPayload

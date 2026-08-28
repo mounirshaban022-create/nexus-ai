@@ -3,8 +3,10 @@ import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { getZAI } from './zai'
-import { freeWebSearch, readPageSmart, wikipediaSearch } from './web-access'
+import { smartWebSearch, readPageSmart, wikipediaSearch } from './web-access'
 import { getPrimaryAccount, listEmails, searchEmails, readEmail, sendEmail } from './email'
+// SSRF guard used by every URL-taking connector handler below.
+import { assertPublicUrl } from './safe-url'
 
 /* ------------------------------------------------------------------ */
 /* Safe math expression evaluator (recursive descent — never eval())   */
@@ -128,7 +130,7 @@ export interface ConnectorParam {
 export interface ConnectorDefinition {
   id: string
   name: string
-  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance'
+  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance' | 'work'
   description: string // human-facing
   /** LLM-facing: what it does + when to use it */
   llmDescription: string
@@ -150,7 +152,9 @@ const IMAGES_DIR = path.join(process.cwd(), 'generated-images')
 
 /** Blocks requests to private/internal networks (SSRF guard).
  *  Shared implementation lives in ./safe-url (re-exported for backwards
- *  compatibility with existing imports). */
+ *  compatibility with existing imports; imported above for local use —
+ *  without that binding every read_page/weather call would crash with a
+ *  ReferenceError). */
 export { assertPublicUrl } from './safe-url'
 
 async function fetchJson(url: string, timeoutMs = 15000): Promise<unknown> {
@@ -198,18 +202,22 @@ export const CONNECTORS: ConnectorDefinition[] = [
     category: 'web',
     description: 'Search the live web for current information, news, and facts.',
     llmDescription:
-      'Search the live web. Use for current events, facts, prices, news, or anything you are unsure about. Returns ranked results with titles, URLs and snippets.',
+      'Search the live web with Google-grade grounding. Returns a sourced ANSWER plus ranked results (titles, URLs, snippets, dates). Use for current events, news, prices, scores, weather, or anything time-sensitive or you are unsure about. Follow up with read_page for details.',
     params: [
       { name: 'query', type: 'string', description: 'The search query', required: true },
     ],
     sampleArgs: { query: 'latest AI news' },
     execute: async (args) => {
-      // FREE WEB ACCESS CHAIN (replaces Z.ai web_search — bypasses 429s):
-      // Brave Search → DuckDuckGo → Wikipedia → Z.ai (last resort).
-      // Every provider is keyless with its own rate-limit budget.
-      const results = await freeWebSearch(String(args.query), 6)
+      // SMART WEB CHAIN: Gemini google_search grounding (Google index +
+      // grounded answer) → Brave → DuckDuckGo → Wikipedia → Z.ai.
+      const smart = await smartWebSearch(String(args.query), 6)
       return {
-        results: results.map((r) => ({
+        engine: smart.engine,
+        // Grounded answer with inline citations — the model can use it
+        // directly instead of guessing from snippets alone.
+        answer: smart.answer?.slice(0, 2400),
+        searchQueries: smart.queries,
+        results: smart.results.map((r) => ({
           title: r.title,
           url: r.url,
           snippet: r.snippet,
@@ -237,8 +245,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
       if (!/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(parsed.hostname)) {
         throw new Error('Invalid hostname')
       }
-      // SMART PAGE READER (replaces Z.ai page_reader): direct fetch first
-      // (no quota), Z.ai reader as fallback for JS-rendered pages.
+      // SMART PAGE READER: direct fetch → Jina Reader (renders JS,
+      // keyless) → Z.ai page_reader as last resort.
       const page = await readPageSmart(parsed.toString())
       return truncateForLlm(
         { title: page.title, url: page.url, text: page.text.slice(0, 6000) },

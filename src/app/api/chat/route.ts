@@ -194,15 +194,22 @@ const CHAT_TOOL_DEFS: Array<{
   {
     id: 'run_command',
     description:
-      'Run a shell command in the NEXUS CLI sandbox (bash — 20s timeout, 90s for package installs) — for file operations, git, curl, data processing, installing and running CLI-Anything skill CLIs, and system tasks. Dangerous operations are blocked. Use run_code for JavaScript/Python.',
+      'Run a shell command in the NEXUS CLI sandbox (bash — 20s timeout) — for small file operations, git, text/data processing and quick system tasks. Signed-in users only. Dangerous operations and secret access are blocked. Use run_code for JavaScript/Python. This is NOT for skills — execute skills with run_skill_action.',
     params: 'command (required: the shell command)',
   },
   {
     id: 'use_skill',
     description:
-      "CLI-Anything AGENT SKILLS — your connection to 79 real external apps: browser automation, Blender, GIMP, LibreOffice, Obsidian, Joplin, n8n workflows, Zoom, mailchimp, Exa search, Calibre, Zotero, drawio, music/video tools and more. ALWAYS call this FIRST when the user wants to control/connect/use an external app. skill='search' + query finds one; skill=<name> loads its full manual; then you MUST act on it with run_command (install the CLI if needed, run its commands, report real output).",
+      "CLI-Anything AGENT SKILLS — 79 skills mapped to real NEXUS cloud engines: image/diagram (Blender, GIMP, Inkscape, drawio…), video (kdenlive, shotcut…), documents (LibreOffice, Obsidian…), research, web search, voice, charts and more. Use it to IDENTIFY the right skill: skill='search' + query finds one; skill=<name> loads its capability card. Then EXECUTE the user's task with run_skill_action — that is what actually produces the artifact. Desktop CLIs cannot be installed or run on this server.",
     params:
-      "skill (required: a skill name like 'browser' or 'obsidian', OR 'list' for the catalog, OR 'search'), query (optional: when skill='search'), install (optional: set true to also run the skill's pip install command now)",
+      "skill (required: a skill name like 'blender' or 'obsidian', OR 'list' for the catalog, OR 'search'), query (optional: when skill='search')",
+  },
+  {
+    id: 'run_skill_action',
+    description:
+      "EXECUTE a NEXUS skill for the user's task and deliver the REAL artifact — this is how skills actually run. Each of the 79 CLI skills + first-party nexus-* skills is mapped to a free cloud engine: image/diagram → AI art, video → AI video with narration, doc/sheet/slides → real Word/Excel/PowerPoint files, search/read → live web, speak → neural voice audio, research → sourced briefing DOCX, translate, weather, chart, QR, password. Call use_skill first if unsure which skill fits, then call THIS with the user\u2019s own task wording. Returns a summary + real attachment (image/file/video) — present its link EXACTLY as returned.",
+    params:
+      'skill (required: skill short name, e.g. "blender", "mermaid", "gimp", "nexus-research", "nexus-weather"), task (required: what the user wants, in their own words)',
   },
   {
     id: 'email_organize',
@@ -379,7 +386,7 @@ function buildSystemPrompt(
     '8. THINK BEFORE ACTING: for multi-step requests, plan which tools to use in which order.',
     '9. DOCUMENTS, PDFs & SPREADSHEETS: when the user attached a document (content appears in the conversation), answer questions about it directly — for spreadsheets, reason over the markdown tables (sums, trends, comparisons). If they ask to EDIT/CHANGE/REWRITE a document, call edit_document. If they ask for PDF operations (rotate/delete/reorder/split/watermark pages), call pdf_operation. If they want a spreadsheet, budget, tracker, or tabular data as Excel, call create_spreadsheet with typed cells and formulas. When asked to analyze data in an attached spreadsheet, compute the actual numbers (use run_code for anything non-trivial) — never guess.',
     '10. When you create or attach a file, present the download link clearly — copying the URL EXACTLY from the tool result. NEVER invent, guess, or pattern-match a file URL: a link you made up is a broken link. If a file was not created by a tool call, it does not exist — say so instead of linking it.',
-    '11. SKILLS & EXTERNAL APPS (VERY IMPORTANT): the moment the user wants to control, connect to, or use an EXTERNAL application — notes apps (Obsidian, Joplin), design tools (Blender, GIMP, Inkscape, Krita), office (LibreOffice), automation (n8n), Zoom, mailchimp, media (Audacity, Shotcut, OBS), browsers, or ANY other app — you MUST call use_skill FIRST: TOOL_CALL with skill="search" and the app name, then load the manual (use_skill with the skill name), then FOLLOW it: install the CLI via run_command as `python3 -m pip install <pkg>` (NEVER bare `pip install` — it fails on this system), then run the CLI commands and report real output. Never claim an app is impossible before trying use_skill. For managing the user\'s INBOX from chat (check emails, find messages, organize, mark read, move, delete, star), use email_list / email_search / email_read / email_organize / email_folders directly. For browsing websites with clicks, use browser_action.',
+    '11. SKILLS & EXTERNAL APPS (VERY IMPORTANT): the moment the user wants to control, connect to, or use an EXTERNAL application — design tools (Blender, GIMP, Inkscape, Krita), diagrams (drawio, mermaid), office (LibreOffice), notes (Obsidian, Joplin), automation (n8n), media (Audacity, Shotcut), research, or ANY other app or skill — do EXACTLY two steps: (1) TOOL_CALL use_skill with skill="search" + the app name (or the exact name if known) to confirm the right skill; (2) TOOL_CALL run_skill_action with skill="<the skill name>" and task="<the user\'s request in their own words>". run_skill_action EXECUTES the skill on NEXUS\'s cloud engine and returns the real artifact (image, diagram, video, document, spreadsheet, voice audio, research briefing…). NEVER try to pip-install or run the desktop CLIs via run_command — they cannot run on a server; run_skill_action is the only way skills execute. Never claim a skill is impossible: every skill has a working cloud equivalent. For managing the user\'s INBOX from chat (check emails, find messages, organize, mark read, move, delete, star), use email_list / email_search / email_read / email_organize / email_folders directly. For browsing websites with clicks, use browser_action.',
     '12. CURRENT INFORMATION: any question about news, prices, scores, weather, "latest", "today", or anything time-sensitive REQUIRES web_search — never answer from memory alone.',
     '13. CODING & REAL PRODUCTS: when the user asks for a website, web app, landing page, tool, game, script or any CODE — put the COMPLETE, RUNNABLE source directly in your chat reply as a markdown code block (a full single-file HTML page with inline CSS/JS for websites and apps, or a complete file/component). Do NOT call create_document or any tool for code — code belongs IN THE CHAT so the user can read, copy and run it. Never truncate: include every line. Prefer modern, polished output (responsive layout, hover states, sensible colors). End with one short "How to run" line. Never say "implement this yourself" — build it fully.',
     '',
@@ -494,6 +501,11 @@ const CHAT_TOOL_IDS = new Set<string>([
  */
 function interceptBareToolArgs(text: string): ParsedToolCall | null {
   const SIGNATURES: Array<{ tool: string; test: (keys: string[]) => boolean }> = [
+    // run_skill_action BEFORE use_skill: bare {"skill": "...", "task": "..."}
+    // payloads match both signatures, and executing the task beats merely
+    // loading a manual (the "model says it will use the skill, then nothing
+    // happens" failure mode).
+    { tool: 'run_skill_action', test: (k) => k.includes('skill') && k.includes('task') },
     { tool: 'use_skill', test: (k) => k.includes('skill') },
     { tool: 'run_command', test: (k) => k.includes('command') && k.length <= 2 },
     { tool: 'web_search', test: (k) => k.length === 1 && k[0] === 'query' },
@@ -1125,8 +1137,8 @@ async function executeChatTool(
       throw new Error('sheets required: [{ name, headers, rows }]')
     }
 
-    const XLSX = await import('xlsx')
-    const wb = XLSX.utils.book_new()
+    const ExcelJS = await import('exceljs')
+    const wb = new ExcelJS.Workbook()
     const usedNames = new Set<string>()
     for (const raw of sheetsArg.slice(0, 10)) {
       const sheet = raw as {
@@ -1160,19 +1172,26 @@ async function executeChatTool(
       let n = 2
       while (usedNames.has(name)) name = `${String(sheet.name ?? 'Sheet').slice(0, 25)}_${n++}`
       usedNames.add(name)
-      const ws = XLSX.utils.aoa_to_sheet(data)
+      const ws = wb.addWorksheet(name)
       // Column widths sized to content (cap 40)
       const cols = Math.max(headers.length, ...rows.map((r) => r.length), 1)
-      ws['!cols'] = Array.from({ length: cols }, (_, i) => ({
-        wch: Math.min(
+      for (let i = 0; i < cols; i++) {
+        ws.getColumn(i + 1).width = Math.min(
           40,
           Math.max(
             10,
             ...data.slice(0, 40).map((row) => String((row as unknown[])[i] ?? '').length + 2)
           )
-        ),
-      }))
-      XLSX.utils.book_append_sheet(wb, ws, name)
+        )
+      }
+      for (const row of data) {
+        ws.addRow(
+          row.map((v) =>
+            // exceljs stores formulas without the leading '='
+            typeof v === 'string' && v.startsWith('=') ? { formula: v.slice(1) } : v
+          )
+        )
+      }
     }
 
     // Save + serve through the shared file route
@@ -1182,7 +1201,7 @@ async function executeChatTool(
     const dir = pathMod.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'generated-images')
     await mkdir(dir, { recursive: true })
     const id = randomUUID()
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer())
     await writeFile(pathMod.join(dir, `${id}.xlsx`), buffer)
 
     return {
@@ -1372,11 +1391,37 @@ async function executeChatTool(
 
   /* ---- run_command: CLI sandbox (bash, blocked dangerous ops) ---- */
   if (toolId === 'run_command') {
+    // The command tool executes real shell on this server. Anonymous chat is
+    // allowed, but running commands is not — a guest could otherwise steer
+    // the model into reading server secrets (env files, the SQLite DB).
+    if (!userId) {
+      return {
+        result: {
+          error: 'Sign in required',
+          note: 'The command tool is available to signed-in users only. Ask the user to sign in, and continue without running commands.',
+        },
+      }
+    }
     const command = String(args.command ?? '').slice(0, 2000)
     if (!command.trim()) throw new Error('command required')
-    const blocked = /\b(rm\s+-rf\s+\/|mkfs|shutdown|reboot|init\s+0|curl[^|]*\|\s*(ba)?sh|wget[^|]*\|\s*(ba)?sh|nc\s+-l|ncat|chmod\s+777\s+\/|kill\s+-9\s+1\b|pkill\s+-9|>\/dev\/sd[a-z])|\(\)\s*\{.*\}\s*;?\s*:/i
+    const blocked = /(rm\s+-rf\s+\/|mkfs|shutdown|reboot|init\s+0|curl[^|]*\|\s*(ba)?sh|wget[^|]*\|\s*(ba)?sh|nc\s+-l|ncat|chmod\s+777\s+\/|kill\s+-9\s+1\b|pkill\s+-9|>\/dev\/sd[a-z])|\(\)\s*\{.*\}\s*;?\s*:/i
     if (blocked.test(command)) {
       throw new Error('Command blocked by the NEXUS safety filter (destructive or remote-code injection pattern).')
+    }
+    // Secret-exfiltration guards. The bash cwd is the shared workspace, so
+    // every pattern below targets ABSOLUTE paths or parent traversal —
+    // workspace-local files with similar names keep working.
+    const secretProbe = [
+      /\.\.\//,                                                    // parent-dir traversal
+      /\/[^\s'"&;|]*\.env\b/i,                                     // server .env files by absolute path
+      /\/proc\/[\s\S]*environ/i,                                   // other processes' environment
+      /\/[^\s'"&;|]*(id_rsa|\.ssh\b|\.aws\b|\.kube\b|\.gnupg|\.netrc|git-credentials|\.git\/config)/i,
+      /\/[^\s'"&;|]*(custom\.db|\/db\/)/i,                        // app SQLite DB by absolute path
+      /\/[^\s'"&;|]*\/db\/[^\s'"&;|]*\.sqlite3?\b/i,
+      /\bsudo\b/,                                                   // must never be needed; blocks passwordless-sudo escapes
+    ]
+    if (secretProbe.some((re) => re.test(command))) {
+      throw new Error('Command blocked by the NEXUS safety filter (access to server credentials or system internals).')
     }
     // SKILLS FIX: the model tends to emit bare `pip install …`. The SYSTEM
     // pip blocks those (PEP 668 externally-managed environment) and the
@@ -1426,15 +1471,25 @@ async function executeChatTool(
           cwd,
           env: { PATH: `${process.env.PATH}:${cwd}/.local/bin:${cwd}/node_modules/.bin`, HOME: cwd, LANG: 'en_US.UTF-8', NEXUS_SANDBOX: '1' } as unknown as NodeJS.ProcessEnv,
           stdio: ['ignore', 'pipe', 'pipe'] as Array<'ignore' | 'pipe'>,
+          // Own process group so the timeout kill reaps background children.
+          detached: true,
         })
         let stdout = ''
         let stderr = ''
         let timedOut = false
-        const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, TIMEOUT_MS)
+        const killTree = () => {
+          if (!child.pid) return
+          try {
+            process.kill(-child.pid, 'SIGKILL') // negative pid = whole group
+          } catch {
+            try { child.kill('SIGKILL') } catch { /* already gone */ }
+          }
+        }
+        const timer = setTimeout(() => { timedOut = true; killTree() }, TIMEOUT_MS)
         child.stdout?.on('data', (d: Buffer) => { if (stdout.length < 60_000) stdout += d.toString().slice(0, 60_000 - stdout.length) })
         child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 20_000) stderr += d.toString().slice(0, 20_000 - stderr.length) })
         child.on('error', (err) => { clearTimeout(timer); resolve({ stdout, stderr: stderr + err.message, code: null, timedOut }) })
-        child.on('close', (code) => { clearTimeout(timer); resolve({ stdout, stderr, code, timedOut }) })
+        child.on('close', (code) => { clearTimeout(timer); killTree(); resolve({ stdout, stderr, code, timedOut }) })
       })
       return {
         result: {
@@ -1449,11 +1504,46 @@ async function executeChatTool(
       }
   }
 
-  /* ---- use_skill: CLI-Anything agent skills (connect to real apps) ---- */
+  /* ---- run_skill_action: EXECUTE a skill's mapped cloud engine ------- */
+  // The "skills don't work" root fix: desktop CLIs (Blender, GIMP…) can't
+  // run on a server and run_command is signed-in-only, so the old
+  // use_skill → pip install → run CLI flow dead-ended. Every skill now has
+  // a working cloud equivalent (runSkillAction — the SAME executor the
+  // Skills-view directive path uses successfully) callable by the agent.
+  if (toolId === 'run_skill_action') {
+    const skillArg = String(args.skill ?? args.name ?? '').trim().slice(0, 100)
+    const taskArg = String(args.task ?? args.request ?? args.prompt ?? args.query ?? '').trim().slice(0, 1200)
+    if (!skillArg) throw new Error('skill required — call use_skill with skill="list" to see the catalog')
+    if (!taskArg) throw new Error('task required — describe what the user wants, in their own words')
+    const catalogEntry = await matchSkillFromCatalog(skillArg)
+    const skillName = catalogEntry?.name ?? skillArg
+    const displayLabel = catalogEntry?.displayName ?? skillArg
+    const outcome = await runSkillAction(req, skillName, catalogEntry?.category, taskArg, displayLabel)
+    if (!outcome.ok) {
+      return {
+        result: {
+          ok: false,
+          error: outcome.error ?? 'The skill engine failed.',
+          note: 'Tell the user the skill run failed and offer to retry or take a different approach. Do NOT invent a file URL.',
+        },
+      }
+    }
+    return {
+      result: {
+        ok: true,
+        summary: outcome.summary,
+        attachmentUrl: (outcome.attachment?.url as string | undefined) ?? null,
+        note:
+          'The artifact is REAL and already attached to the chat. Present the link EXACTLY as returned (copy verbatim) and keep your answer short. If attachmentUrl is null but a video job was started, tell the user the video is rendering and will appear shortly.',
+      },
+      attachment: outcome.attachment as Record<string, unknown> | undefined,
+    }
+  }
+
+  /* ---- use_skill: CLI-Anything agent skills (identify + capability card) ---- */
   if (toolId === 'use_skill') {
     const skillArg = String(args.skill ?? args.name ?? '').trim().slice(0, 100)
     const queryArg = String(args.query ?? args.q ?? '').trim().slice(0, 200)
-    const wantInstall = args.install === true || args.install === 'true'
     if (!skillArg) throw new Error("skill required — use 'list' to see the catalog")
 
     if (skillArg.toLowerCase() === 'list') {
@@ -1474,7 +1564,7 @@ async function executeChatTool(
           query: queryArg,
           matches: found.map((s) => `${s.name}: ${s.description.slice(0, 140)}`),
           note: found.length
-            ? 'Call use_skill with a name above to load its manual.'
+            ? 'Pick a skill above, then EXECUTE the user\'s task: TOOL_CALL run_skill_action {"skill":"<name>","task":"<user request>"}. That produces the real artifact.'
             : 'No matching skill — call use_skill with skill="list" for the full catalog.',
         },
       }
@@ -1484,61 +1574,28 @@ async function executeChatTool(
     if (!entry) throw new Error(`Unknown skill "${skillArg}" — call use_skill with skill="list" to see available skills.`)
     const { skill, doc } = entry
 
-    // Optional: run the skill's install command now (pip install …).
-    let installOutput: string | null = null
-    if (wantInstall && skill.installCmd) {
-      // Sanitize: strip shell separators; keep only pip/python install lines.
-      const safeInstall = skill.installCmd.replace(/&&|\|\||;|`|\$/g, '').trim().slice(0, 400)
-      // Install via the venv's `python3 -m pip` (the SYSTEM pip blocks
-      // --user installs with PEP 668, and the venv pip rejects --user).
-      // The CLI entry point lands in the venv bin dir which is already on
-      // run_command's PATH — immediately usable by the next tool step.
-      const pkg = safeInstall.replace(/^pip3?\s+install\s+/i, '').trim()
-      const fullCmd = pkg
-        ? `python3 -m pip install --quiet ${pkg} 2>&1 | tail -8`
-        : `python3 -m pip install --quiet ${safeInstall} 2>&1 | tail -8`
-      try {
-        const { spawn } = await import('child_process')
-        const { mkdir } = await import('fs/promises')
-        const { tmpdir } = await import('os')
-        const pathMod = await import('path')
-        const workspace = pathMod.join(tmpdir(), 'nexus-workspace')
-        await mkdir(workspace, { recursive: true })
-        const exec = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
-          const child = spawn('bash', ['-c', `${fullCmd} 2>&1 | tail -8`], {
-            cwd: workspace,
-            env: { PATH: `${process.env.PATH}:${workspace}/.local/bin`, HOME: workspace, LANG: 'en_US.UTF-8', NEXUS_SANDBOX: '1' } as unknown as NodeJS.ProcessEnv,
-            stdio: ['ignore', 'pipe', 'pipe'] as Array<'ignore' | 'pipe'>,
-          })
-          let out = ''
-          child.stdout?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
-          child.stderr?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
-          const timer = setTimeout(() => child.kill('SIGKILL'), 150_000)
-          child.on('error', (err) => { clearTimeout(timer); resolve({ stdout: out + err.message, stderr: '', code: null }) })
-          child.on('close', (code) => { clearTimeout(timer); resolve({ stdout: out, stderr: '', code }) })
-        })
-        installOutput = `exit=${exec.code}\n${exec.stdout.slice(0, 2000)}`
-      } catch (err) {
-        installOutput = `install failed: ${err instanceof Error ? err.message : 'unknown error'}`
-      }
-    }
-
     return {
       result: {
         skill: skill.name,
         displayName: skill.displayName,
         category: skill.category,
         requires: skill.requires ?? null,
-        installCmd: skill.installCmd ?? null,
-        // READY-TO-RUN install command (venv pip) — models that shortened
-        // the package name broke installs; hand them the exact line.
-        installCommand: skill.installCmd
-          ? `python3 -m pip install ${skill.installCmd.replace(/^pip3?\s+install\s+/i, '').trim()}`
-          : null,
-        installOutput,
-        manual: doc || '(no SKILL.md found — install the CLI and run "<entry-point> --help")',
+        installCmd: null, // desktop pip installs cannot run here — see cloudAction
+        installOutput: null,
+        // The cloud mapping that actually executes this skill on NEXUS's
+        // free engines — the ONLY reliable way to produce a real artifact
+        // (desktop CLIs cannot run on a server; pip installs dead-end).
+        cloudAction: {
+          tool: 'run_skill_action',
+          skill: skill.name,
+          kind: resolveSkillAction(skill.name, skill.category).kind,
+          engineLabel: resolveSkillAction(skill.name, skill.category).label,
+        },
+        manual: doc ? doc.slice(0, 6000) : '(no manual — use the cloudAction mapping)',
         note:
-          'Manual loaded. NOW ACT: (1) if the CLI is not installed, call run_command with EXACTLY the installCommand above (do NOT shorten the package name — the git+ URL is required); (2) then run the CLI commands from the manual via run_command to actually control the application (the CLI lands on PATH after install); (3) report real outputs to the user. If a step genuinely cannot run in this environment (e.g. a GUI app is required), say exactly what is missing and offer the closest alternative.',
+          'Capability card loaded. Desktop CLIs CANNOT be installed or run on this server — do NOT pip install anything. To actually DO the user\'s task, call: TOOL_CALL run_skill_action {"skill":"' +
+          skill.name +
+          '","task":"<the user\'s request in their own words>"} — it executes the cloud engine mapped above and returns a real artifact (image, document, video, audio, research brief…).',
       },
     }
   }
@@ -1671,7 +1728,7 @@ export async function POST(req: NextRequest) {
             ],
             thinking: { type: 'disabled' },
           })
-          const description = response.choices[0]?.message?.content ?? ''
+          const description = response.choices?.[0]?.message?.content ?? ""
           if (description.trim()) {
             activeImage.description = description.slice(0, 500)
             attachmentContextMessage =
@@ -2277,7 +2334,7 @@ export async function POST(req: NextRequest) {
             llmMessages.push({
               role: 'user',
               content:
-                '[system directive] This message involves an external app or skill. Your FIRST action must be a TOOL_CALL to use_skill — either {"skill":"search","query":"<app name>"} or {"skill":"<exact name>"} if you know it. Only answer in prose AFTER receiving the manual or a real result.',
+                '[system directive] This message involves an external app or skill. Your FIRST action must be a TOOL_CALL to use_skill — either {"skill":"search","query":"<app name>"} or {"skill":"<exact name>"} if you know it — and your SECOND must be TOOL_CALL run_skill_action with skill="<that skill>" and task="<the user\'s request>" which executes it and returns the real artifact. Desktop CLIs cannot run here; run_skill_action is the ONLY way to execute a skill. Only answer in prose AFTER the artifact (or a real result) is delivered.',
             })
           }
 

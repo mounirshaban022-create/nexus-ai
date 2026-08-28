@@ -130,6 +130,11 @@ export interface CloudSkill {
   installCmd?: string
 }
 
+/** Number of vendored CLI-Anything agent skills in the full catalog —
+ *  mirrors listAllSkills() in src/lib/cli-skills.ts. Kept as a static
+ *  constant so client-side badges stay in sync without a fetch. */
+export const VENDORED_SKILLS_COUNT = 79
+
 export const CLOUD_SKILLS: CloudSkill[] = [
   {
     name: 'nexus-translate',

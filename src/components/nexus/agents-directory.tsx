@@ -375,7 +375,7 @@ function AgentCard({
       )}
 
       {/* Action row — always visible on touch, revealed on hover from md up */}
-      <div className="mt-3 flex flex-wrap items-center gap-2 transition duration-200 md:translate-y-1 md:opacity-0 md:group-hover:translate-y-0 md:group-hover:opacity-100">
+      <div className="mt-3 flex flex-wrap items-center gap-2 transition duration-200 md:translate-y-1 md:opacity-0 md:group-hover:translate-y-0 md:group-hover:opacity-100 md:group-focus-within:translate-y-0 md:group-focus-within:opacity-100">
         <button
           onClick={() => onNewChatWith(agent.slug)}
           className="nx-gradient-surface flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold"

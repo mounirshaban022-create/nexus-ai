@@ -40,8 +40,8 @@ export async function POST(req: NextRequest) {
     }
     const { title, sheets } = parsed.data
 
-    const XLSX = await import('xlsx')
-    const wb = XLSX.utils.book_new()
+    const ExcelJS = await import('exceljs')
+    const wb = new ExcelJS.Workbook()
     const usedNames = new Set<string>()
 
     for (const sheet of sheets) {
@@ -57,18 +57,30 @@ export async function POST(req: NextRequest) {
       while (usedNames.has(name)) name = `${(sheet.name ?? 'Sheet').slice(0, 25)}_${n++}`
       usedNames.add(name)
 
-      const ws = XLSX.utils.aoa_to_sheet(data)
+      const ws = wb.addWorksheet(name)
       const cols = Math.max(sheet.headers.length, ...sheet.rows.map((r) => r.length), 1)
-      ws['!cols'] = Array.from({ length: cols }, (_, i) => ({
-        wch: Math.min(40, Math.max(10, ...data.slice(0, 40).map((row) => String((row as unknown[])[i] ?? '').length + 2))),
-      }))
-      XLSX.utils.book_append_sheet(wb, ws, name)
+      // Column widths sized to content (min 10, cap 40) — same heuristic
+      const cellText = (v: unknown) => String(v ?? '')
+      for (let i = 0; i < cols; i++) {
+        ws.getColumn(i + 1).width = Math.min(
+          40,
+          Math.max(10, ...data.slice(0, 40).map((row) => cellText((row as unknown[])[i]).length + 2))
+        )
+      }
+      for (const row of data) {
+        ws.addRow(
+          row.map((v) =>
+            // exceljs stores formulas without the leading '='
+            typeof v === 'string' && v.startsWith('=') ? { formula: v.slice(1) } : v
+          )
+        )
+      }
     }
 
     const dir = path.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'generated-images')
     await mkdir(dir, { recursive: true })
     const id = randomUUID()
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer())
     await writeFile(path.join(dir, `${id}.xlsx`), buffer)
 
     return NextResponse.json({
