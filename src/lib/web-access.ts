@@ -234,6 +234,135 @@ export async function wikipediaSearch(query: string, num = 6): Promise<WebSearch
 }
 
 /* ------------------------------------------------------------------ */
+/* Provider 3.5: Gemini google_search grounding — REAL Google index    */
+/* ------------------------------------------------------------------ */
+
+/* gemini-2.5-flash was retired for NEW API keys (Aug 2026) — keep it as
+ * the last model tried so keys created before retirement still work. */
+const GEMINI_SEARCH_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-3.6-flash-lite',
+  'gemini-2.5-flash',
+]
+
+const globalForGeminiBench = globalThis as unknown as {
+  __nexusGeminiSearchBenchUntil?: number
+}
+
+export interface GeminiSearchOutcome {
+  results: WebSearchResult[]
+  /** The grounded answer Gemini wrote from the live results. */
+  answer: string
+  /** The search queries Google actually ran. */
+  queries: string[]
+}
+
+/** Parses a generateContent response that used google_search grounding:
+ *  sources live in groundingMetadata.groundingChunks, and each source's
+ *  snippet is the answer sentence that cited it (groundingSupports). */
+export function parseGeminiGrounding(data: unknown, num: number): GeminiSearchOutcome {
+  const d = data as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> }
+      groundingMetadata?: {
+        webSearchQueries?: string[]
+        groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>
+        groundingSupports?: Array<{
+          segment?: { text?: string }
+          groundingChunkIndices?: number[]
+        }>
+      }
+    }>
+  }
+  const cand = d?.candidates?.[0]
+  const answer = (cand?.content?.parts ?? [])
+    .map((p) => p.text ?? '')
+    .join('')
+    .trim()
+  const gm = cand?.groundingMetadata
+  const chunks = gm?.groundingChunks ?? []
+
+  const snippetFor = new Map<number, string>()
+  for (const sup of gm?.groundingSupports ?? []) {
+    const seg = (sup?.segment?.text ?? '').trim()
+    for (const idx of sup?.groundingChunkIndices ?? []) {
+      if (seg && !snippetFor.has(idx)) snippetFor.set(idx, seg.slice(0, 220))
+    }
+  }
+
+  const results: WebSearchResult[] = []
+  chunks.forEach((ch, i) => {
+    const web = ch?.web
+    if (!web?.uri || results.length >= num) return
+    let host = ''
+    try {
+      host = new URL(web.uri).hostname.replace(/^www\./, '')
+    } catch {
+      return
+    }
+    results.push({
+      title: web.title ?? host,
+      url: web.uri,
+      snippet: snippetFor.get(i) ?? '',
+      host_name: host,
+      rank: results.length + 1,
+      favicon: faviconFor(web.uri),
+    })
+  })
+  return { results, answer, queries: gm?.webSearchQueries ?? [] }
+}
+
+/**
+ * Searches via Gemini's google_search tool grounding — Google's own index
+ * with a grounded answer + citations. Free tier on AI Studio keys. When
+ * the key is missing/out-of-quota/location-blocked the whole provider
+ * benches for 60s (in-memory) so the chain doesn't pay its latency.
+ */
+export async function geminiSearch(query: string, num = 8): Promise<GeminiSearchOutcome> {
+  const apiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim()
+  if (!apiKey) throw new Error('GEMINI_API_KEY not configured')
+  const benchUntil = globalForGeminiBench.__nexusGeminiSearchBenchUntil ?? 0
+  if (Date.now() < benchUntil) throw new Error('Gemini search benched after recent failures')
+
+  let lastErr: unknown = null
+  for (const model of GEMINI_SEARCH_MODELS) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: query }] }],
+            tools: [{ google_search: {} }],
+            generationConfig: { temperature: 0.1 },
+          }),
+          signal: AbortSignal.timeout(25_000),
+        }
+      )
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(`Gemini ${model} responded ${res.status}: ${detail.slice(0, 160)}`)
+      }
+      const data = await res.json()
+      const parsed = parseGeminiGrounding(data, num)
+      if (parsed.results.length === 0 && !parsed.answer) {
+        throw new Error(`Gemini ${model} returned no grounding chunks`)
+      }
+      return parsed
+    } catch (err) {
+      lastErr = err
+      // 429 (quota) / 403 (location or key) are KEY-level, not model-level —
+      // trying the next model would waste a round trip.
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/\b429\b|\b403\b/.test(msg)) break
+    }
+  }
+  globalForGeminiBench.__nexusGeminiSearchBenchUntil = Date.now() + 60_000
+  throw lastErr ?? new Error('Gemini search failed')
+}
+
+/* ------------------------------------------------------------------ */
 /* Provider 4: direct page reader (fetch + HTML→text)                 */
 /* ------------------------------------------------------------------ */
 
@@ -243,6 +372,8 @@ export interface PageContent {
   html: string
   text: string
   publishedTime?: string
+  /** Which reader produced this content (direct | jina-reader | zai-page-reader). */
+  engine?: string
 }
 
 export function htmlToReadableText(html: string): string {
@@ -386,6 +517,47 @@ export async function readPageDirect(url: string): Promise<PageContent> {
     html: html.slice(0, 200_000),
     text: text.slice(0, 60_000),
     publishedTime: timeMatch?.[1],
+    engine: 'direct',
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Provider 4.5: Jina Reader (r.jina.ai) — keyless JS-rendering reader */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Second-chance page reader: Jina's hosted reader renders JavaScript,
+ * bypasses most bot walls, and returns clean Markdown. Keyless tier is
+ * rate-limited per IP; an optional JINA_API_KEY raises the limits and
+ * also unlocks the s.jina.ai search endpoint.
+ */
+async function readPageJina(url: string): Promise<PageContent> {
+  const parsed = assertPublicUrl(url) // SSRF guard — same policy as direct
+  const headers: Record<string, string> = {
+    'User-Agent': BROWSER_HEADERS['User-Agent'],
+    Accept: 'text/plain',
+  }
+  const jinaKey = (process.env.JINA_API_KEY || '').trim()
+  if (jinaKey) headers.Authorization = `Bearer ${jinaKey}`
+
+  const res = await fetch(`https://r.jina.ai/${parsed.toString()}`, {
+    headers,
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!res.ok) throw new Error(`Jina Reader responded ${res.status}`)
+  const raw = await res.text()
+  const titleMatch = /^Title:\s*(.+)$/m.exec(raw)
+  const urlMatch = /^URL Source:\s*(.+)$/m.exec(raw)
+  const marker = 'Markdown Content:'
+  const mi = raw.indexOf(marker)
+  const text = (mi >= 0 ? raw.slice(mi + marker.length) : raw).trim()
+  if (text.length < 40) throw new Error('Jina Reader returned no readable content')
+  return {
+    title: titleMatch?.[1]?.trim() || parsed.hostname,
+    url: urlMatch?.[1]?.trim() || parsed.toString(),
+    html: '',
+    text: text.slice(0, 60_000),
+    engine: 'jina-reader',
   }
 }
 
@@ -393,43 +565,68 @@ export async function readPageDirect(url: string): Promise<PageContent> {
 /* Unified chains (search + read) with Z.ai as last resort            */
 /* ------------------------------------------------------------------ */
 
+export interface SmartWebSearch {
+  results: WebSearchResult[]
+  /** Grounded answer (Gemini google_search) — present when the engine writes one. */
+  answer?: string
+  /** The search queries the engine actually ran. */
+  queries?: string[]
+  /** Which provider won: gemini-google-search | brave | ddg | wikipedia | zai */
+  engine: string
+}
+
 /**
- * FREE WEB SEARCH CHAIN: Brave → DuckDuckGo → Wikipedia → Z.ai.
- * Each provider has an independent rate-limit budget. Z.ai is kept as
- * the final fallback so quality is unchanged whenever its quota is
- * available.
+ * SMART WEB SEARCH CHAIN:
+ *   1. Gemini google_search grounding — real Google index + grounded answer
+ *      (GEMINI_API_KEY, free tier; self-benches 60s when out of quota)
+ *   2. Brave SERP scrape
+ *   3. DuckDuckGo HTML scrape
+ *   4. Wikipedia API
+ *   5. Z.ai functions (when its quota is available)
+ * Datacenter IPs get challenged by the scrapers, so the Gemini grounding
+ * is the engine that makes search reliable on Vercel.
  */
-export async function freeWebSearch(
-  query: string,
-  num = 8
-): Promise<WebSearchResult[]> {
+export async function smartWebSearch(query: string, num = 8): Promise<SmartWebSearch> {
   const trimmed = query.trim()
-  if (!trimmed) return []
+  if (!trimmed) return { results: [], engine: 'none' }
 
   const errors: string[] = []
 
-  // 1. Brave (best general coverage — verified live)
+  // 1. Gemini google_search grounding (Google-grade results + answer)
   try {
-    return await braveSearch(trimmed, num)
+    const g = await geminiSearch(trimmed, num)
+    return {
+      results: g.results,
+      answer: g.answer || undefined,
+      queries: g.queries.length > 0 ? g.queries : undefined,
+      engine: 'gemini-google-search',
+    }
+  } catch (err) {
+    errors.push(`gemini: ${err instanceof Error ? err.message : err}`)
+  }
+
+  // 2. Brave (best general coverage among keyless scrapes)
+  try {
+    return { results: await braveSearch(trimmed, num), engine: 'brave' }
   } catch (err) {
     errors.push(`brave: ${err instanceof Error ? err.message : err}`)
   }
 
-  // 2. DuckDuckGo HTML (blocked on some IPs — cheap to try)
+  // 3. DuckDuckGo HTML (blocked on some IPs — cheap to try)
   try {
-    return await duckDuckGoSearch(trimmed, num)
+    return { results: await duckDuckGoSearch(trimmed, num), engine: 'ddg' }
   } catch (err) {
     errors.push(`ddg: ${err instanceof Error ? err.message : err}`)
   }
 
-  // 3. Wikipedia (encyclopedic only, but always up)
+  // 4. Wikipedia (encyclopedic only, but always up)
   try {
-    return await wikipediaSearch(trimmed, num)
+    return { results: await wikipediaSearch(trimmed, num), engine: 'wikipedia' }
   } catch (err) {
     errors.push(`wikipedia: ${err instanceof Error ? err.message : err}`)
   }
 
-  // 4. Z.ai (works when quota is available)
+  // 5. Z.ai (works when quota is available)
   try {
     const { getZAI } = await import('./zai')
     const zai = await getZAI()
@@ -438,15 +635,18 @@ export async function freeWebSearch(
       num,
     })) as Array<{ url: string; name: string; snippet: string; host_name?: string; date?: string }>
     if (Array.isArray(results) && results.length > 0) {
-      return results.map((r, i) => ({
-        title: r.name,
-        url: r.url,
-        snippet: r.snippet,
-        host_name: r.host_name ?? '',
-        rank: i + 1,
-        date: r.date,
-        favicon: faviconFor(r.url),
-      }))
+      return {
+        results: results.map((r, i) => ({
+          title: r.name,
+          url: r.url,
+          snippet: r.snippet,
+          host_name: r.host_name ?? '',
+          rank: i + 1,
+          date: r.date,
+          favicon: faviconFor(r.url),
+        })),
+        engine: 'zai',
+      }
     }
     throw new Error('empty')
   } catch (err) {
@@ -458,6 +658,14 @@ export async function freeWebSearch(
 }
 
 /**
+ * Back-compat wrapper — returns just the ranked results.
+ * New callers should use smartWebSearch() to also get the grounded answer.
+ */
+export async function freeWebSearch(query: string, num = 8): Promise<WebSearchResult[]> {
+  return (await smartWebSearch(query, num)).results
+}
+
+/**
  * SMART PAGE READER: direct fetch first (no quota), Z.ai page_reader as
  * fallback (handles JS-heavy pages its own service can render).
  */
@@ -465,7 +673,14 @@ export async function readPageSmart(url: string): Promise<PageContent> {
   try {
     return await readPageDirect(url)
   } catch (err) {
-    console.error('[web-access] direct read failed, trying Z.ai reader:', err instanceof Error ? err.message : err)
+    console.error('[web-access] direct read failed, trying Jina Reader:', err instanceof Error ? err.message : err)
+  }
+  // Jina Reader — renders JavaScript, bypasses most bot walls (keyless;
+  // an optional JINA_API_KEY raises the rate limits)
+  try {
+    return await readPageJina(url)
+  } catch (err) {
+    console.error('[web-access] Jina Reader failed, trying Z.ai reader:', err instanceof Error ? err.message : err)
   }
   // Z.ai fallback
   const { getZAI } = await import('./zai')
@@ -483,5 +698,6 @@ export async function readPageSmart(url: string): Promise<PageContent> {
     html: data.html ?? '',
     text: text.slice(0, 60_000),
     publishedTime: data.publishedTime,
+    engine: 'zai-page-reader',
   }
 }

@@ -409,7 +409,8 @@ const POOL_ENTRIES: PoolEntry[] = [
    * spikes so the PAID accounts never drain first:
    *   Groq     — ~14,400 free requests/day, fastest tokens/sec available
    *   Cerebras — ~1M free tokens/day, near-instant first token
-   *   Gemini   — AI Studio free tier (gemini-2.5-flash), generous limits
+   *   Gemini   — AI Studio free tier (gemini-3.6-flash), generous limits
+   *             (gemini-2.5-flash was retired for new keys in Aug 2026)
    * All three are OpenAI-compatible endpoints → shared compat helpers. */
   {
     id: 'groq',
@@ -518,7 +519,7 @@ const POOL_ENTRIES: PoolEntry[] = [
     label: 'Gemini (free tier)',
     configured: () => (process.env.GEMINI_API_KEY || '').trim().length > 0,
     stream: async (messages, onDelta, opts) => {
-      const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+      const models = ['gemini-3.6-flash', 'gemini-3.6-flash-lite']
       let lastErr: unknown = null
       for (const model of models) {
         try {
@@ -542,7 +543,7 @@ const POOL_ENTRIES: PoolEntry[] = [
       throw lastErr ?? new Error('Gemini produced no content')
     },
     complete: async (messages, opts) => {
-      const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+      const models = ['gemini-3.6-flash', 'gemini-3.6-flash-lite']
       let lastErr: unknown = null
       for (const model of models) {
         try {
