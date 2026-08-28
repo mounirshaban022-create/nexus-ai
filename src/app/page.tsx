@@ -28,6 +28,7 @@ import { WhatsAppMode } from '@/components/omni/whatsapp-mode'
 import { NexusSettingsMode } from '@/components/nexus/settings-mode'
 import { SkillsMode } from '@/components/omni/skills-mode'
 import { translate } from '@/lib/i18n'
+import { VENDORED_SKILLS_COUNT } from '@/lib/skill-map'
 
 export default function Page() {
   // Apply saved theme + language preferences (from Settings). The nexus
@@ -242,7 +243,7 @@ export default function Page() {
             fill
             dark
             title="Agent Skills"
-            description="79 CLI-Anything skills that connect NEXUS to real apps — from Blender and LibreOffice to browser automation and n8n."
+            description={`${VENDORED_SKILLS_COUNT} CLI-Anything skills that connect NEXUS to real apps — from Blender and LibreOffice to browser automation and n8n.`}
           >
             <SkillsMode onUseInChat={handleUseSkillInChat} />
           </FramedPanel>

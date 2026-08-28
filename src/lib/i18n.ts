@@ -179,6 +179,7 @@ export const STRINGS = {
     conversations: { en: 'Conversations', ar: 'المحادثات' },
     memories: { en: 'Memories', ar: 'الذكريات' },
     skillsUsed: { en: 'Skills', ar: 'المهارات' },
+    skillsAvailable: { en: 'Skills available', ar: 'المهارات المتاحة' },
     creations: { en: 'Creations', ar: 'الإبداعات' },
     connections: { en: 'Connections', ar: 'الاتصالات' },
     email: { en: 'Email', ar: 'البريد الإلكتروني' },

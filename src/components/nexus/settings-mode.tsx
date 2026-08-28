@@ -122,8 +122,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 /** Providers that need no API key (mirrors ANONYMOUS_PROVIDER_IDS server-side). */
 const ANONYMOUS_PROVIDER_IDS = new Set(['llm7', 'ovhcloud', 'kilocode'])
 
-/** Vendored CLI-Anything skills — constant, matches the Skills browser. */
-const SKILLS_COUNT = 79
+import { VENDORED_SKILLS_COUNT as SKILLS_COUNT } from '@/lib/skill-map'
 
 const GMAIL_DEFAULT_HINT =
   'Enable 2FA, then create an App Password at myaccount.google.com/apppasswords'
@@ -740,7 +739,7 @@ function AddProviderDialog({
               </p>
               {selected.keyUrl && (
                 <a
-                  href={selected.keyUrl}
+                  href={/^(https?:\/\/|\/)/i.test(selected.keyUrl) ? selected.keyUrl : undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 transition hover:underline dark:text-[#ff8a80]"
@@ -1407,7 +1406,7 @@ export function NexusSettingsMode() {
           />
           <StatCard
             icon={Puzzle}
-            label={t('settings.skillsUsed')}
+            label={t('settings.skillsAvailable')}
             value={SKILLS_COUNT}
             loading={false}
             accent="#34d399"
@@ -1497,7 +1496,7 @@ export function NexusSettingsMode() {
                   className="flex min-h-[38px] shrink-0 items-center gap-1.5 self-start rounded-xl border border-border px-3.5 text-xs font-medium text-muted-foreground transition hover:border-[#ff5a5f]/40 hover:text-foreground sm:self-auto"
                 >
                   <Plus className="h-3.5 w-3.5" aria-hidden />
-                  {connectedEmailCount > 0 ? t('settings.connect') : t('settings.connect')}
+                  {t('settings.connect')}
                 </button>
               </div>
             </div>
@@ -1712,7 +1711,7 @@ export function NexusSettingsMode() {
                 {t('settings.creatorLocation')}
               </p>
               <p className="mt-3 w-full border-t border-border pt-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
-                NEXUS AI © 2026
+                NEXUS AI © {new Date().getFullYear()}
               </p>
             </div>
           </SectionCard>
