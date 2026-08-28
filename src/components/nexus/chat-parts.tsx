@@ -122,11 +122,11 @@ export function HandoffPill({ assign, live = false }: { assign: AgentAssignEvent
         {assign.name}
       </span>
       {assign.divisionLabel ? (
-        <span className="hidden shrink-0 text-zinc-500 sm:inline">· {assign.divisionLabel}</span>
+        <span className="hidden shrink-0 text-muted-foreground/80 sm:inline">· {assign.divisionLabel}</span>
       ) : null}
-      <span className="shrink-0 text-zinc-500">{t('chat.tookOver')}</span>
+      <span className="shrink-0 text-muted-foreground/80">{t('chat.tookOver')}</span>
       {assign.reason ? (
-        <span className="hidden min-w-0 truncate text-zinc-600 md:inline">— {assign.reason}</span>
+        <span className="hidden min-w-0 truncate text-muted-foreground/80 md:inline">— {assign.reason}</span>
       ) : null}
     </div>
   )
@@ -221,14 +221,14 @@ export function ToolCard({ info }: { info: ToolCardInfo }) {
   if (info.status === 'running') {
     return (
       <div
-        className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-zinc-400"
+        className="flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
         role="status"
         aria-label={label}
       >
         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#ff5a5f]" aria-hidden />
         <span className="shrink-0">{label}</span>
         {info.message ? (
-          <span className="min-w-0 max-w-[240px] truncate text-zinc-600 sm:max-w-xs">{info.message}</span>
+          <span className="min-w-0 max-w-[240px] truncate text-muted-foreground/80 sm:max-w-xs">{info.message}</span>
         ) : null}
       </div>
     )
@@ -246,7 +246,7 @@ export function ToolCard({ info }: { info: ToolCardInfo }) {
         className={`flex w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition ${
           error
             ? 'border-red-500/25 bg-red-500/10 text-red-300'
-            : 'border-white/8 bg-white/[0.03] text-zinc-500 hover:text-zinc-300'
+            : 'border-border bg-muted/50 text-muted-foreground/80 hover:text-muted-foreground'
         }`}
       >
         {error ? (
@@ -257,13 +257,13 @@ export function ToolCard({ info }: { info: ToolCardInfo }) {
         <span className="shrink-0">{error ? `${label} failed` : label}</span>
         {lines.length > 0 ? (
           <ChevronDown
-            className={`ms-auto h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-180' : ''}`}
+            className={`ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/80 transition-transform ${open ? 'rotate-180' : ''}`}
             aria-hidden
           />
         ) : null}
       </button>
       {open && lines.length > 0 ? (
-        <div className="nx-rise mt-1.5 whitespace-pre-wrap break-words rounded-xl border border-white/8 bg-black/30 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-zinc-500">
+        <div className="nx-rise mt-1.5 whitespace-pre-wrap break-words rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground/80">
           {lines.join('\n')}
         </div>
       ) : null}
@@ -355,9 +355,9 @@ function VideoJobCard({
           controls
           preload="metadata"
           src={state.url}
-          className="w-full rounded-xl border border-white/10 bg-black"
+          className="w-full rounded-xl border border-border bg-black"
         />
-        <figcaption className="mt-1.5 truncate text-[11px] text-zinc-500">{title || 'Generated video'}</figcaption>
+        <figcaption className="mt-1.5 truncate text-[11px] text-muted-foreground/80">{title || 'Generated video'}</figcaption>
       </figure>
     )
   }
@@ -372,7 +372,7 @@ function VideoJobCard({
         <p className="mt-1.5 text-[11px] leading-relaxed text-red-300/70">
           {state.error || 'Video generation failed.'}
         </p>
-        <p className="mt-1 flex items-center gap-1 text-[11px] text-zinc-500">
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/80">
           <RefreshCcw className="h-3 w-3" aria-hidden /> Ask NEXUS to try generating it again.
         </p>
       </div>
@@ -381,18 +381,18 @@ function VideoJobCard({
 
   const pct = Math.min(100, Math.max(3, state.progress))
   return (
-    <div className="w-full max-w-sm rounded-xl border border-white/10 bg-white/[0.03] p-3" role="status">
+    <div className="w-full max-w-sm rounded-xl border border-border bg-muted/50 p-3" role="status">
       <div className="flex items-center gap-2.5">
         <span className="nx-gradient-surface grid h-9 w-9 shrink-0 place-items-center rounded-lg">
           <Clapperboard className="h-4 w-4" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-zinc-200">{title || 'Generating video'}</p>
-          <p className="truncate text-[11px] text-zinc-500">
+          <p className="truncate text-xs font-medium text-foreground">{title || 'Generating video'}</p>
+          <p className="truncate text-[11px] text-muted-foreground/80">
             {state.message || VIDEO_STATUS_LABEL[state.status] || 'Working…'}
           </p>
         </div>
-        <span className="shrink-0 text-[11px] tabular-nums text-zinc-500">{Math.round(pct)}%</span>
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/80">{Math.round(pct)}%</span>
       </div>
       <div className="nx-progress-track mt-2.5" aria-hidden>
         <div className="nx-progress-fill" style={{ width: `${pct}%` }} />
@@ -447,7 +447,7 @@ export function SkillRunCard({ info }: { info: SkillRunEvent }) {
       initial={{ opacity: 0, y: 14, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-      className="relative w-full max-w-md overflow-hidden rounded-2xl border bg-white/[0.03] p-4"
+      className="relative w-full max-w-md overflow-hidden rounded-2xl border bg-muted/50 p-4"
       style={{ borderColor: `${accent}38` }}
       role="status"
       aria-label={`Skill ${info.skill} ${info.status}`}
@@ -490,7 +490,7 @@ export function SkillRunCard({ info }: { info: SkillRunEvent }) {
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="truncate text-sm font-semibold text-zinc-100">{info.skill}</p>
+            <p className="truncate text-sm font-semibold text-foreground">{info.skill}</p>
             <span
               className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
               style={{ backgroundColor: `${accent}1a`, color: accent }}
@@ -498,7 +498,7 @@ export function SkillRunCard({ info }: { info: SkillRunEvent }) {
               {error ? 'failed' : running ? 'running' : 'done'}
             </span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">
+          <p className="mt-0.5 truncate text-xs text-muted-foreground/80">
             {info.actionLabel}
             {running && elapsed > 0 ? ` · ${elapsed}s` : ''}
           </p>
@@ -544,10 +544,10 @@ export function SkillRunCard({ info }: { info: SkillRunEvent }) {
                     transition={{ repeat: Infinity, duration: 0.9 }}
                   />
                 ) : (
-                  <span key="idle" className="block h-4 w-4 rounded-full border-2 border-white/10" />
+                  <span key="idle" className="block h-4 w-4 rounded-full border-2 border-border" />
                 )}
               </AnimatePresence>
-              <span className={done ? 'text-zinc-400' : active ? 'text-zinc-200' : 'text-zinc-600'}>
+              <span className={done ? 'text-muted-foreground' : active ? 'text-foreground' : 'text-muted-foreground/80'}>
                 {label}
               </span>
             </li>
@@ -557,7 +557,7 @@ export function SkillRunCard({ info }: { info: SkillRunEvent }) {
 
       {/* Task context line */}
       {info.task ? (
-        <p className="relative mt-3 truncate rounded-lg bg-black/25 px-2.5 py-1.5 font-mono text-[10px] text-zinc-500">
+        <p className="relative mt-3 truncate rounded-lg bg-input px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground/80">
           {info.task}
         </p>
       ) : null}
@@ -608,7 +608,7 @@ function TtsAttachment({ text }: { text: string }) {
   }, [audioUrl])
 
   return (
-    <div className="w-full max-w-sm rounded-xl border border-white/10 bg-white/[0.03] p-3">
+    <div className="w-full max-w-sm rounded-xl border border-border bg-muted/50 p-3">
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -624,13 +624,13 @@ function TtsAttachment({ text }: { text: string }) {
           )}
         </button>
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
             <Volume2 className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
             Neural speech
           </p>
-          <p className="mt-0.5 truncate text-[11px] text-zinc-500">{text}</p>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{text}</p>
         </div>
-        <Sparkles className="h-3.5 w-3.5 shrink-0 text-zinc-600" aria-hidden />
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" aria-hidden />
       </div>
       {audioUrl ? (
         <motion.audio
@@ -671,9 +671,9 @@ function AttachmentCard({ item }: { item: unknown }) {
           src={url}
           alt={title || 'Generated image'}
           loading="lazy"
-          className="w-full rounded-xl border border-white/10"
+          className="w-full rounded-xl border border-border"
         />
-        {title ? <figcaption className="mt-1.5 truncate text-[11px] text-zinc-500">{title}</figcaption> : null}
+        {title ? <figcaption className="mt-1.5 truncate text-[11px] text-muted-foreground/80">{title}</figcaption> : null}
       </figure>
     )
   }
@@ -712,21 +712,21 @@ function AttachmentCard({ item }: { item: unknown }) {
         href={url}
         download
         aria-label={`${t('common.download')} ${title}`}
-        className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 transition hover:border-[#ff5a5f]/35 hover:bg-white/[0.05]"
+        className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-border bg-muted/50 p-3 transition hover:border-[#ff5a5f]/35 hover:bg-muted/50"
       >
         <span className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-lg">
           <FileText className="h-5 w-5" aria-hidden />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-zinc-200">{title}</span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-zinc-500">
+          <span className="block truncate text-sm text-foreground">{title}</span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
             {format ? (
-              <span className="rounded-full bg-white/8 px-1.5 py-0.5 font-medium text-zinc-400">{format}</span>
+              <span className="rounded-full bg-accent px-1.5 py-0.5 font-medium text-muted-foreground">{format}</span>
             ) : null}
             {size ? <span>{size}</span> : null}
           </span>
         </span>
-        <Download className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+        <Download className="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden />
       </a>
     )
   }
@@ -737,12 +737,12 @@ function AttachmentCard({ item }: { item: unknown }) {
     const stdout = str(a.stdout) || str(a.stderr)
     const exit = a.exitCode
     return (
-      <div className="w-full max-w-md rounded-xl border border-white/10 bg-black/30 p-3">
-        <div className="flex items-center gap-2 text-xs text-zinc-400">
+      <div className="w-full max-w-md rounded-xl border border-border bg-input p-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Terminal className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
-          <span className="truncate font-medium text-zinc-300">Code result</span>
+          <span className="truncate font-medium text-muted-foreground">Code result</span>
           {language ? (
-            <span className="shrink-0 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] text-zinc-400">{language}</span>
+            <span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">{language}</span>
           ) : null}
           {typeof exit === 'number' ? (
             <span
@@ -755,11 +755,11 @@ function AttachmentCard({ item }: { item: unknown }) {
           ) : null}
         </div>
         {stdout ? (
-          <pre className="nx-scroll mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
+          <pre className="nx-scroll mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground">
             {stdout}
           </pre>
         ) : (
-          <p className="mt-2 text-[11px] text-zinc-600">No output.</p>
+          <p className="mt-2 text-[11px] text-muted-foreground/80">No output.</p>
         )}
       </div>
     )
@@ -770,8 +770,8 @@ function AttachmentCard({ item }: { item: unknown }) {
     const results = Array.isArray(a.results) ? a.results : []
     if (results.length === 0) return null
     return (
-      <div className="w-full max-w-md rounded-xl border border-white/10 bg-white/[0.03] p-3">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Sources</p>
+      <div className="w-full max-w-md rounded-xl border border-border bg-muted/50 p-3">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Sources</p>
         <ul className="mt-2 space-y-1.5">
           {results.slice(0, 5).map((raw, i) => {
             const r = asRecord(raw)
@@ -780,18 +780,18 @@ function AttachmentCard({ item }: { item: unknown }) {
             const title = str(r.title) || url
             return (
               <li key={i} className="flex min-w-0 items-start gap-1.5 text-xs">
-                <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-zinc-600" aria-hidden />
+                <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/80" aria-hidden />
                 {url ? (
                   <a
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="min-w-0 flex-1 truncate text-zinc-400 transition hover:text-zinc-200"
+                    className="min-w-0 flex-1 truncate text-muted-foreground transition hover:text-foreground"
                   >
                     {title}
                   </a>
                 ) : (
-                  <span className="min-w-0 flex-1 truncate text-zinc-500">{title}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground/80">{title}</span>
                 )}
               </li>
             )
@@ -805,7 +805,7 @@ function AttachmentCard({ item }: { item: unknown }) {
   const title = str(a.title) || type
   if (!title) return null
   return (
-    <div className="flex max-w-sm items-center gap-2 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-zinc-500">
+    <div className="flex max-w-sm items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground/80">
       <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="truncate">{title}</span>
     </div>

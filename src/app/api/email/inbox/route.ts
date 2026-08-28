@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(1, rawLimit), 25) : 10
     const folder = searchParams.get('folder') || 'INBOX'
 
-    const account = await getPrimaryAccount()
+    const account = await getPrimaryAccount(session.userId)
     if (!account) {
       return NextResponse.json(
         { error: 'No email account connected.', needsConnect: true },

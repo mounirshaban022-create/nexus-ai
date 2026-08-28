@@ -827,7 +827,8 @@ async function executeChatTool(
   toolId: string,
   args: Record<string, unknown>,
   activeDoc: ActiveDoc | null = null,
-  activeImage: ActiveImage | null = null
+  activeImage: ActiveImage | null = null,
+  userId: string | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
   const origin = appOrigin(req)
   if (toolId === 'generate_image') {
@@ -1336,7 +1337,7 @@ async function executeChatTool(
   /* ---- send_email: real email via the connected SMTP account ---- */
   if (toolId === 'send_email') {
     const { sendEmail, getPrimaryAccount } = await import('@/lib/email')
-    const account = await getPrimaryAccount()
+    const account = await getPrimaryAccount(userId)
     if (!account) {
       throw new Error('No email account connected. Ask the user to connect their email in Settings → Email first.')
     }
@@ -1356,7 +1357,7 @@ async function executeChatTool(
   /* ---- send_whatsapp: real WhatsApp via the connected number ---- */
   if (toolId === 'send_whatsapp') {
     const { waSendText, getWhatsAppAccount, normalizeWaNumber } = await import('@/lib/whatsapp')
-    const account = await getWhatsAppAccount()
+    const account = await getWhatsAppAccount(userId)
     if (!account) {
       throw new Error('No WhatsApp number connected. Ask the user to connect WhatsApp first (sidebar → WhatsApp).')
     }
@@ -1544,7 +1545,7 @@ async function executeChatTool(
 
   /* ---- email_organize: real inbox housekeeping (mark/star/move/delete) ---- */
   if (toolId === 'email_organize') {
-    const account = await getPrimaryAccount()
+    const account = await getPrimaryAccount(userId)
     if (!account) {
       return { result: { error: 'No email account connected. Ask the user to connect one in Settings → Email first.' } }
     }
@@ -1572,7 +1573,7 @@ async function executeChatTool(
 
   /* ---- email_folders: list mailbox folders (move targets) ---- */
   if (toolId === 'email_folders') {
-    const account = await getPrimaryAccount()
+    const account = await getPrimaryAccount(userId)
     if (!account) {
       return { result: { error: 'No email account connected. Ask the user to connect one in Settings → Email first.' } }
     }
@@ -1585,7 +1586,9 @@ async function executeChatTool(
   if (!connector) return { result: { error: `Unknown tool "${toolId}"` } }
   const validated = validateConnectorArgs(connector, args)
   if (!validated.ok) return { result: { error: validated.error } }
-  const result = await connector.execute(validated.args)
+  // SECURITY: pass the caller's userId so email connectors read only
+  // the caller's own mailbox.
+  const result = await connector.execute(validated.args, { userId })
   // Attach search results richly
   if (toolId === 'web_search' && Array.isArray((result as { results?: unknown[] }).results)) {
     const results = (result as { results: Array<{ title: string; url: string; snippet: string }> }).results
@@ -1774,7 +1777,7 @@ export async function POST(req: NextRequest) {
     // inbox tools (list / search / read) become available to the agent so
     // it can manage the mailbox directly from chat (paired with the
     // email_organize + email_folders ability tools above).
-    const emailAccount = await getPrimaryAccount().catch(() => null)
+    const emailAccount = await getPrimaryAccount(verifiedUserId).catch(() => null)
 
     const enabledConnectors = [
       'web_search', 'read_page', 'wikipedia', 'weather', 'crypto', 'currency',
@@ -2306,7 +2309,7 @@ export async function POST(req: NextRequest) {
           // USER PROVIDER: resolved once (their key, their quota). When
           // present it streams FIRST (word-by-word like everything else);
           // on failure we race the free pool.
-          const userProvider = await getActiveAiProvider()
+          const userProvider = await getActiveAiProvider(verifiedUserId)
 
           for (let step = 0; step <= MAX_TOOL_CALLS; step++) {
             const isLast = step === MAX_TOOL_CALLS
@@ -2570,7 +2573,7 @@ export async function POST(req: NextRequest) {
               let result: unknown
               let attachment: Record<string, unknown> | undefined
               try {
-                const executed = await executeChatTool(req, toolCall.tool, toolCall.args, activeDoc, activeImage)
+                const executed = await executeChatTool(req, toolCall.tool, toolCall.args, activeDoc, activeImage, verifiedUserId)
                 result = executed.result
                 attachment = executed.attachment
               } catch (error) {

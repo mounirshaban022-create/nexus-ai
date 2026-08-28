@@ -113,15 +113,15 @@ export function VoicePicker({
         <button
           type="button"
           aria-label={`Voice: ${voiceLabel(value)}. Change voice.`}
-          className="flex h-9 max-w-[62vw] items-center gap-1.5 rounded-full border border-white/12 bg-white/5 pl-2.5 pr-2 text-xs font-medium text-zinc-200 transition hover:border-[#ff5a5f]/45 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5a5f]/50 sm:max-w-none"
+          className="flex h-9 max-w-[62vw] items-center gap-1.5 rounded-full border border-border bg-accent/50 pl-2.5 pr-2 text-xs font-medium text-foreground transition hover:border-[#ff5a5f]/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5a5f]/50 sm:max-w-none"
         >
           <AudioLines className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
           <span className="truncate">
-            <span className="hidden text-zinc-500 sm:inline">Voice:&nbsp;</span>
+            <span className="hidden text-muted-foreground/80 sm:inline">Voice:&nbsp;</span>
             {voiceLabel(value)}
           </span>
           <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`}
+            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/80 transition-transform ${open ? 'rotate-180' : ''}`}
             aria-hidden
           />
         </button>
@@ -129,24 +129,24 @@ export function VoicePicker({
       <PopoverContent
         align="start"
         sideOffset={10}
-        className="z-[60] w-[min(86vw,360px)] rounded-2xl border-white/10 bg-[#14101a] p-0 text-zinc-100 shadow-2xl shadow-black/60"
+        className="z-[60] w-[min(86vw,360px)] rounded-2xl border-border bg-card p-0 text-foreground shadow-2xl shadow-black/60"
       >
         {/* search */}
-        <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
-          <Search className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search voices or languages…"
             aria-label="Search voices"
-            className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/80"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="rounded-full px-1.5 text-xs text-zinc-500 hover:text-zinc-200"
+              className="rounded-full px-1.5 text-xs text-muted-foreground/80 hover:text-foreground"
             >
               ✕
             </button>
@@ -156,13 +156,13 @@ export function VoicePicker({
         {/* grouped list */}
         <div className="nx-scroll max-h-[46vh] overflow-y-auto px-2 py-2" role="listbox" aria-label="Voices">
           {groups.length === 0 && (
-            <p className="px-3 py-6 text-center text-sm text-zinc-500">
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground/80">
               No voices match “{query}”.
             </p>
           )}
           {groups.map((g) => (
             <div key={g.key} className="mb-1.5 last:mb-0">
-              <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+              <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
                 {g.label}
               </p>
               <div className="space-y-0.5">
@@ -182,7 +182,7 @@ export function VoicePicker({
                       className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${
                         active
                           ? 'bg-[#ff5a5f]/15 ring-1 ring-inset ring-[#ff5a5f]/35'
-                          : 'hover:bg-white/5'
+                          : 'hover:bg-accent/50'
                       }`}
                     >
                       <span
@@ -198,8 +198,8 @@ export function VoicePicker({
                         {v.provider === 'kokoro' ? <WifiOff className="h-3.5 w-3.5" /> : v.label.slice(0, 2)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-zinc-100">{v.label}</span>
-                        <span className="block truncate text-xs text-zinc-500">{v.language}</span>
+                        <span className="block truncate text-sm font-medium text-foreground">{v.label}</span>
+                        <span className="block truncate text-xs text-muted-foreground/80">{v.language}</span>
                       </span>
                       {active && <Check className="h-4 w-4 shrink-0 text-[#ff5a5f]" aria-hidden />}
                     </button>
@@ -211,14 +211,14 @@ export function VoicePicker({
 
           {/* offline section still warming up */}
           {kokoroLoading && !kokoroReady && (
-            <p className="flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-600">
+            <p className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground/80">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
               Loading offline Kokoro voices…
             </p>
           )}
         </div>
 
-        <p className="border-t border-white/10 px-3 py-2 text-[11px] leading-relaxed text-zinc-600">
+        <p className="border-t border-border px-3 py-2 text-[11px] leading-relaxed text-muted-foreground/80">
           Neural voices stream from the server. Offline voices run entirely in your
           browser once loaded.
         </p>

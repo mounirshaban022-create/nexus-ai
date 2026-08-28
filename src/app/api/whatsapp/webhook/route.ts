@@ -3,7 +3,8 @@ import { after } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { db } from '@/lib/db'
 import {
-  getWhatsAppAccount,
+  getWhatsAppAccountByVerifyToken,
+  getWhatsAppAccountByPhoneNumberId,
   waSendText,
   waMarkRead,
   saveInboundMessage,
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
-  const account = await getWhatsAppAccount()
+  const account = await getWhatsAppAccountByVerifyToken(token)
   if (!account || token !== account.verifyToken) {
     console.warn('[whatsapp-webhook] verification failed — token mismatch')
     return new NextResponse('Forbidden', { status: 403 })
@@ -161,18 +162,19 @@ function extractText(message: WaInboundMessage): string {
 async function processWebhook(payload: WaWebhookPayload): Promise<void> {
   if (payload.object !== 'whatsapp_business_account' || !payload.entry?.length) return
 
-  const account = await getWhatsAppAccount()
-  if (!account) return
-
+  // Per-entry account resolution: each webhook entry carries the
+  // phone_number_id it belongs to, so we route to the correct user's
+  // account (WhatsApp connections are now per-user, not global).
   for (const entry of payload.entry) {
     for (const change of entry.changes ?? []) {
       const value = change.value
       if (!value) continue
 
-      // --- Security check: event must belong to OUR phone number ID ---
       const eventPhoneNumberId = value.metadata?.phone_number_id
-      if (eventPhoneNumberId && eventPhoneNumberId !== account.phoneNumberId) {
-        console.warn('[whatsapp-webhook] dropped event for foreign phone_number_id')
+      if (!eventPhoneNumberId) continue
+      const account = await getWhatsAppAccountByPhoneNumberId(eventPhoneNumberId)
+      if (!account) {
+        console.warn('[whatsapp-webhook] no account owns phone_number_id', eventPhoneNumberId)
         continue
       }
 

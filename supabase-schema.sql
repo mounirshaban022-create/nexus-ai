@@ -320,3 +320,50 @@ DELETE FROM "GeneratedVideo" a USING "GeneratedVideo" b
 WHERE a."jobId" IS NOT NULL AND a."jobId" = b."jobId" AND a."createdAt" < b."createdAt";
 CREATE UNIQUE INDEX IF NOT EXISTS "GeneratedVideo_jobId_key" ON "GeneratedVideo"("jobId");
 
+-- ------------------------------------------------------------------
+-- SECURITY + MEDIA upgrade (per-user private accounts + durable files)
+-- Non-destructive: every statement is IF NOT EXISTS so re-running is safe.
+-- ------------------------------------------------------------------
+
+-- EmailAccount → per-user (private connected mailboxes)
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+CREATE INDEX IF NOT EXISTS "EmailAccount_userId_createdAt_idx" ON "EmailAccount"("userId", "createdAt");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'EmailAccount_userId_fkey') THEN
+    ALTER TABLE "EmailAccount" ADD CONSTRAINT "EmailAccount_userId_fkey"
+      FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+-- AiProvider → per-user (private API keys). The old global unique on
+-- providerId alone MUST be dropped: two users may each configure the same
+-- providerId. Replace with a composite unique (providerId, userId).
+DROP INDEX IF EXISTS "AiProvider_providerId_key";
+ALTER TABLE "AiProvider" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+CREATE INDEX IF NOT EXISTS "AiProvider_userId_createdAt_idx" ON "AiProvider"("userId", "createdAt");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'AiProvider_userId_fkey') THEN
+    ALTER TABLE "AiProvider" ADD CONSTRAINT "AiProvider_userId_fkey"
+      FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+-- Composite unique allows one config per (provider, user). Postgres treats
+-- NULL userIds as distinct, so legacy global rows remain insertable.
+CREATE UNIQUE INDEX IF NOT EXISTS "AiProvider_providerId_userId_key" ON "AiProvider"("providerId", "userId");
+
+-- WhatsAppAccount → per-user (private WhatsApp connections). The Meta
+-- webhook still resolves the right account by its unique verifyToken.
+ALTER TABLE "WhatsAppAccount" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+CREATE INDEX IF NOT EXISTS "WhatsAppAccount_userId_createdAt_idx" ON "WhatsAppAccount"("userId", "createdAt");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'WhatsAppAccount_userId_fkey') THEN
+    ALTER TABLE "WhatsAppAccount" ADD CONSTRAINT "WhatsAppAccount_userId_fkey"
+      FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+-- GeneratedDocument → durable file bytes (survives Vercel's ephemeral /tmp)
+ALTER TABLE "GeneratedDocument" ADD COLUMN IF NOT EXISTS "data" TEXT;
+ALTER TABLE "GeneratedDocument" ADD COLUMN IF NOT EXISTS "mimeType" TEXT;
+CREATE INDEX IF NOT EXISTS "GeneratedDocument_userId_createdAt_idx" ON "GeneratedDocument"("userId", "createdAt");
+

@@ -73,8 +73,8 @@ function SidebarContent({
   const navItemClass = (active: boolean) =>
     `flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm transition md:h-9 ${
       active
-        ? 'bg-zinc-800/80 font-medium text-zinc-100'
-        : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100'
+        ? 'bg-accent/80 font-medium text-foreground'
+        : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
     }`
 
   return (
@@ -82,13 +82,13 @@ function SidebarContent({
       {/* Logo block */}
       <div className="flex shrink-0 items-center gap-3 px-4 pt-5 pr-10 pb-4">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400">
-          <Hexagon className="h-5 w-5 text-zinc-950" fill="currentColor" aria-hidden />
+          <Hexagon className="h-5 w-5 text-foreground" fill="currentColor" aria-hidden />
         </span>
         <div className="min-w-0">
-          <p className="font-display text-lg font-bold leading-none tracking-tight text-zinc-100">
+          <p className="font-display text-lg font-bold leading-none tracking-tight text-foreground">
             NEXUS
           </p>
-          <p className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+          <p className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-muted-foreground/80">
             The Agency
           </p>
         </div>
@@ -99,7 +99,7 @@ function SidebarContent({
         <button
           type="button"
           onClick={() => onNavigate({ type: 'chat', agentSlug: null })}
-          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-amber-400 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-amber-400 px-3 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
         >
           <Plus className="h-4 w-4" aria-hidden />
           New conversation
@@ -107,7 +107,7 @@ function SidebarContent({
         <form onSubmit={submitSearch} role="search" aria-label="Search specialists">
           <div className="relative">
             <Search
-              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-zinc-500"
+              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/80"
               aria-hidden
             />
             <Input
@@ -116,7 +116,7 @@ function SidebarContent({
               onChange={(e) => handleSearchChange(e.target.value)}
               placeholder={`Search ${AGENCY_STATS.agents} specialists…`}
               aria-label={`Search ${AGENCY_STATS.agents} specialists`}
-              className="h-10 rounded-xl border-zinc-800 bg-zinc-900 pl-9 text-zinc-100 placeholder:text-zinc-500 focus-visible:border-amber-400/50 focus-visible:ring-amber-400/20 dark:border-zinc-800 dark:bg-zinc-900"
+              className="h-10 rounded-xl border-border bg-muted pl-9 text-foreground placeholder:text-muted-foreground/80 focus-visible:border-amber-400/50 focus-visible:ring-amber-400/20 dark:border-border dark:bg-zinc-900"
             />
           </div>
         </form>
@@ -142,13 +142,13 @@ function SidebarContent({
           >
             <Users className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">All Agents</span>
-            <span className="rounded-md bg-zinc-800 px-1.5 py-0.5 text-[11px] tabular-nums text-zinc-400">
+            <span className="rounded-md bg-accent px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
               {AGENCY_STATS.agents}
             </span>
           </button>
         </div>
 
-        <p className="px-3 pt-5 pb-2 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+        <p className="px-3 pt-5 pb-2 text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
           Divisions
         </p>
         <div className="space-y-0.5">
@@ -165,13 +165,13 @@ function SidebarContent({
               >
                 <DivisionIcon division={d} className="h-4 w-4 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{d.label}</span>
-                <span className="text-xs tabular-nums text-zinc-500">{d.count}</span>
+                <span className="text-xs tabular-nums text-muted-foreground/80">{d.count}</span>
               </button>
             )
           })}
         </div>
 
-        <p className="px-3 pt-5 pb-2 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+        <p className="px-3 pt-5 pb-2 text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
           Channels
         </p>
         <div className="space-y-0.5">
@@ -188,7 +188,7 @@ function SidebarContent({
       </nav>
 
       {/* Pinned bottom: settings + account + build version */}
-      <div className="shrink-0 border-t border-zinc-800/60 p-3">
+      <div className="shrink-0 border-t border-border/60 p-3">
         <button
           type="button"
           onClick={() => onNavigate({ type: 'settings' })}
@@ -202,19 +202,19 @@ function SidebarContent({
         {user ? (
           <div className="mt-1 flex items-center gap-2.5 rounded-lg px-2 py-2">
             <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-zinc-950"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-foreground"
               aria-hidden
             >
               {(user.name || user.email || '?').charAt(0).toUpperCase()}
             </span>
-            <span className="min-w-0 flex-1 truncate text-xs text-zinc-400" title={user.email}>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={user.email}>
               {user.email}
             </span>
             <button
               type="button"
               onClick={onSignOut}
               aria-label="Sign out"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-800/70 hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-amber-400"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground/80 transition hover:bg-accent/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-amber-400"
             >
               <LogOut className="h-4 w-4" aria-hidden />
             </button>
@@ -229,7 +229,7 @@ function SidebarContent({
           </button>
         )}
 
-        <p className="px-2 pt-3 text-[10px] text-zinc-600" aria-hidden>
+        <p className="px-2 pt-3 text-[10px] text-muted-foreground/80" aria-hidden>
           NEXUS · {BUILD_VERSION}
         </p>
       </div>
@@ -261,7 +261,7 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Fixed ambient glow — the agency signature */}
       <div
         aria-hidden
@@ -269,7 +269,7 @@ export function AppShell({
       />
 
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] flex-col border-r border-zinc-800/60 bg-[#0c0c0f] md:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] flex-col border-r border-border/60 bg-sidebar md:flex">
         <SidebarContent
           view={view}
           setView={setView}
@@ -281,20 +281,20 @@ export function AppShell({
       </aside>
 
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-zinc-800/60 bg-[#0c0c0f]/90 px-2 backdrop-blur md:hidden">
+      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-border/60 bg-sidebar/90 px-2 backdrop-blur md:hidden">
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
           aria-label="Open navigation menu"
-          className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-800/70 hover:text-zinc-100"
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-accent/70 hover:text-foreground"
         >
           <Menu className="h-5 w-5" aria-hidden />
         </button>
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400">
-            <Hexagon className="h-4 w-4 text-zinc-950" fill="currentColor" aria-hidden />
+            <Hexagon className="h-4 w-4 text-foreground" fill="currentColor" aria-hidden />
           </span>
-          <span className="font-display text-base font-bold tracking-tight text-zinc-100">
+          <span className="font-display text-base font-bold tracking-tight text-foreground">
             NEXUS
           </span>
         </div>
@@ -302,7 +302,7 @@ export function AppShell({
           type="button"
           onClick={() => navigate({ type: 'chat', agentSlug: null })}
           aria-label="New conversation"
-          className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-800/70 hover:text-zinc-100"
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-accent/70 hover:text-foreground"
         >
           <Plus className="h-5 w-5" aria-hidden />
         </button>
@@ -312,7 +312,7 @@ export function AppShell({
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side="left"
-          className="agency-scroll w-[280px] gap-0 overflow-y-auto border-zinc-800/60 bg-[#0c0c0f] p-0 text-zinc-100"
+          className="agency-scroll w-[280px] gap-0 overflow-y-auto border-border/60 bg-sidebar p-0 text-foreground"
         >
           <SheetTitle className="sr-only">Agency navigation</SheetTitle>
           <SidebarContent

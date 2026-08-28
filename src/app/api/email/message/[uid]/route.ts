@@ -37,7 +37,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     const { searchParams } = new URL(req.url)
     const folder = searchParams.get('folder') || 'INBOX'
 
-    const account = await getPrimaryAccount()
+    const account = await getPrimaryAccount(session.userId)
     if (!account) {
       return NextResponse.json(
         { error: 'No email account connected.', needsConnect: true },

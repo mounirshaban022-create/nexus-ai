@@ -72,32 +72,32 @@ export function AgencyAuthModal({
   }
 
   const inputClass =
-    'h-11 rounded-xl border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 focus-visible:border-amber-400/50 focus-visible:ring-amber-400/20 dark:border-zinc-800 dark:bg-zinc-900'
-  const labelClass = 'text-xs font-medium uppercase tracking-wide text-zinc-500'
+    'h-11 rounded-xl border-border bg-muted text-foreground placeholder:text-muted-foreground/80 focus-visible:border-amber-400/50 focus-visible:ring-amber-400/20 dark:border-border dark:bg-zinc-900'
+  const labelClass = 'text-xs font-medium uppercase tracking-wide text-muted-foreground/80'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-2xl border-zinc-800 bg-[#111114] text-zinc-100 sm:max-w-md">
+      <DialogContent className="rounded-2xl border-border bg-card text-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl font-bold tracking-tight">
             Join the Agency
           </DialogTitle>
-          <DialogDescription className="text-zinc-400">
+          <DialogDescription className="text-muted-foreground">
             One account — every specialist.
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={switchTab}>
-          <TabsList className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 dark:bg-zinc-900">
+          <TabsList className="h-11 w-full rounded-xl border border-border bg-muted dark:bg-zinc-900">
             <TabsTrigger
               value="signin"
-              className="rounded-lg text-zinc-400 data-[state=active]:bg-zinc-100 data-[state=active]:text-zinc-950 dark:text-zinc-400 dark:data-[state=active]:bg-zinc-100 dark:data-[state=active]:text-zinc-950"
+              className="rounded-lg text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:text-muted-foreground dark:data-[state=active]:bg-zinc-100 dark:data-[state=active]:text-foreground"
             >
               Sign in
             </TabsTrigger>
             <TabsTrigger
               value="signup"
-              className="rounded-lg text-zinc-400 data-[state=active]:bg-zinc-100 data-[state=active]:text-zinc-950 dark:text-zinc-400 dark:data-[state=active]:bg-zinc-100 dark:data-[state=active]:text-zinc-950"
+              className="rounded-lg text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground dark:text-muted-foreground dark:data-[state=active]:bg-zinc-100 dark:data-[state=active]:text-foreground"
             >
               Create account
             </TabsTrigger>
@@ -143,7 +143,7 @@ export function AgencyAuthModal({
               <button
                 type="submit"
                 disabled={loading}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-400 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 disabled:opacity-60"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-400 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 disabled:opacity-60"
               >
                 {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                 {loading ? 'Signing in…' : 'Sign in'}
@@ -207,7 +207,7 @@ export function AgencyAuthModal({
               <button
                 type="submit"
                 disabled={loading}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-400 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 disabled:opacity-60"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-400 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 disabled:opacity-60"
               >
                 {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                 {loading ? 'Creating account…' : 'Create account'}
@@ -219,7 +219,7 @@ export function AgencyAuthModal({
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="mx-auto block text-sm text-zinc-500 underline underline-offset-4 transition hover:text-zinc-300"
+          className="mx-auto block text-sm text-muted-foreground/80 underline underline-offset-4 transition hover:text-muted-foreground"
         >
           Continue as guest instead
         </button>

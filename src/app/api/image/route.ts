@@ -186,7 +186,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
     }
 
+    // SECURITY: only the caller's OWN generated images.
     const images = await db.generatedImage.findMany({
+      where: { userId: session.userId },
       orderBy: { createdAt: 'desc' },
       take: 60,
     })

@@ -32,7 +32,7 @@ export function AgentCard({
     <button
       onClick={() => setView({ type: 'agent', agentSlug: agent.slug })}
       aria-label={`Open profile: ${agent.name}`}
-      className="group flex w-full gap-3 rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-4 text-left transition hover:border-zinc-700 hover:bg-zinc-900"
+      className="group flex w-full gap-3 rounded-2xl border border-border/60 bg-muted/60 p-4 text-left transition hover:border-border hover:bg-muted"
     >
       <span
         className="grid h-12 w-12 shrink-0 place-items-center rounded-xl text-2xl"
@@ -43,7 +43,7 @@ export function AgentCard({
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-semibold text-zinc-100">{agent.name}</span>
+          <span className="truncate text-sm font-semibold text-foreground">{agent.name}</span>
           {division && (
             <span
               className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -53,9 +53,9 @@ export function AgentCard({
             </span>
           )}
         </span>
-        <span className="line-clamp-2 text-xs text-zinc-500">{agent.description}</span>
+        <span className="line-clamp-2 text-xs text-muted-foreground/80">{agent.description}</span>
         {agent.vibe && (
-          <span className="line-clamp-1 text-[11px] italic text-zinc-600">{agent.vibe}</span>
+          <span className="line-clamp-1 text-[11px] italic text-muted-foreground/80">{agent.vibe}</span>
         )}
       </span>
     </button>
@@ -110,11 +110,11 @@ export function AgencyRoster({
     <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
       {/* Header */}
       <header className="mb-6">
-        <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">The Roster</p>
-        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-zinc-100 md:text-4xl">
+        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">The Roster</p>
+        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
           Every specialist.
         </h1>
-        <p className="mt-2 text-sm text-zinc-400">
+        <p className="mt-2 text-sm text-muted-foreground">
           {AGENCY_STATS.agents} agents across {AGENCY_STATS.divisions} divisions
         </p>
       </header>
@@ -122,7 +122,7 @@ export function AgencyRoster({
       {/* Search */}
       <div className="relative mb-4">
         <Search
-          className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500"
+          className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80"
           aria-hidden
         />
         <input
@@ -136,7 +136,7 @@ export function AgencyRoster({
           placeholder="Search specialists, skills, divisions…"
           aria-label="Search specialists"
           autoFocus
-          className="h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900 pl-10 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none transition focus:border-zinc-600"
+          className="h-12 w-full rounded-xl border border-border bg-muted pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground/80 outline-none transition focus:border-border"
         />
         {query && (
           <button
@@ -146,7 +146,7 @@ export function AgencyRoster({
               inputRef.current?.focus()
             }}
             aria-label="Clear search"
-            className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+            className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground/80 transition hover:bg-accent hover:text-muted-foreground"
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -164,11 +164,11 @@ export function AgencyRoster({
           className={`flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium transition ${
             division === null
               ? 'border-amber-400/60 bg-amber-400/10 text-amber-300'
-              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+              : 'border-border bg-muted/60 text-muted-foreground hover:border-border hover:text-foreground'
           }`}
         >
           All
-          <span className="text-[10px] text-zinc-500">{AGENCY_STATS.agents}</span>
+          <span className="text-[10px] text-muted-foreground/80">{AGENCY_STATS.agents}</span>
         </button>
         {AGENCY_DIVISIONS.map((d) => {
           const active = division === d.id
@@ -181,7 +181,7 @@ export function AgencyRoster({
               }}
               aria-pressed={active}
               className={`flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium transition ${
-                active ? '' : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                active ? '' : 'border-border bg-muted/60 text-muted-foreground hover:border-border hover:text-foreground'
               }`}
               style={
                 active
@@ -199,15 +199,15 @@ export function AgencyRoster({
 
       {/* Results */}
       {results.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 rounded-2xl border border-zinc-800/60 bg-zinc-900/40 py-16 text-center">
-          <p className="text-sm font-medium text-zinc-300">No specialists match.</p>
-          <p className="max-w-sm text-xs text-zinc-500">
+        <div className="flex flex-col items-center gap-4 rounded-2xl border border-border/60 bg-muted/40 py-16 text-center">
+          <p className="text-sm font-medium text-muted-foreground">No specialists match.</p>
+          <p className="max-w-sm text-xs text-muted-foreground/80">
             Try a different search term or clear the division filter.
           </p>
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="rounded-xl border border-zinc-800 px-4 py-2 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-100"
+              className="rounded-xl border border-border px-4 py-2 text-xs font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
             >
               Clear filters
             </button>
@@ -215,7 +215,7 @@ export function AgencyRoster({
         </div>
       ) : (
         <>
-          <p className="mb-3 text-xs text-zinc-500">
+          <p className="mb-3 text-xs text-muted-foreground/80">
             {results.length} specialist{results.length === 1 ? '' : 's'}
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -238,10 +238,10 @@ export function AgencyRoster({
             <div className="mt-6 flex justify-center">
               <button
                 onClick={() => setLimit((l) => l + PAGE_SIZE)}
-                className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-5 py-2.5 text-sm font-medium text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-100"
+                className="rounded-xl border border-border bg-muted/60 px-5 py-2.5 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
               >
                 Show more
-                <span className="ml-2 text-xs text-zinc-500">
+                <span className="ml-2 text-xs text-muted-foreground/80">
                   {visible.length} of {results.length}
                 </span>
               </button>

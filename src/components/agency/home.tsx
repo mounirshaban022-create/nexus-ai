@@ -130,10 +130,10 @@ export function AgencyHome({
     <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8 md:py-12">
       {/* Greeting */}
       <motion.header {...sectionMotion(0)}>
-        <h1 className="font-display text-3xl font-bold tracking-tight text-zinc-100 md:text-4xl">
+        <h1 className="font-display text-3xl font-bold tracking-tight text-foreground md:text-4xl">
           {dubaiGreeting(user?.name ?? '')}
         </h1>
-        <p className="mt-2 text-sm text-zinc-400 md:text-base">
+        <p className="mt-2 text-sm text-muted-foreground md:text-base">
           Your agency is ready — {AGENCY_STATS.agents} specialists on call.
         </p>
       </motion.header>
@@ -143,7 +143,7 @@ export function AgencyHome({
         <button
           type="button"
           onClick={() => setView({ type: 'chat', agentSlug: null })}
-          className="flex h-11 items-center justify-center gap-2 rounded-xl bg-amber-400 px-5 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+          className="flex h-11 items-center justify-center gap-2 rounded-xl bg-amber-400 px-5 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
         >
           <MessageSquare className="h-4 w-4" aria-hidden />
           New conversation
@@ -151,7 +151,7 @@ export function AgencyHome({
         <button
           type="button"
           onClick={() => setView({ type: 'roster' })}
-          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-5 text-sm font-medium text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500"
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-5 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <Users className="h-4 w-4" aria-hidden />
           Browse all agents
@@ -171,12 +171,12 @@ export function AgencyHome({
           ].map((s) => (
             <div
               key={s.label}
-              className="rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-5 transition hover:border-zinc-700"
+              className="rounded-2xl border border-border/60 bg-muted/60 p-5 transition hover:border-border"
             >
-              <p className="font-display text-3xl font-bold tabular-nums text-zinc-100">
+              <p className="font-display text-3xl font-bold tabular-nums text-foreground">
                 {s.value}
               </p>
-              <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+              <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
                 {s.label}
               </p>
             </div>
@@ -187,7 +187,7 @@ export function AgencyHome({
       {/* Favorite divisions */}
       <motion.section {...sectionMotion(0.12)} className="mt-10" aria-labelledby="home-divisions">
         <div className="flex items-center justify-between">
-          <h2 id="home-divisions" className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+          <h2 id="home-divisions" className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
             Your divisions
           </h2>
           {hasFavorites && (
@@ -206,7 +206,7 @@ export function AgencyHome({
               key={d.id}
               type="button"
               onClick={() => setView({ type: 'division', divisionId: d.id })}
-              className="group flex flex-col gap-3 rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-4 text-left transition hover:-translate-y-0.5 hover:border-zinc-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+              className="group flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/60 p-4 text-left transition hover:-translate-y-0.5 hover:border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
             >
               <span
                 className="flex aspect-square w-12 items-center justify-center rounded-xl p-3"
@@ -215,8 +215,8 @@ export function AgencyHome({
                 <DivisionIcon division={d} className="h-6 w-6" />
               </span>
               <span>
-                <span className="font-display block font-semibold text-zinc-100">{d.label}</span>
-                <span className="mt-0.5 block text-sm text-zinc-500">
+                <span className="font-display block font-semibold text-foreground">{d.label}</span>
+                <span className="mt-0.5 block text-sm text-muted-foreground/80">
                   {d.count} specialists
                 </span>
               </span>
@@ -227,7 +227,7 @@ export function AgencyHome({
 
       {/* Featured specialists */}
       <motion.section {...sectionMotion(0.16)} className="mt-10" aria-labelledby="home-featured">
-        <h2 id="home-featured" className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+        <h2 id="home-featured" className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
           Featured
         </h2>
         <div className="agency-scroll -mx-4 mt-4 flex gap-4 overflow-x-auto px-4 pb-2 md:-mx-8 md:px-8">
@@ -238,7 +238,7 @@ export function AgencyHome({
                 key={a.slug}
                 type="button"
                 onClick={() => setView({ type: 'agent', agentSlug: a.slug })}
-                className="w-[260px] flex-shrink-0 rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-zinc-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+                className="w-[260px] flex-shrink-0 rounded-2xl border border-border/60 bg-muted/60 p-5 text-left transition hover:-translate-y-0.5 hover:border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
               >
                 <div
                   className="flex h-12 w-12 items-center justify-center rounded-xl text-2xl"
@@ -246,7 +246,7 @@ export function AgencyHome({
                 >
                   <span aria-hidden>{a.emoji}</span>
                 </div>
-                <h3 className="mt-4 font-semibold text-zinc-100">{a.name}</h3>
+                <h3 className="mt-4 font-semibold text-foreground">{a.name}</h3>
                 {div && (
                   <span
                     className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-medium"
@@ -255,7 +255,7 @@ export function AgencyHome({
                     {div.label}
                   </span>
                 )}
-                <p className="mt-2 text-sm leading-relaxed text-zinc-500 italic line-clamp-2">
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground/80 italic line-clamp-2">
                   {a.vibe}
                 </p>
               </button>
@@ -266,20 +266,20 @@ export function AgencyHome({
 
       {/* Recent conversations */}
       <motion.section {...sectionMotion(0.2)} className="mt-10" aria-labelledby="home-recent">
-        <h2 id="home-recent" className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+        <h2 id="home-recent" className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
           Recent conversations
         </h2>
 
         <div className="mt-4 space-y-3">
           {recent.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-800 p-8 text-center">
-              <p className="text-sm text-zinc-400">
+            <div className="rounded-2xl border border-dashed border-border p-8 text-center">
+              <p className="text-sm text-muted-foreground">
                 No conversations yet — say hello to a specialist.
               </p>
               <button
                 type="button"
                 onClick={() => setView({ type: 'roster' })}
-                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-zinc-700 px-5 text-sm font-medium text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
+                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl border border-border px-5 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
               >
                 Browse the roster
               </button>
@@ -295,7 +295,7 @@ export function AgencyHome({
                   onClick={() =>
                     setView({ type: 'chat', agentSlug: s.agentSlug ?? null, sessionId: s.id })
                   }
-                  className="flex w-full items-center gap-4 rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-4 text-left transition hover:border-zinc-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+                  className="flex w-full items-center gap-4 rounded-2xl border border-border/60 bg-muted/60 p-4 text-left transition hover:border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
                 >
                   <span
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg"
@@ -304,18 +304,18 @@ export function AgencyHome({
                     <span aria-hidden>{agent.emoji}</span>
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-zinc-100">
+                    <span className="block truncate text-sm font-medium text-foreground">
                       {s.title || agent.name}
                     </span>
-                    <span className="block truncate text-xs text-zinc-500">
+                    <span className="block truncate text-xs text-muted-foreground/80">
                       {s.preview || `Conversation with ${agent.name}`}
                     </span>
                   </span>
                   <span className="shrink-0 text-right">
-                    <span className="block text-xs text-zinc-500">
+                    <span className="block text-xs text-muted-foreground/80">
                       {relativeTime(s.updatedAt)}
                     </span>
-                    <span className="block text-[11px] text-zinc-600">
+                    <span className="block text-[11px] text-muted-foreground/80">
                       {s.messageCount} {s.messageCount === 1 ? 'message' : 'messages'}
                     </span>
                   </span>

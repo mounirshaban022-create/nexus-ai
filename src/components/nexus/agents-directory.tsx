@@ -46,7 +46,7 @@ export function AgentsDirectory(props: AgentsDirectoryProps) {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-h-[88vh] flex-col overflow-hidden border-white/10 bg-[#0c0c0e] p-0 text-zinc-100 sm:max-w-4xl"
+        className="flex max-h-[88vh] flex-col overflow-hidden border-border bg-sidebar p-0 text-foreground sm:max-w-4xl"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>{`${t('agents.title')} — ${t('agents.searchLabel')}`}</DialogTitle>
@@ -131,19 +131,19 @@ function DirectoryBody({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 border-b border-white/8 px-5 py-4">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
           {!inModal && (
             <button
               onClick={onClose}
               aria-label={t('agents.back')}
-              className="rounded-xl p-2 text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100"
+              className="rounded-xl p-2 text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
             >
               <ArrowLeft className="h-5 w-5 rtl:-scale-x-100" />
             </button>
           )}
           <h2 className="font-display truncate text-xl font-bold tracking-tight">{t('agents.title')}</h2>
-          <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-zinc-400">
+          <span className="shrink-0 rounded-full border border-border bg-accent/50 px-2.5 py-1 text-xs font-medium text-muted-foreground">
             {filtered.length === AGENCY_AGENTS.length
               ? t('agents.specialistsCount', { count: String(AGENCY_AGENTS.length) })
               : t('agents.specialistsOf', { count: String(filtered.length), total: String(AGENCY_AGENTS.length) })}
@@ -153,7 +153,7 @@ function DirectoryBody({
           <button
             onClick={onClose}
             aria-label={t('agents.close')}
-            className="rounded-xl p-2 text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100"
+            className="rounded-xl p-2 text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
           >
             <X className="h-5 w-5" />
           </button>
@@ -161,21 +161,21 @@ function DirectoryBody({
       </div>
 
       {/* Search + division rail */}
-      <div className="border-b border-white/8 px-5 py-4">
-        <div className="flex h-11 items-center gap-2.5 rounded-xl border border-white/10 bg-black/40 px-3.5 transition focus-within:border-[#ff5a5f]/45 focus-within:shadow-[0_0_0_4px_rgba(255,90,95,0.08)]">
-          <Search className="h-4 w-4 shrink-0 text-zinc-500" />
+      <div className="border-b border-border px-5 py-4">
+        <div className="flex h-11 items-center gap-2.5 rounded-xl border border-border bg-input px-3.5 transition focus-within:border-[#ff5a5f]/45 focus-within:shadow-[0_0_0_4px_rgba(255,90,95,0.08)]">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground/80" />
           <input
             value={query}
             onChange={(e) => applyQuery(e.target.value)}
             placeholder={t('agents.searchPlaceholder')}
             aria-label={t('agents.searchLabel')}
-            className="h-full min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/80"
           />
           {query && (
             <button
               onClick={() => applyQuery('')}
               aria-label={t('agents.clearSearch')}
-              className="rounded-lg p-1 text-zinc-500 transition hover:text-zinc-200"
+              className="rounded-lg p-1 text-muted-foreground/80 transition hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -206,7 +206,7 @@ function DirectoryBody({
       {/* Pinned banner */}
       {pinnedAgent && (
         <div
-          className="flex items-center gap-3 border-b border-white/8 px-5 py-3"
+          className="flex items-center gap-3 border-b border-border px-5 py-3"
           style={{
             background: `linear-gradient(${isRTL ? 270 : 90}deg, ${tint(pinnedColor, 0.16)} 0%, transparent 80%)`,
           }}
@@ -214,8 +214,8 @@ function DirectoryBody({
           <span className="text-lg" aria-hidden>
             {pinnedAgent.emoji}
           </span>
-          <p className="min-w-0 flex-1 truncate text-xs text-zinc-400">
-            {t('agents.pinnedLabel')}: <span className="font-semibold text-zinc-100">{pinnedAgent.name}</span> —{' '}
+          <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {t('agents.pinnedLabel')}: <span className="font-semibold text-foreground">{pinnedAgent.name}</span> —{' '}
             {t('agents.pinnedNote')}
           </p>
           <button
@@ -249,7 +249,7 @@ function DirectoryBody({
             <div className="col-span-full flex justify-center pb-2">
               <button
                 onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
-                className="rounded-full border border-white/15 px-5 py-2 text-xs font-medium text-zinc-300 transition hover:border-white/30 hover:bg-white/5"
+                className="rounded-full border border-border px-5 py-2 text-xs font-medium text-muted-foreground transition hover:border-border hover:bg-accent/50"
               >
                 {t('agents.showMore', {
                   count: String(Math.min(PAGE_SIZE, filtered.length - visible.length)),
@@ -261,10 +261,10 @@ function DirectoryBody({
 
           {filtered.length === 0 && (
             <div className="col-span-full flex flex-col items-center gap-3 py-14 text-center">
-              <Hexagon className="h-9 w-9 text-zinc-600" />
+              <Hexagon className="h-9 w-9 text-muted-foreground/80" />
               <div>
-                <p className="text-sm font-medium text-zinc-300">{t('agents.noMatchTitle')}</p>
-                <p className="mt-1 text-xs text-zinc-500">{t('agents.noMatchDesc')}</p>
+                <p className="text-sm font-medium text-muted-foreground">{t('agents.noMatchTitle')}</p>
+                <p className="mt-1 text-xs text-muted-foreground/80">{t('agents.noMatchDesc')}</p>
               </div>
               <button
                 onClick={clearFilters}
@@ -307,7 +307,7 @@ function DivisionChip({
       className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
         active
           ? 'text-foreground'
-          : 'border-white/10 text-zinc-400 hover:border-white/25 hover:text-zinc-200'
+          : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
       }`}
       style={
         active
@@ -323,7 +323,7 @@ function DivisionChip({
         <Hexagon className="h-3.5 w-3.5" style={{ color: active ? '#ff5a5f' : '#71717a' }} />
       )}
       {label}
-      <span className="text-[10px] font-semibold text-zinc-500">{count}</span>
+      <span className="text-[10px] font-semibold text-muted-foreground/80">{count}</span>
     </button>
   )
 }
@@ -360,16 +360,16 @@ function AgentCard({
           {agent.emoji}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-zinc-100">{agent.name}</h3>
+          <h3 className="truncate text-sm font-semibold text-foreground">{agent.name}</h3>
           <p className="mt-0.5 text-[11px] font-medium uppercase tracking-wide" style={{ color }}>
             {division?.label ?? t('agents.agency')}
           </p>
         </div>
       </div>
 
-      <p className="mt-2.5 line-clamp-2 text-xs leading-relaxed text-zinc-400">{agent.description}</p>
+      <p className="mt-2.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{agent.description}</p>
       {agent.vibe && (
-        <p className="mt-2 truncate text-xs italic text-zinc-500" title={agent.vibe}>
+        <p className="mt-2 truncate text-xs italic text-muted-foreground/80" title={agent.vibe}>
           &ldquo;{agent.vibe}&rdquo;
         </p>
       )}
@@ -394,7 +394,7 @@ function AgentCard({
         ) : (
           <button
             onClick={() => onPin(agent.slug)}
-            className="flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/30 hover:bg-white/5"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-border hover:bg-accent/50"
           >
             <Pin className="h-3.5 w-3.5" />
             {t('agents.pin')}

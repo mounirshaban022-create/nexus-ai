@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
     }
 
+    // SECURITY: only the caller's OWN provider configs. Never expose
+    // another user's API keys (even masked) or connection status.
     const providers = await db.aiProvider.findMany({
+      where: { userId: session.userId },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -85,33 +88,49 @@ export async function POST(req: NextRequest) {
       preset.id
     )
 
-    // Upsert (one config per provider)
-    const provider = await db.aiProvider.upsert({
-      where: { providerId: preset.id },
-      update: {
-        apiKeyEnc: encryptSecret(rawKey),
-        defaultModel,
-        status: verification.ok ? 'connected' : 'error',
-        statusMessage: verification.message,
-      },
-      create: {
-        providerId: preset.id,
-        label: preset.label,
-        baseUrl: preset.baseUrl,
-        apiKeyEnc: encryptSecret(rawKey),
-        defaultModel,
-        status: verification.ok ? 'connected' : 'error',
-        statusMessage: verification.message,
-      },
-      select: {
-        id: true,
-        providerId: true,
-        label: true,
-        defaultModel: true,
-        status: true,
-        statusMessage: true,
-      },
+    // SECURITY: per-user upsert — find this user's existing config for the
+    // provider, or create a new private row. (No global providerId unique.)
+    const existing = await db.aiProvider.findFirst({
+      where: { providerId: preset.id, userId: session.userId },
     })
+    const provider = existing
+      ? await db.aiProvider.update({
+          where: { id: existing.id },
+          data: {
+            apiKeyEnc: encryptSecret(rawKey),
+            defaultModel,
+            status: verification.ok ? 'connected' : 'error',
+            statusMessage: verification.message,
+          },
+          select: {
+            id: true,
+            providerId: true,
+            label: true,
+            defaultModel: true,
+            status: true,
+            statusMessage: true,
+          },
+        })
+      : await db.aiProvider.create({
+          data: {
+            userId: session.userId,
+            providerId: preset.id,
+            label: preset.label,
+            baseUrl: preset.baseUrl,
+            apiKeyEnc: encryptSecret(rawKey),
+            defaultModel,
+            status: verification.ok ? 'connected' : 'error',
+            statusMessage: verification.message,
+          },
+          select: {
+            id: true,
+            providerId: true,
+            label: true,
+            defaultModel: true,
+            status: true,
+            statusMessage: true,
+          },
+        })
 
     return NextResponse.json({ provider, verification })
   } catch (error) {

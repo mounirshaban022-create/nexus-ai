@@ -49,7 +49,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
       onClick={handleClick}
       aria-label="Toggle light/dark theme"
       title="Toggle light/dark theme"
-      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 text-zinc-400 transition hover:border-white/25 hover:bg-white/5 hover:text-zinc-100 ${className}`}
+      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-border hover:bg-accent hover:text-foreground ${className}`}
     >
       {mounted ? (
         <span

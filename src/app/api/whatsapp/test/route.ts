@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const account = await getWhatsAppAccount()
+  const account = await getWhatsAppAccount(session.userId)
   if (!account) {
     return NextResponse.json(
       { error: 'Connect your WhatsApp number first (step 1–3 above).' },

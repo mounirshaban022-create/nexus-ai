@@ -403,12 +403,17 @@ export async function PUT(req: NextRequest) {
     try {
       const docRecord = await db.generatedDocument.create({
         data: {
+          id,
           filename: doc.filename,
           format: ext,
           title: doc.title,
           summary: edited.slice(0, 200),
           downloadUrl: `/api/documents/file/${id}?format=${ext}`,
           size: buffer.length,
+          data: buffer.toString('base64'),
+          mimeType: ext === 'docx'
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : ext === 'md' ? 'text/markdown' : 'text/plain',
           userId: user?.id ?? null,
         },
       })

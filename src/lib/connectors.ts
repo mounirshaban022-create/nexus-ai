@@ -136,7 +136,14 @@ export interface ConnectorDefinition {
   sampleArgs: Record<string, unknown>
   /** Requires a connected email account */
   requiresAccount?: boolean
-  execute: (args: Record<string, unknown>) => Promise<unknown>
+  execute: (args: Record<string, unknown>, ctx?: ConnectorContext) => Promise<unknown>
+}
+
+/** SECURITY: per-call context so connectors that touch private data
+ *  (email accounts) only ever read the CALLER's own records. The
+ *  userId is derived from a verified session by every caller. */
+export interface ConnectorContext {
+  userId?: string | null
 }
 
 const IMAGES_DIR = path.join(process.cwd(), 'generated-images')
@@ -1174,8 +1181,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { limit: '5' },
     requiresAccount: true,
-    execute: async (args) => {
-      const account = await getPrimaryAccount()
+    execute: async (args, ctx) => {
+      const account = await getPrimaryAccount(ctx?.userId)
       if (!account) {
         return {
           error: 'No email account connected. Ask the user to connect one in the Connectors hub (Accounts section).',
@@ -1208,8 +1215,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { query: 'invoice' },
     requiresAccount: true,
-    execute: async (args) => {
-      const account = await getPrimaryAccount()
+    execute: async (args, ctx) => {
+      const account = await getPrimaryAccount(ctx?.userId)
       if (!account) {
         return { error: 'No email account connected. Ask the user to connect one in the Connectors hub.' }
       }
@@ -1240,8 +1247,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { uid: '1' },
     requiresAccount: true,
-    execute: async (args) => {
-      const account = await getPrimaryAccount()
+    execute: async (args, ctx) => {
+      const account = await getPrimaryAccount(ctx?.userId)
       if (!account) {
         return { error: 'No email account connected. Ask the user to connect one in the Connectors hub.' }
       }
@@ -1265,8 +1272,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { to: 'friend@example.com', subject: 'Hello', body: 'Just checking in!' },
     requiresAccount: true,
-    execute: async (args) => {
-      const account = await getPrimaryAccount()
+    execute: async (args, ctx) => {
+      const account = await getPrimaryAccount(ctx?.userId)
       if (!account) {
         return { error: 'No email account connected. Ask the user to connect one in the Connectors hub.' }
       }

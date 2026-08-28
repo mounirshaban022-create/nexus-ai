@@ -46,18 +46,18 @@ export function FramedPanel({
     >
       <header className={`flex shrink-0 items-end justify-between gap-4 ${fill ? 'mb-3' : 'mb-5'}`}>
         <div className="min-w-0">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-zinc-100 md:text-[28px]">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground md:text-[28px]">
             {title}
           </h1>
           {description && (
-            <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-zinc-400">{description}</p>
+            <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
           )}
         </div>
         <BrandMark size={32} className="hidden shrink-0 opacity-60 sm:block" />
       </header>
 
       <div
-        className={`overflow-hidden rounded-2xl border border-white/10 shadow-[0_32px_90px_-32px_rgba(0,0,0,0.85)] ${
+        className={`overflow-hidden rounded-2xl border border-border shadow-[0_32px_90px_-32px_rgba(0,0,0,0.85)] ${
           fill ? 'flex min-h-0 flex-1 flex-col' : ''
         }`}
       >
@@ -68,10 +68,10 @@ export function FramedPanel({
             fill
               ? `flex min-h-0 flex-1 flex-col framed-panel-dark ${
                   dark
-                    ? 'bg-[#0c0c0e] text-zinc-100 ring-1 ring-white/5 ring-inset'
-                    : 'bg-white p-4 text-zinc-900 ring-1 ring-zinc-950/5 ring-inset md:p-6'
+                    ? 'bg-sidebar text-foreground ring-1 ring-border ring-inset'
+                    : 'bg-white p-4 text-foreground ring-1 ring-border/60 ring-inset md:p-6'
                 }`
-              : 'bg-white p-4 text-zinc-900 ring-1 ring-zinc-950/5 ring-inset md:p-6'
+              : 'bg-white p-4 text-foreground ring-1 ring-border/60 ring-inset md:p-6'
           }
         >
           {children}

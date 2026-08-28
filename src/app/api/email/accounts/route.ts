@@ -12,7 +12,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
     }
 
+    // SECURITY: only the caller's OWN accounts. Never expose another
+    // user's connected mailboxes (email address, IMAP/SMTP host, username).
     const accounts = await db.emailAccount.findMany({
+      where: { userId: session.userId },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
@@ -75,8 +78,10 @@ export async function POST(req: NextRequest) {
       password: data.password,
     })
 
+    // SECURITY: stamp the caller's userId so this account is private.
     const account = await db.emailAccount.create({
       data: {
+        userId: session.userId,
         label: data.label,
         email: data.email,
         fromName: data.fromName,

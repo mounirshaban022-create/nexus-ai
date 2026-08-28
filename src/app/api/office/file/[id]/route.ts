@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { db } from '@/lib/db'
 
 const IS_VERCEL = Boolean(process.env.VERCEL)
 const FILES_DIR = IS_VERCEL
@@ -35,13 +36,14 @@ export async function GET(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Invalid file id.' }, { status: 400 })
     }
 
-    // Find the file regardless of extension
+    const download = req.nextUrl.searchParams.get('download') === '1'
+    const title = req.nextUrl.searchParams.get('title') || 'nexus-document'
+
+    // 1. Disk (local FS or a warm Vercel /tmp from the generating lambda).
     for (const ext of ['docx', 'xlsx', 'pptx', 'md', 'pdf', 'html', 'txt', 'zip', 'png']) {
       try {
         const filePath = path.join(FILES_DIR, `${id}.${ext}`)
         const buffer = await readFile(filePath)
-        const download = req.nextUrl.searchParams.get('download') === '1'
-        const title = req.nextUrl.searchParams.get('title') || 'nexus-document'
         return new NextResponse(new Uint8Array(buffer), {
           status: 200,
           headers: {
@@ -56,6 +58,35 @@ export async function GET(req: NextRequest, context: RouteContext) {
       } catch {
         // try next extension
       }
+    }
+
+    // 2. DB base64 — the durable copy that survives Vercel's ephemeral /tmp
+    // across serverless invocations. The office/create route stamps the
+    // record id = file id, so a direct lookup resolves it.
+    try {
+      const record = await db.generatedDocument.findUnique({
+        where: { id },
+        select: { data: true, mimeType: true, format: true, filename: true },
+      })
+      if (record?.data) {
+        const buffer = Buffer.from(record.data, 'base64')
+        const ext = record.format || 'docx'
+        const mime = record.mimeType || MIME_TYPES[ext] || 'application/octet-stream'
+        const fname = record.filename || `${title}.${ext}`
+        return new NextResponse(new Uint8Array(buffer), {
+          status: 200,
+          headers: {
+            'Content-Type': mime,
+            'Content-Length': buffer.length.toString(),
+            'Content-Disposition': download
+              ? `attachment; filename="${fname.replace(/[^a-zA-Z0-9 _.-]/g, '').slice(0, 80)}"`
+              : 'inline',
+            'Cache-Control': 'public, max-age=3600',
+          },
+        })
+      }
+    } catch {
+      /* DB miss — fall through to 404 */
     }
 
     return NextResponse.json({ error: 'File not found.' }, { status: 404 })

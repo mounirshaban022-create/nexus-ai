@@ -50,13 +50,13 @@ export function AgencyDivisionView({
       <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
         <button
           onClick={() => setView({ type: 'roster' })}
-          className="mb-6 flex items-center gap-2 text-sm text-zinc-400 transition hover:text-zinc-200"
+          className="mb-6 flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden /> All divisions
         </button>
-        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/40 py-16 text-center">
-          <p className="text-sm font-medium text-zinc-300">Division not found.</p>
-          <p className="mt-1 text-xs text-zinc-500">
+        <div className="rounded-2xl border border-border/60 bg-muted/40 py-16 text-center">
+          <p className="text-sm font-medium text-muted-foreground">Division not found.</p>
+          <p className="mt-1 text-xs text-muted-foreground/80">
             Browse the full roster to find a specialist.
           </p>
         </div>
@@ -71,7 +71,7 @@ export function AgencyDivisionView({
       {/* Back */}
       <button
         onClick={() => setView({ type: 'roster' })}
-        className="mb-6 flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 transition hover:text-zinc-200"
+        className="mb-6 flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden /> All divisions
       </button>
@@ -86,10 +86,10 @@ export function AgencyDivisionView({
           <DivisionIcon division={division} className="h-6 w-6" />
         </div>
         <div className="min-w-0">
-          <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-zinc-100">
+          <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-foreground">
             {division.label}
           </h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-muted-foreground/80">
             {division.count} specialist{division.count === 1 ? '' : 's'} · {description}
           </p>
         </div>

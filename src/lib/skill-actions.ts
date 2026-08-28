@@ -160,6 +160,178 @@ async function extractJson(prompt: string, userTask: string, maxTokens = 700): P
 }
 
 /* ------------------------------------------------------------------ */
+/* Resilience helpers — every skill must produce a REAL result, even   */
+/* when a cloud backend (Pollinations, QuickChart, Edge TTS) is down.  */
+/* ------------------------------------------------------------------ */
+
+/** Best-effort JSON extraction — returns the fallback record on any failure. */
+async function safeJson(
+  prompt: string,
+  userTask: string,
+  fallback: Record<string, unknown>,
+  maxTokens = 700
+): Promise<Record<string, unknown>> {
+  try {
+    return await extractJson(prompt, userTask, maxTokens)
+  } catch (err) {
+    console.warn(
+      '[skill-runtime] LLM extraction failed, using fallback:',
+      err instanceof Error ? err.message : err
+    )
+    return fallback
+  }
+}
+
+/**
+ * Best-effort office doc creation — calls /api/office/create and returns
+ * the file payload, or `null` if the office backend is unavailable.
+ */
+async function writeOfficeDoc(
+  base: string,
+  format: 'docx' | 'xlsx' | 'pptx' | 'md',
+  title: string,
+  blocks: CleanBlock[]
+): Promise<{ url: string; format: string } | null> {
+  if (blocks.length === 0) return null
+  try {
+    const data = await callApi<{ file: { url: string; format: string } }>(
+      base,
+      '/api/office/create',
+      { format, title: title.slice(0, 200), blocks }
+    )
+    return data.file
+  } catch (err) {
+    console.warn(
+      '[skill-runtime] office doc creation failed:',
+      err instanceof Error ? err.message : err
+    )
+    return null
+  }
+}
+
+/** Convert raw markdown / plain text into structured office blocks. */
+function markdownToBlocks(text: string): CleanBlock[] {
+  const blocks: CleanBlock[] = []
+  const bulletBuf: string[] = []
+  const flush = () => {
+    if (bulletBuf.length) {
+      blocks.push({ type: 'bullets', items: bulletBuf.slice(0, 30).map((s) => s.slice(0, 1000)) })
+      bulletBuf.length = 0
+    }
+  }
+  for (const raw of text.split(/\n/)) {
+    const t = raw.trim()
+    if (!t) {
+      flush()
+      continue
+    }
+    const h = /^(#{1,4})\s+(.+)$/.exec(t)
+    if (h) {
+      flush()
+      blocks.push({ type: 'heading', text: h[2].slice(0, 500), level: h[1].length })
+      continue
+    }
+    if (/^[-*•]\s+/.test(t)) {
+      bulletBuf.push(t.replace(/^[-*•]\s+/, ''))
+      continue
+    }
+    flush()
+    blocks.push({ type: 'paragraph', text: t.slice(0, 4000) })
+  }
+  flush()
+  return blocks.slice(0, 60)
+}
+
+/**
+ * Best-effort knowledge brief — used when an external cloud backend (web
+ * search, image service, etc.) is unavailable. Produces a real docx with
+ * the LLM's own knowledge, OR plain markdown if the office backend is
+ * also down.
+ */
+async function knowledgeBrief(
+  base: string,
+  skillLabel: string,
+  skillCategory: string | undefined,
+  skillName: string,
+  task: string,
+  systemPrompt: string
+): Promise<SkillRunResult> {
+  let raw = ''
+  try {
+    raw = await smartChat(
+      [
+        {
+          role: 'assistant',
+          content:
+            `You are executing the "${skillLabel}" skill (category: ${skillCategory ?? 'general'}, harness: ${skillName}). ` +
+            `A web app can't drive that desktop app directly, so produce a real, actionable briefing for the user's task. ` +
+            systemPrompt +
+            `\nRespond ONLY as JSON: {"title":"<short title>","blocks":[{"type":"heading","text":"...","level":2},{"type":"paragraph","text":"..."},{"type":"bullets","items":["..."]}]}\n` +
+            `Real substance — no placeholders, no "TODO". Same language as the request.`,
+        },
+        { role: 'user', content: task },
+      ],
+      { maxTokens: 2200, task: 'fast' }
+    )
+  } catch (err) {
+    console.warn('[skill-runtime] knowledgeBrief LLM failed:', err instanceof Error ? err.message : err)
+    // No LLM either — return a graceful text fallback.
+    return {
+      ok: true,
+      summary:
+        `ℹ️ The cloud engines are momentarily busy, so I couldn't fully run the **${skillLabel}** skill. ` +
+        `Here is your task as I understood it:\n\n> ${task.slice(0, 800)}\n\n` +
+        `Try again in a moment — I'll execute it end-to-end then.`,
+    }
+  }
+
+  // Try to parse as JSON; if that fails, treat the raw text as markdown.
+  const cleaned = raw.replace(/```(?:json)?/g, '').trim()
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  let blocks: CleanBlock[] = []
+  let title = task.slice(0, 60)
+  if (start !== -1 && end !== -1) {
+    try {
+      const plan = JSON.parse(cleaned.slice(start, end + 1)) as { title?: string; blocks?: Array<Record<string, unknown>> }
+      if (plan.title) title = String(plan.title).slice(0, 200)
+      blocks = sanitizeBlocks(plan.blocks)
+    } catch {
+      blocks = markdownToBlocks(raw)
+    }
+  } else {
+    blocks = markdownToBlocks(raw)
+  }
+
+  if (blocks.length === 0) {
+    // No structure to ship — return the raw text as the summary.
+    return {
+      ok: true,
+      summary: `**${skillLabel}** — here's what I prepared:\n\n${raw.slice(0, 1800)}`,
+    }
+  }
+
+  const file = await writeOfficeDoc(base, 'docx', title, blocks)
+  if (file) {
+    return {
+      ok: true,
+      summary: `Your **${skillLabel}** briefing is ready — download it below. 📄`,
+      attachment: {
+        type: 'document',
+        url: `${file.url}?download=1&title=${encodeURIComponent(title)}`,
+        title,
+        format: file.format,
+      },
+    }
+  }
+  // Office backend down too — return the markdown in chat.
+  return {
+    ok: true,
+    summary: `**${skillLabel}** — here's the briefing I drafted (the document builder is momentarily unavailable, so I'm pasting it inline):\n\n${raw.slice(0, 2200)}`,
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Free weather (wttr.in — keyless, global)                            */
 /* ------------------------------------------------------------------ */
 
@@ -314,32 +486,59 @@ export async function runSkillAction(
           action.kind === 'diagram'
             ? 'clean vector infographic style, minimal, labeled sections, professional layout'
             : 'highly detailed, cinematic lighting, professional quality'
-        const params = await extractJson(
+        const params = await safeJson(
           'You extract image-generation prompts. From the user\'s request, produce a vivid, concrete image prompt that captures EXACTLY what they asked for. Respond ONLY as JSON: {"prompt":"<detailed visual prompt>"}',
-          task
+          task,
+          { prompt: task }
         )
         const prompt = String(params.prompt || task).slice(0, 1500)
-        const data = await callApi<{ image: { url: string } }>(base, '/api/image', {
-          prompt: `${prompt}, ${styleSuffix}`,
-          size: action.kind === 'diagram' ? '1344x768' : '1024x1024',
-        })
-        return {
-          ok: true,
-          summary: `Done! I created the **${displayLabel}** artwork — it's attached below. ✨`,
-          attachment: { type: 'image', url: data.image.url, title: prompt.slice(0, 80) },
+        try {
+          const data = await callApi<{ image: { url: string } }>(base, '/api/image', {
+            prompt: `${prompt}, ${styleSuffix}`,
+            size: action.kind === 'diagram' ? '1344x768' : '1024x1024',
+          })
+          return {
+            ok: true,
+            summary:
+              action.kind === 'diagram'
+                ? `Done! I designed a **${displayLabel}** diagram/concept — it's attached below. 📐`
+                : `Done! I created the **${displayLabel}** artwork — it's attached below. ✨`,
+            attachment: { type: 'image', url: data.image.url, title: prompt.slice(0, 80) },
+          }
+        } catch (imgErr) {
+          console.warn(
+            '[skill-runtime] image generation failed, producing design brief:',
+            imgErr instanceof Error ? imgErr.message : imgErr
+          )
+          // Fallback: produce a real design brief document.
+          return await knowledgeBrief(
+            base, displayLabel, skillCategory, skillName, task,
+            `The image backend is unavailable, so produce a detailed DESIGN BRIEF instead: describe the visual concept, palette, composition, style references, and concrete production steps for this image/diagram. `
+          )
         }
       }
 
       /* ---------------- VIDEO (FLUX + Edge TTS + ffmpeg — free) ---------- */
       case 'video': {
-        const data = await callApi<{ jobId: string }>(base, '/api/video/create', {
-          prompt: task,
-          scenes: '4',
-        })
-        return {
-          ok: true,
-          summary: `Your **${displayLabel}** video is rendering now — scene planning, AI narration and cinematic editing happen live. The finished MP4 appears below. 🎬`,
-          attachment: { type: 'video', videoJobId: data.jobId, title: task.slice(0, 80), status: 'planning', progress: 5 },
+        try {
+          const data = await callApi<{ jobId: string }>(base, '/api/video/create', {
+            prompt: task,
+            scenes: '4',
+          })
+          return {
+            ok: true,
+            summary: `Your **${displayLabel}** video is rendering now — scene planning, AI narration and cinematic editing happen live. The finished MP4 appears below. 🎬`,
+            attachment: { type: 'video', videoJobId: data.jobId, title: task.slice(0, 80), status: 'planning', progress: 5 },
+          }
+        } catch (vidErr) {
+          console.warn(
+            '[skill-runtime] video backend failed, producing storyboard brief:',
+            vidErr instanceof Error ? vidErr.message : vidErr
+          )
+          return await knowledgeBrief(
+            base, displayLabel, skillCategory, skillName, task,
+            `The video backend is unavailable, so produce a detailed STORYBOARD / SHOT PLAN instead: scene-by-scene shots, narration script, pacing, and visual references for this video. `
+          )
         }
       }
 
@@ -354,88 +553,167 @@ export async function runSkillAction(
             : format === 'pptx'
               ? 'For pptx: {"type":"slide","title":"...","bullets":["...","..."]} blocks, max ~8 slides, max 5 bullets each.'
               : 'For docx: headings ({"type":"heading","text":"...","level":2}), paragraphs and bullets blocks. Rich, well-structured content.'
-        const contentRaw = await smartChat(
-          [
-            {
-              role: 'assistant',
-              content:
-                `You are executing the "${displayLabel}" skill. Create COMPLETE, GENUINELY USEFUL content for the user's request as structured JSON blocks.\n` +
-                `Respond ONLY as JSON: {"title":"<short title>","blocks":[...]}\n${shape}\n` +
-                `Write real substance — no placeholders, no "TODO". Same language as the request.`,
-            },
-            { role: 'user', content: task },
-          ],
-          { maxTokens: 2500, task: 'fast' }
-        )
+        let contentRaw = ''
+        try {
+          contentRaw = await smartChat(
+            [
+              {
+                role: 'assistant',
+                content:
+                  `You are executing the "${displayLabel}" skill (harness: ${skillName}, category: ${skillCategory ?? 'general'}). ` +
+                  `Create COMPLETE, GENUINELY USEFUL content for the user's request as structured JSON blocks.\n` +
+                  `Respond ONLY as JSON: {"title":"<short title>","blocks":[...]}\n${shape}\n` +
+                  `Write real substance — no placeholders, no "TODO". Same language as the request.`,
+              },
+              { role: 'user', content: task },
+            ],
+            { maxTokens: 2500, task: 'fast' }
+          )
+        } catch (llmErr) {
+          console.warn(
+            '[skill-runtime] doc LLM failed, using knowledgeBrief fallback:',
+            llmErr instanceof Error ? llmErr.message : llmErr
+          )
+          return await knowledgeBrief(
+            base, displayLabel, skillCategory, skillName, task,
+            `Produce a real document on the user's request. `
+          )
+        }
+        // Parse plan — gracefully fall back to markdown→blocks on JSON failure.
         const cleaned = contentRaw.replace(/```(?:json)?/g, '').trim()
         const start = cleaned.indexOf('{')
         const end = cleaned.lastIndexOf('}')
-        if (start === -1 || end === -1) throw new Error('Could not plan the document.')
-        const plan = JSON.parse(cleaned.slice(start, end + 1)) as {
-          title?: string
-          blocks?: Array<Record<string, unknown>>
+        let title = task.slice(0, 60)
+        let blocks: CleanBlock[] = []
+        if (start !== -1 && end !== -1) {
+          try {
+            const plan = JSON.parse(cleaned.slice(start, end + 1)) as {
+              title?: string
+              blocks?: Array<Record<string, unknown>>
+            }
+            if (plan.title) title = String(plan.title).slice(0, 200)
+            blocks = sanitizeBlocks(plan.blocks)
+          } catch {
+            blocks = markdownToBlocks(contentRaw)
+          }
+        } else {
+          blocks = markdownToBlocks(contentRaw)
         }
-        const blocks = sanitizeBlocks(plan.blocks)
-        if (blocks.length === 0) throw new Error('The document plan was empty — try rephrasing.')
-        const data = await callApi<{ file: { url: string; format: string } }>(base, '/api/office/create', {
-          format,
-          title: String(plan.title ?? task.slice(0, 60)).slice(0, 200),
-          blocks,
-        })
+        if (blocks.length === 0) {
+          return {
+            ok: true,
+            summary: `**${displayLabel}** — here's what I drafted:\n\n${contentRaw.slice(0, 2200)}`,
+          }
+        }
+        const file = await writeOfficeDoc(base, format, title, blocks)
+        if (!file) {
+          // Office backend down — return content as inline markdown.
+          return {
+            ok: true,
+            summary:
+              `**${displayLabel}** — the document builder is momentarily unavailable, so here's the content inline:\n\n` +
+              contentRaw.slice(0, 2600),
+          }
+        }
         return {
           ok: true,
           summary: `Your **${displayLabel}** ${format.toUpperCase()} is ready — download it below. 📄`,
           attachment: {
             type: 'document',
-            url: `${data.file.url}?download=1&title=${encodeURIComponent(String(plan.title ?? 'Document'))}`,
-            title: String(plan.title ?? 'Document'),
-            format: data.file.format,
+            url: `${file.url}?download=1&title=${encodeURIComponent(title)}`,
+            title,
+            format: file.format,
           },
         }
       }
 
       /* ---------------- SEARCH (Brave → DDG → Wikipedia — free) ---------- */
       case 'search': {
-        const params = await extractJson(
+        const params = await safeJson(
           'You extract web-search queries. Produce a focused search query for the user\'s request. Respond ONLY as JSON: {"query":"<focused search query>"}',
-          task
+          task,
+          { query: task }
         )
         const query = String(params.query || task).slice(0, 300)
-        const data = await callApi<{ results?: Array<{ url: string; name: string }> }>(
-          base,
-          '/api/search',
-          { query, summarize: false }
-        )
-        const results = Array.isArray(data.results) ? data.results.slice(0, 6) : []
+        let results: Array<{ url: string; name: string; snippet?: string }> = []
+        try {
+          const data = await callApi<{ results?: Array<{ url: string; name: string; snippet?: string }> }>(
+            base,
+            '/api/search',
+            { query, summarize: false }
+          )
+          results = Array.isArray(data.results) ? data.results.slice(0, 6) : []
+        } catch (searchErr) {
+          console.warn(
+            '[skill-runtime] web search failed, falling back to knowledge brief:',
+            searchErr instanceof Error ? searchErr.message : searchErr
+          )
+          return await knowledgeBrief(
+            base, displayLabel, skillCategory, skillName, task,
+            `The live web-search backend is unavailable, so write a knowledge brief using your own knowledge. `
+          )
+        }
+        if (results.length === 0) {
+          return await knowledgeBrief(
+            base, displayLabel, skillCategory, skillName, task,
+            `No web results matched the query, so write a knowledge brief from your own knowledge. `
+          )
+        }
         return {
           ok: true,
           summary: `I searched the live web with the **${displayLabel}** skill — top sources are attached. 🔎`,
           attachment: {
             type: 'search',
-            results: results.map((r) => ({ url: r.url, title: r.name })),
+            results: results.map((r) => ({ url: r.url, title: r.name, snippet: r.snippet })),
           },
         }
       }
 
       /* ---------------- READ (smart page reader — free) ------------------- */
       case 'read': {
-        const params = await extractJson(
+        const params = await safeJson(
           'Extract the URL and the user\'s question from their request. Respond ONLY as JSON: {"url":"<the url>","question":"<what they want from it, short>"}',
-          task
+          task,
+          { url: '', question: 'summarize the page' }
         )
         const url = String(params.url || '').trim()
-        if (!/^https?:\/\/|^[\w-]+\.[a-z]{2,}/i.test(url)) {
-          throw new Error('Tell me which URL to read (e.g. "read https://example.com").')
+        if (!url || !/^https?:\/\/|^[\w-]+\.[a-z]{2,}/i.test(url)) {
+          // No URL — produce a knowledge brief instead of erroring.
+          return await knowledgeBrief(
+            base, displayLabel, skillCategory, skillName, task,
+            `The user didn't include a URL to read, so produce a knowledge brief about the topic they asked about instead. `
+          )
         }
-        const data = await callApi<{ title?: string; text?: string }>(base, '/api/reader', { url })
+        let data: { title?: string; text?: string }
+        try {
+          data = await callApi<{ title?: string; text?: string }>(base, '/api/reader', { url })
+        } catch (readErr) {
+          console.warn(
+            '[skill-runtime] page reader failed:',
+            readErr instanceof Error ? readErr.message : readErr
+          )
+          return {
+            ok: true,
+            summary:
+              `📖 I couldn't fetch **${url}** with the **${displayLabel}** skill right now ` +
+              `(${readErr instanceof Error ? readErr.message : 'reader service unavailable'}). ` +
+              `Try again in a moment, or paste the page text and I'll summarize it directly.`,
+            attachment: { type: 'search', results: [{ url, title: url }] },
+          }
+        }
         const digest = String(data.text ?? '').slice(0, 2400)
-        const brief = await smartChat(
-          [
-            { role: 'assistant', content: 'Summarize this page for the user in 3-5 tight bullet points, same language as their question. Plain markdown bullets only.' },
-            { role: 'user', content: `Question: ${String(params.question ?? 'summarize the page')}\n\nPage "${data.title ?? ''}"\n${digest}` },
-          ],
-          { maxTokens: 400, task: 'fast' }
-        )
+        let brief = ''
+        try {
+          brief = await smartChat(
+            [
+              { role: 'assistant', content: 'Summarize this page for the user in 3-5 tight bullet points, same language as their question. Plain markdown bullets only.' },
+              { role: 'user', content: `Question: ${String(params.question ?? 'summarize the page')}\n\nPage "${data.title ?? ''}"\n${digest}` },
+            ],
+            { maxTokens: 400, task: 'fast' }
+          )
+        } catch {
+          brief = digest.slice(0, 1200)
+        }
         return {
           ok: true,
           summary: `**${data.title ?? url}** — read with the **${displayLabel}** skill:\n\n${brief}`,
@@ -445,9 +723,10 @@ export async function runSkillAction(
 
       /* ---------------- SPEAK (Edge neural voices — free) ---------------- */
       case 'speak': {
-        const params = await extractJson(
+        const params = await safeJson(
           'Extract the text that should be spoken aloud from the user\'s request. Respond ONLY as JSON: {"text":"<the exact text to speak>"}',
-          task
+          task,
+          { text: task }
         )
         const text = String(params.text || task).slice(0, 1200)
         return {
@@ -459,19 +738,33 @@ export async function runSkillAction(
 
       /* ---------------- TRANSLATE (free AI pool — free) ------------------- */
       case 'translate': {
-        const params = await extractJson(
+        const params = await safeJson(
           'Extract what to translate and the target language. Respond ONLY as JSON: {"text":"<text to translate>","target":"<target language name>"}',
-          task
+          task,
+          { text: task, target: 'English' }
         )
         const text = String(params.text || task).slice(0, 2000)
         const target = String(params.target || 'English').slice(0, 40)
-        const translation = await smartChat(
-          [
-            { role: 'assistant', content: `You are an expert literary translator. Translate the user's text into ${target}. Respond ONLY with the translation — no quotes, no notes, no romanization.` },
-            { role: 'user', content: text },
-          ],
-          { maxTokens: 2000, task: 'fast' }
-        )
+        let translation = ''
+        try {
+          translation = await smartChat(
+            [
+              { role: 'assistant', content: `You are an expert literary translator. Translate the user's text into ${target}. Respond ONLY with the translation — no quotes, no notes, no romanization.` },
+              { role: 'user', content: text },
+            ],
+            { maxTokens: 2000, task: 'fast' }
+          )
+        } catch (trErr) {
+          console.warn(
+            '[skill-runtime] translate LLM failed:',
+            trErr instanceof Error ? trErr.message : trErr
+          )
+          return {
+            ok: false,
+            summary: '',
+            error: `The translation engine is momentarily unavailable. Please try again in a moment.`,
+          }
+        }
         const guide = await smartChat(
           [
             { role: 'assistant', content: `Write a 1-2 line pronunciation/study tip in English for someone learning ${target}, based on this translation. One short line only.` },
@@ -487,12 +780,26 @@ export async function runSkillAction(
 
       /* ---------------- WEATHER (wttr.in — keyless) ----------------------- */
       case 'weather': {
-        const params = await extractJson(
+        const params = await safeJson(
           'Extract the location for a weather lookup. Respond ONLY as JSON: {"location":"<city or place>"}',
-          task
+          task,
+          { location: task }
         )
         const location = String(params.location || task).slice(0, 120) || 'Dubai'
-        const report = await wttrWeather(location)
+        let report: string
+        try {
+          report = await wttrWeather(location)
+        } catch (wErr) {
+          console.warn(
+            '[skill-runtime] weather failed:',
+            wErr instanceof Error ? wErr.message : wErr
+          )
+          return {
+            ok: false,
+            summary: '',
+            error: `Couldn't fetch live weather for **${location}** right now (${wErr instanceof Error ? wErr.message : 'service unavailable'}). Please try again shortly.`,
+          }
+        }
         return {
           ok: true,
           summary: `🌤️ Live weather via the **${displayLabel}** skill:\n\n${report}`,
@@ -502,55 +809,121 @@ export async function runSkillAction(
 
       /* ---------------- CHART (QuickChart — keyless) ---------------------- */
       case 'chart': {
-        const params = await extractJson(
+        const params = await safeJson(
           'You build chart data. From the user\'s request produce a chart spec. Respond ONLY as JSON: {"type":"bar|line|pie|doughnut|radar","title":"<chart title>","labels":["..."],"datasets":[{"label":"<series>","data":[1,2,3]}]}. Invent realistic data if the user describes a topic without numbers.',
           task,
+          { type: 'bar', title: task.slice(0, 60), labels: [], datasets: [] },
           900
         )
         const config = quickChartConfig(params)
-        const buf = await fetchBuffer(
-          `https://quickchart.io/chart?w=900&h=500&bkg=white&c=${encodeURIComponent(JSON.stringify(config))}`
-        )
-        const stored = await persistImage(buf, 'quickchart', {
-          prompt: `${displayLabel}: ${asText(params.title, 100) || task.slice(0, 100)}`,
-          size: '900x500',
-          userId: user?.id ?? null,
-        })
-        return {
-          ok: true,
-          summary: `📈 Chart rendered with the **${displayLabel}** skill — it's attached below.`,
-          attachment: { type: 'image', url: stored.url, title: asText(params.title, 80) || task.slice(0, 80) },
+        try {
+          const buf = await fetchBuffer(
+            `https://quickchart.io/chart?w=900&h=500&bkg=white&c=${encodeURIComponent(JSON.stringify(config))}`
+          )
+          const stored = await persistImage(buf, 'quickchart', {
+            prompt: `${displayLabel}: ${asText(params.title, 100) || task.slice(0, 100)}`,
+            size: '900x500',
+            userId: user?.id ?? null,
+          })
+          return {
+            ok: true,
+            summary: `📈 Chart rendered with the **${displayLabel}** skill — it's attached below.`,
+            attachment: { type: 'image', url: stored.url, title: asText(params.title, 80) || task.slice(0, 80) },
+          }
+        } catch (chartErr) {
+          console.warn(
+            '[skill-runtime] chart rendering failed, producing data table doc:',
+            chartErr instanceof Error ? chartErr.message : chartErr
+          )
+          // Fallback: ship the chart data as a real docx with a table.
+          const labelsRaw = Array.isArray(params.labels)
+            ? params.labels.map((x: unknown) => asText(x, 80))
+            : []
+          const datasetsRaw = Array.isArray(params.datasets)
+            ? (params.datasets as Array<Record<string, unknown>>).map((d, i) => ({
+                label: asText(d.label ?? d.name ?? `Series ${i + 1}`, 60),
+                data: Array.isArray(d.data)
+                  ? d.data.map((x: unknown) => (typeof x === 'number' ? String(x) : asText(x, 40)))
+                  : [],
+              }))
+            : []
+          const chartTitle = asText(params.title, 200) || task.slice(0, 60)
+          const header = ['Label', ...datasetsRaw.map((d) => d.label)]
+          const rows: string[][] = [header.map(String)]
+          const maxRows = Math.max(1, labelsRaw.length, ...datasetsRaw.map((d) => d.data.length))
+          for (let i = 0; i < maxRows; i++) {
+            rows.push([String(labelsRaw[i] ?? `Row ${i + 1}`), ...datasetsRaw.map((d) => String(d.data[i] ?? ''))])
+          }
+          const blocks: CleanBlock[] = [
+            { type: 'heading', text: chartTitle, level: 1 },
+            { type: 'paragraph', text: `Chart type: ${String(params.type ?? 'bar')}. Rendered as a data table because the chart image service was unavailable.` },
+            { type: 'table', rows },
+          ]
+          const file = await writeOfficeDoc(base, 'docx', chartTitle, blocks)
+          if (file) {
+            return {
+              ok: true,
+              summary: `📈 The chart image service was busy, so I prepared the chart data as a downloadable table with the **${displayLabel}** skill. 📊`,
+              attachment: {
+                type: 'document',
+                url: `${file.url}?download=1&title=${encodeURIComponent(chartTitle)}`,
+                title: chartTitle,
+                format: file.format,
+              },
+            }
+          }
+          return {
+            ok: true,
+            summary:
+              `📈 **${displayLabel}** — chart image service was unavailable. Here's the chart data:\n\n` +
+              `\`\`\`\n${JSON.stringify(config, null, 2).slice(0, 1800)}\n\`\`\``,
+          }
         }
       }
 
       /* ---------------- QR (goQR.me — keyless) ---------------------------- */
       case 'qr': {
-        const params = await extractJson(
+        const params = await safeJson(
           'Extract the data to encode into a QR code (a URL, text, wifi string, contact…). Respond ONLY as JSON: {"data":"<exact content to encode>"}',
-          task
+          task,
+          { data: task }
         )
         const qrData = String(params.data || task).slice(0, 1500)
-        const buf = await fetchBuffer(
-          `https://api.qrserver.com/v1/create-qr-code/?size=600x600&ecc=M&margin=8&data=${encodeURIComponent(qrData)}`
-        )
-        const stored = await persistImage(buf, 'qrcode', {
-          prompt: `QR: ${qrData.slice(0, 120)}`,
-          size: '600x600',
-          userId: user?.id ?? null,
-        })
-        return {
-          ok: true,
-          summary: `🔳 QR code forged with the **${displayLabel}** skill — scan or download it below.`,
-          attachment: { type: 'image', url: stored.url, title: qrData.slice(0, 80) },
+        try {
+          const buf = await fetchBuffer(
+            `https://api.qrserver.com/v1/create-qr-code/?size=600x600&ecc=M&margin=8&data=${encodeURIComponent(qrData)}`
+          )
+          const stored = await persistImage(buf, 'qrcode', {
+            prompt: `QR: ${qrData.slice(0, 120)}`,
+            size: '600x600',
+            userId: user?.id ?? null,
+          })
+          return {
+            ok: true,
+            summary: `🔳 QR code forged with the **${displayLabel}** skill — scan or download it below.`,
+            attachment: { type: 'image', url: stored.url, title: qrData.slice(0, 80) },
+          }
+        } catch (qrErr) {
+          console.warn(
+            '[skill-runtime] QR service failed:',
+            qrErr instanceof Error ? qrErr.message : qrErr
+          )
+          return {
+            ok: true,
+            summary:
+              `🔳 The QR service was unavailable, but here's the encoded payload for the **${displayLabel}** skill — ` +
+              `copy it into any QR generator (or try again in a moment for an instant image):\n\n\`\`\`\n${qrData.slice(0, 800)}\n\`\`\``,
+          }
         }
       }
 
       /* ---------------- PASSWORD (Node crypto — free) --------------------- */
       case 'password': {
-        const params = await extractJson(
+        const params = await safeJson(
           'Extract password requirements. Respond ONLY as JSON: {"length":<number 8-64, default 20>,"count":<number 1-5, default 3>,"mode":"password|passphrase|apikey","words":<number 3-8 for passphrases>}',
-          task
-        ).catch(() => ({}) as Record<string, unknown>)
+          task,
+          {}
+        )
         const mode = String(params.mode ?? 'password').toLowerCase()
         const sets = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_=+'
         const pick = (n: number, alphabet: string) =>
@@ -586,65 +959,131 @@ export async function runSkillAction(
       /* ---------------- RESEARCH (search → real briefing doc) ------------ */
       case 'research':
       default: {
-        const search = await callApi<{ results?: Array<{ url: string; name: string; snippet?: string }> }>(
-          base,
-          '/api/search',
-          { query: task.slice(0, 300), summarize: false }
-        )
-        const results = Array.isArray(search.results) ? search.results.slice(0, 6) : []
+        // Live web search (best-effort — gracefully degrades to knowledge brief)
+        let results: Array<{ url: string; name: string; snippet?: string }> = []
+        try {
+          const search = await callApi<{ results?: Array<{ url: string; name: string; snippet?: string }> }>(
+            base,
+            '/api/search',
+            { query: task.slice(0, 300), summarize: false }
+          )
+          results = Array.isArray(search.results) ? search.results.slice(0, 6) : []
+        } catch (searchErr) {
+          console.warn(
+            '[skill-runtime] research web search failed, continuing with LLM knowledge:',
+            searchErr instanceof Error ? searchErr.message : searchErr
+          )
+        }
         const context = results
           .map((r, i) => `[${i + 1}] ${r.name} (${r.url})\n${String(r.snippet ?? '').slice(0, 300)}`)
           .join('\n\n')
-        const contentRaw = await smartChat(
-          [
-            {
-              role: 'assistant',
-              content:
-                `You are executing the "${displayLabel}" skill. Using the web findings, write a practical briefing document.\n` +
-                `Respond ONLY as JSON: {"title":"...","blocks":[{"type":"heading","text":"...","level":2},{"type":"paragraph","text":"..."},{"type":"bullets","items":["..."]}]}\n` +
-                `Include: quick answer, how-to steps, commands/config examples as paragraphs, pitfalls. Real substance, same language as the request.`,
-            },
-            { role: 'user', content: `${task}\n\nWEB FINDINGS:\n${context || '(none — rely on your knowledge)'}` },
-          ],
-          { maxTokens: 2200, task: 'fast' }
-        )
+
+        let contentRaw = ''
+        try {
+          contentRaw = await smartChat(
+            [
+              {
+                role: 'assistant',
+                content:
+                  `You are executing the "${displayLabel}" skill (harness: ${skillName}, category: ${skillCategory ?? 'general'}). ` +
+                  `This skill normally drives the "${displayLabel}" desktop app, but a web app can't do that — so produce a real, actionable BRIEFING document for the user's task.\n` +
+                  `Use the WEB FINDINGS to ground your answer in current reality. ` +
+                  `Include: quick answer, step-by-step how-to, real commands/config/code examples (as paragraphs), prerequisites, and pitfalls. ` +
+                  `Respond ONLY as JSON: {"title":"<short title>","blocks":[{"type":"heading","text":"...","level":2},{"type":"paragraph","text":"..."},{"type":"bullets","items":["..."]}]}\n` +
+                  `Real substance — no placeholders, no "TODO". Same language as the request.`,
+              },
+              { role: 'user', content: `${task}\n\nWEB FINDINGS:\n${context || '(none — rely on your own knowledge)'}` },
+            ],
+            { maxTokens: 2200, task: 'fast' }
+          )
+        } catch (llmErr) {
+          console.warn('[skill-runtime] research LLM failed:', llmErr instanceof Error ? llmErr.message : llmErr)
+          // No LLM — return a graceful text-only result with whatever sources we have.
+          if (results.length > 0) {
+            return {
+              ok: true,
+              summary:
+                `🧠 I gathered live sources for your **${displayLabel}** task (the synthesis engine was busy) — top hits attached. Try again in a moment for the full briefing.`,
+              attachment: { type: 'search', results: results.map((r) => ({ url: r.url, title: r.name, snippet: r.snippet })) },
+            }
+          }
+          return {
+            ok: true,
+            summary:
+              `🧠 The cloud engines are momentarily busy — I couldn't fully run the **${displayLabel}** skill right now. ` +
+              `Here is your task as I understood it:\n\n> ${task.slice(0, 800)}\n\nTry again in a moment.`,
+          }
+        }
+
+        // Parse plan — gracefully fall back to markdown→blocks on JSON failure.
         const cleaned = contentRaw.replace(/```(?:json)?/g, '').trim()
         const start = cleaned.indexOf('{')
         const end = cleaned.lastIndexOf('}')
-        const plan = start !== -1 && end !== -1
-          ? (JSON.parse(cleaned.slice(start, end + 1)) as { title?: string; blocks?: Array<Record<string, unknown>> })
-          : { blocks: [] }
-        const blocks = sanitizeBlocks(plan.blocks)
+        let title = task.slice(0, 60)
+        let blocks: CleanBlock[] = []
+        if (start !== -1 && end !== -1) {
+          try {
+            const plan = JSON.parse(cleaned.slice(start, end + 1)) as { title?: string; blocks?: Array<Record<string, unknown>> }
+            if (plan.title) title = String(plan.title).slice(0, 200)
+            blocks = sanitizeBlocks(plan.blocks)
+          } catch {
+            blocks = markdownToBlocks(contentRaw)
+          }
+        } else {
+          blocks = markdownToBlocks(contentRaw)
+        }
+
+        // Always append a Sources heading + bullets when we have web hits.
+        if (results.length > 0) {
+          blocks.push({ type: 'heading', text: 'Sources', level: 2 })
+          blocks.push({ type: 'bullets', items: results.map((r) => `${r.name} — ${r.url}`).slice(0, 12) })
+        }
+
         if (blocks.length > 0) {
-          const data = await callApi<{ file: { url: string; format: string } }>(base, '/api/office/create', {
-            format: 'docx',
-            title: String(plan.title ?? task.slice(0, 60)).slice(0, 200),
-            blocks,
-          })
+          const file = await writeOfficeDoc(base, 'docx', title, blocks)
+          if (file) {
+            return {
+              ok: true,
+              summary: `I researched your **${displayLabel}** task and wrote a full briefing — download below. ${results.length > 0 ? 'Sources attached.' : ''} 🧠`,
+              attachment: {
+                type: 'document',
+                url: `${file.url}?download=1&title=${encodeURIComponent(title)}`,
+                title,
+                format: 'docx',
+              },
+            }
+          }
+          // Office backend down — inline markdown.
           return {
             ok: true,
-            summary: `I researched your **${displayLabel}** task and wrote a full briefing — download below. Sources attached. 🧠`,
-            attachment: {
-              type: 'document',
-              url: `${data.file.url}?download=1&title=${encodeURIComponent(String(plan.title ?? 'Briefing'))}`,
-              title: String(plan.title ?? 'Briefing'),
-              format: 'docx',
-            },
+            summary:
+              `I researched your **${displayLabel}** task — the document builder was busy, so here's the briefing inline:\n\n` +
+              contentRaw.slice(0, 2600) +
+              (results.length > 0 ? `\n\n**Sources:**\n${results.map((r) => `- ${r.name} — ${r.url}`).join('\n')}` : ''),
           }
         }
+        // No structured blocks — surface whatever sources we have.
+        if (results.length > 0) {
+          return {
+            ok: true,
+            summary: `I researched your **${displayLabel}** task — key sources attached. 🔎`,
+            attachment: { type: 'search', results: results.map((r) => ({ url: r.url, title: r.name, snippet: r.snippet })) },
+          }
+        }
+        // Truly nothing — return the raw text content.
         return {
           ok: true,
-          summary: `I researched your **${displayLabel}** task — key sources attached. 🔎`,
-          attachment: { type: 'search', results: results.map((r) => ({ url: r.url, title: r.name })) },
+          summary: `**${displayLabel}** — here's what I prepared:\n\n${contentRaw.slice(0, 1800)}`,
         }
       }
     }
   } catch (err) {
     console.error(`[skill-runtime] ${skillName} (${action.kind}) failed:`, err)
+    const reason = err instanceof Error ? err.message : 'Unknown error.'
     return {
       ok: false,
       summary: '',
-      error: err instanceof Error ? err.message : 'The skill run failed. Try rephrasing.',
+      error: `The **${displayLabel}** skill hit a snag: ${reason}. Try rephrasing, or retry in a moment.`,
     }
   }
 }

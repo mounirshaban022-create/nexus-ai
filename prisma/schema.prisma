@@ -89,14 +89,20 @@ model GeneratedVideo {
 model GeneratedDocument {
   id          String   @id @default(cuid())
   filename    String
-  format      String   @default("docx") // docx | txt | md
+  format      String   @default("docx") // docx | txt | md | xlsx | pptx | pdf | html
   title       String
   summary     String   @default("")
   downloadUrl String
   size        Int      @default(0)
+  // MEDIA FIX: base64 of the file bytes — survives Vercel's ephemeral /tmp
+  // across serverless invocations so download links never 404.
+  data        String?
+  mimeType    String?
   userId      String?
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model User {
@@ -125,10 +131,17 @@ model User {
   sessions      ChatSession[]   // Phase 0 Bug 3: back-relation for ownership
   memories      UserMemory[]    // Phase 1 P1: per-user durable memory
   projects      Project[]       // Phase 1 P3: per-user persistent projects
+  emailAccounts EmailAccount[]  // SECURITY: private connected email accounts
+  aiProviders   AiProvider[]   // SECURITY: private connected AI provider keys
+  whatsappAccounts WhatsAppAccount[] // SECURITY: private WhatsApp connections
 }
 
 model EmailAccount {
   id            String    @id @default(cuid())
+  // SECURITY: every email account is PRIVATE to the user who connected it.
+  // null = legacy/global row (pre-migration); queries MUST filter by userId.
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   label         String
   email         String
   fromName      String    @default("")
@@ -143,11 +156,19 @@ model EmailAccount {
   statusMessage String    @default("")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  @@index([userId, createdAt])
 }
 
 model AiProvider {
   id           String   @id @default(cuid())
-  providerId   String   @unique // "openrouter" | "groq" | "gemini" | "mistral" | "cerebras" | "together"
+  // SECURITY: every AI provider key is PRIVATE to the user who added it.
+  // null = legacy/global row (pre-migration). The composite unique below
+  // lets one user keep ONE config per providerId, while different users
+  // can each configure the same providerId independently.
+  userId       String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerId   String   // "openrouter" | "groq" | "gemini" | "mistral" | "cerebras" | "together"
   label        String
   apiKeyEnc    String
   baseUrl      String
@@ -156,6 +177,9 @@ model AiProvider {
   statusMessage String  @default("")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@unique([providerId, userId])
+  @@index([userId, createdAt])
 }
 
 // Phase 1 — Priority 1: per-user memory store.
@@ -246,6 +270,11 @@ model ProjectFile {
 /* ------------------------------------------------------------------ */
 model WhatsAppAccount {
   id             String   @id @default(cuid())
+  // SECURITY: every WhatsApp connection is PRIVATE to the user who set it up.
+  // null = legacy/global row (pre-migration). The Meta webhook still finds the
+  // right account by its unique verifyToken, independent of userId.
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   label          String   @default("WhatsApp Business")
   // Display name shown to customers ("business name" on WhatsApp profile)
   businessName   String   @default("NEXUS Assistant")
@@ -274,6 +303,7 @@ model WhatsAppAccount {
 
   messages       WhatsAppMessage[]
 
+  @@index([userId, createdAt])
   @@index([createdAt])
 }
 

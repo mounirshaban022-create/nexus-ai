@@ -140,10 +140,42 @@ export interface ResolvedAccount {
   password: string
 }
 
-export async function getPrimaryAccount(): Promise<ResolvedAccount | null> {
+/**
+ * SECURITY: every email account is PRIVATE to the user who connected it.
+ * `userId` MUST be supplied by every caller (derived from a verified
+ * session). null userId returns null — guests have no email access.
+ * Legacy rows with userId=null are NEVER returned here (they predate
+ * per-user scoping and may belong to anyone).
+ */
+export async function getPrimaryAccount(userId?: string | null): Promise<ResolvedAccount | null> {
+  if (!userId) return null
   const account = await db.emailAccount.findFirst({
-    where: { status: 'connected' },
+    where: { userId, status: 'connected' },
     orderBy: { createdAt: 'asc' },
+  })
+  if (!account) return null
+  return {
+    id: account.id,
+    label: account.label,
+    email: account.email,
+    fromName: account.fromName,
+    imapHost: account.imapHost,
+    imapPort: account.imapPort,
+    smtpHost: account.smtpHost,
+    smtpPort: account.smtpPort,
+    smtpSecure: account.smtpSecure,
+    username: account.username,
+    password: decryptSecret(account.passwordEnc),
+  }
+}
+
+/** SECURITY: fetch an account by id ONLY if it belongs to `userId`. */
+export async function getOwnedEmailAccount(
+  id: string,
+  userId: string
+): Promise<ResolvedAccount | null> {
+  const account = await db.emailAccount.findFirst({
+    where: { id, userId },
   })
   if (!account) return null
   return {

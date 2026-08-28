@@ -129,8 +129,8 @@ const GMAIL_DEFAULT_HINT =
   'Enable 2FA, then create an App Password at myaccount.google.com/apppasswords'
 
 const inputClass =
-  'w-full min-h-[42px] rounded-xl border border-white/10 bg-black/40 px-3.5 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[#ff5a5f]/50 focus:ring-4 focus:ring-[#ff5a5f]/10'
-const fieldLabelClass = 'mb-1.5 block text-xs font-medium text-zinc-400'
+  'w-full min-h-[42px] rounded-xl border border-border bg-input px-3.5 py-2.5 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/80 focus:border-[#ff5a5f]/50 focus:ring-4 focus:ring-[#ff5a5f]/10'
+const fieldLabelClass = 'mb-1.5 block text-xs font-medium text-muted-foreground'
 
 const EASE = [0.21, 1.02, 0.73, 1] as const
 
@@ -183,15 +183,15 @@ function SectionCard({
     >
       <header className="flex items-start gap-3.5">
         <span
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/8"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border"
           style={{ background: tint(accent, 0.12), color: accent }}
           aria-hidden
         >
           <Icon className="h-5 w-5" />
         </span>
         <div className="min-w-0">
-          <h2 className="font-display text-[15px] font-bold tracking-tight text-zinc-100">{title}</h2>
-          {desc && <p className="mt-1 text-xs leading-relaxed text-zinc-500">{desc}</p>}
+          <h2 className="font-display text-[15px] font-bold tracking-tight text-foreground">{title}</h2>
+          {desc && <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">{desc}</p>}
         </div>
       </header>
       <div className="mt-4">{children}</div>
@@ -230,14 +230,14 @@ function StatCard({
           <Icon className="h-4 w-4" />
         </span>
         {loading ? (
-          <span className="h-7 w-10 animate-pulse rounded-md bg-white/10" aria-hidden />
+          <span className="h-7 w-10 animate-pulse rounded-md bg-accent" aria-hidden />
         ) : (
-          <span className="font-display text-2xl font-bold leading-none tracking-tight text-zinc-100">
+          <span className="font-display text-2xl font-bold leading-none tracking-tight text-foreground">
             {value === null ? '—' : value.toLocaleString()}
           </span>
         )}
       </div>
-      <p className="mt-2.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className="mt-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">{label}</p>
     </motion.div>
   )
 }
@@ -283,8 +283,8 @@ function PresetPill({
       aria-pressed={active}
       className={`min-h-[34px] rounded-full border px-3 py-1.5 text-xs font-medium transition ${
         active
-          ? 'border-[#ff5a5f]/45 bg-[#ff5a5f]/12 text-zinc-100'
-          : 'border-white/10 bg-black/30 text-zinc-400 hover:border-white/25 hover:text-zinc-200'
+          ? 'border-[#ff5a5f]/45 bg-[#ff5a5f]/12 text-foreground'
+          : 'border-border bg-input text-muted-foreground hover:border-border hover:text-foreground'
       }`}
     >
       {children}
@@ -429,7 +429,7 @@ function EmailConnectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88dvh] overflow-y-auto border-white/10 bg-[#101012] text-zinc-100 sm:max-w-lg">
+      <DialogContent className="max-h-[88dvh] overflow-y-auto border-border bg-card text-foreground sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-display flex items-center gap-2 text-left text-lg tracking-tight">
             <span
@@ -441,7 +441,7 @@ function EmailConnectDialog({
             </span>
             {t('settings.emailConnect')}
           </DialogTitle>
-          <DialogDescription className="text-left text-xs leading-relaxed text-zinc-500">
+          <DialogDescription className="text-left text-xs leading-relaxed text-muted-foreground/80">
             {t('settings.emailDesc')}
           </DialogDescription>
         </DialogHeader>
@@ -567,7 +567,7 @@ function EmailConnectDialog({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="min-h-[44px] flex-1 rounded-xl border border-white/10 px-4 text-sm font-medium text-zinc-400 transition hover:border-white/25 hover:text-zinc-200"
+              className="min-h-[44px] flex-1 rounded-xl border border-border px-4 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
             >
               {t('settings.cancel')}
             </button>
@@ -682,7 +682,7 @@ function AddProviderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88dvh] overflow-y-auto border-white/10 bg-[#101012] text-zinc-100 sm:max-w-md">
+      <DialogContent className="max-h-[88dvh] overflow-y-auto border-border bg-card text-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="font-display flex items-center gap-2 text-left text-lg tracking-tight">
             <span
@@ -694,7 +694,7 @@ function AddProviderDialog({
             </span>
             {t('settings.addProvider')}
           </DialogTitle>
-          <DialogDescription className="text-left text-xs leading-relaxed text-zinc-500">
+          <DialogDescription className="text-left text-xs leading-relaxed text-muted-foreground/80">
             {t('settings.aiProvidersDesc')}
           </DialogDescription>
         </DialogHeader>
@@ -733,9 +733,9 @@ function AddProviderDialog({
 
           {/* Selected provider info */}
           {selected && (
-            <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3.5">
-              <p className="text-[11px] leading-relaxed text-zinc-400">{selected.freeNote}</p>
-              <p className="mt-1.5 truncate font-mono text-[10px] text-zinc-600" title={selected.baseUrl}>
+            <div className="rounded-xl border border-border bg-muted/50 p-3.5">
+              <p className="text-[11px] leading-relaxed text-muted-foreground">{selected.freeNote}</p>
+              <p className="mt-1.5 truncate font-mono text-[10px] text-muted-foreground/80" title={selected.baseUrl}>
                 {selected.baseUrl}
               </p>
               {selected.keyUrl && (
@@ -755,7 +755,7 @@ function AddProviderDialog({
           <label className="block">
             <span className={fieldLabelClass}>
               {t('settings.apiKey')}
-              {isAnonymous && <span className="ml-1.5 font-normal text-zinc-600">(optional)</span>}
+              {isAnonymous && <span className="ml-1.5 font-normal text-muted-foreground/80">(optional)</span>}
             </span>
             <input
               type="password"
@@ -771,7 +771,7 @@ function AddProviderDialog({
           <label className="block">
             <span className={fieldLabelClass}>
               {t('settings.model')}
-              <span className="ml-1.5 font-normal text-zinc-600">(optional)</span>
+              <span className="ml-1.5 font-normal text-muted-foreground/80">(optional)</span>
             </span>
             <input
               type="text"
@@ -802,7 +802,7 @@ function AddProviderDialog({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="min-h-[44px] flex-1 rounded-xl border border-white/10 px-4 text-sm font-medium text-zinc-400 transition hover:border-white/25 hover:text-zinc-200"
+              className="min-h-[44px] flex-1 rounded-xl border border-border px-4 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
             >
               {t('settings.cancel')}
             </button>
@@ -1200,7 +1200,7 @@ export function NexusSettingsMode() {
           <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
             {/* Avatar (upload for signed-in users) */}
             <div className="relative shrink-0 self-start sm:self-center">
-              <div className="h-20 w-20 overflow-hidden rounded-2xl border border-white/10 shadow-[0_16px_40px_-16px_rgba(0,0,0,0.8)] md:h-24 md:w-24">
+              <div className="h-20 w-20 overflow-hidden rounded-2xl border border-border shadow-[0_16px_40px_-16px_rgba(0,0,0,0.8)] md:h-24 md:w-24">
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
                 ) : (
@@ -1219,7 +1219,7 @@ export function NexusSettingsMode() {
                   disabled={uploadingAvatar}
                   aria-label={t('settings.changePhoto')}
                   title={t('settings.changePhoto')}
-                  className="absolute -bottom-1.5 -right-1.5 flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-[#1a1a1e] text-zinc-300 shadow-lg transition hover:border-[#ff5a5f]/50 hover:text-zinc-100 disabled:opacity-60"
+                  className="absolute -bottom-1.5 -right-1.5 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-lg transition hover:border-[#ff5a5f]/50 hover:text-foreground disabled:opacity-60"
                 >
                   {uploadingAvatar ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -1240,32 +1240,32 @@ export function NexusSettingsMode() {
             {/* Identity */}
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="font-display truncate text-xl font-bold tracking-tight text-zinc-100">
+                <h2 className="font-display truncate text-xl font-bold tracking-tight text-foreground">
                   {displayName}
                 </h2>
                 <span
                   className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                     user
                       ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300'
-                      : 'border-white/10 bg-white/5 text-zinc-400'
+                      : 'border-border bg-accent/50 text-muted-foreground'
                   }`}
                 >
                   {user ? t('settings.account') : t('settings.guest')}
                 </span>
               </div>
-              <p className="mt-1 truncate text-sm text-zinc-400">
+              <p className="mt-1 truncate text-sm text-muted-foreground">
                 {user ? user.email : t('settings.guestHint')}
               </p>
               {user && memberSince && (
-                <p className="mt-1 text-xs text-zinc-600">
+                <p className="mt-1 text-xs text-muted-foreground/80">
                   {t('settings.memberSince')} {memberSince}
                 </p>
               )}
               {user && (user.location || user.bio) && (
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500">
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground/80">
                   {user.location && (
                     <span className="inline-flex items-center gap-1">
-                      <MapPin className="h-3 w-3 text-zinc-600" aria-hidden />
+                      <MapPin className="h-3 w-3 text-muted-foreground/80" aria-hidden />
                       {user.location}
                     </span>
                   )}
@@ -1280,7 +1280,7 @@ export function NexusSettingsMode() {
                 <button
                   type="button"
                   onClick={() => (editing ? setEditing(false) : startEdit())}
-                  className="flex min-h-[40px] items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 text-sm font-medium text-zinc-300 transition hover:border-[#ff5a5f]/40 hover:text-zinc-100"
+                  className="flex min-h-[40px] items-center gap-2 rounded-xl border border-border bg-muted/50 px-4 text-sm font-medium text-muted-foreground transition hover:border-[#ff5a5f]/40 hover:text-foreground"
                 >
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
                   {editing ? t('settings.cancel') : t('settings.editProfile')}
@@ -1304,7 +1304,7 @@ export function NexusSettingsMode() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               transition={{ duration: 0.25, ease: EASE }}
-              className="relative mt-5 space-y-3 overflow-hidden border-t border-white/8 pt-5"
+              className="relative mt-5 space-y-3 overflow-hidden border-t border-border pt-5"
               onSubmit={(e) => {
                 e.preventDefault()
                 void saveProfile()
@@ -1362,7 +1362,7 @@ export function NexusSettingsMode() {
                 <button
                   type="button"
                   onClick={() => setEditing(false)}
-                  className="min-h-[42px] rounded-xl border border-white/10 px-4 text-sm font-medium text-zinc-400 transition hover:border-white/25 hover:text-zinc-200"
+                  className="min-h-[42px] rounded-xl border border-border px-4 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
                 >
                   {t('settings.cancel')}
                 </button>
@@ -1425,22 +1425,22 @@ export function NexusSettingsMode() {
         >
           {emailLoading ? (
             <div className="space-y-2.5">
-              <div className="h-16 animate-pulse rounded-xl bg-white/[0.05]" />
-              <div className="h-16 animate-pulse rounded-xl bg-white/[0.05]" />
+              <div className="h-16 animate-pulse rounded-xl bg-muted/50" />
+              <div className="h-16 animate-pulse rounded-xl bg-muted/50" />
             </div>
           ) : emailAccounts.length === 0 ? (
             <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <span
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/8"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border"
                   style={{ background: tint('#ff5a5f', 0.1), color: '#ff5a5f' }}
                   aria-hidden
                 >
                   <Mail className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-zinc-200">{t('settings.emailConnect')}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
+                  <p className="text-sm font-medium text-foreground">{t('settings.emailConnect')}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground/80">
                     Gmail · Outlook · Yahoo · iCloud · Zoho · IMAP
                   </p>
                 </div>
@@ -1459,12 +1459,12 @@ export function NexusSettingsMode() {
               {emailAccounts.map((a) => (
                 <div
                   key={a.id}
-                  className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/30 p-3.5 transition hover:border-white/15"
+                  className="flex items-center gap-3 rounded-xl border border-border bg-input p-3.5 transition hover:border-border"
                 >
                   <StatusDot status={a.status} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-100">{a.email}</p>
-                    <p className="truncate text-xs text-zinc-500">
+                    <p className="truncate text-sm font-medium text-foreground">{a.email}</p>
+                    <p className="truncate text-xs text-muted-foreground/80">
                       {a.label}
                       {a.statusMessage ? ` · ${a.statusMessage}` : ''}
                     </p>
@@ -1475,7 +1475,7 @@ export function NexusSettingsMode() {
                     disabled={deletingEmailId === a.id}
                     aria-label={`${t('settings.disconnect')} ${a.email}`}
                     title={t('settings.disconnect')}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-500 transition hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground/80 transition hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
                   >
                     {deletingEmailId === a.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -1487,14 +1487,14 @@ export function NexusSettingsMode() {
               ))}
 
               <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
-                <p className="flex max-w-md items-start gap-2 text-xs leading-relaxed text-zinc-500">
+                <p className="flex max-w-md items-start gap-2 text-xs leading-relaxed text-muted-foreground/80">
                   <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-[#f5a623]" aria-hidden />
                   {t('settings.emailAskHint')}
                 </p>
                 <button
                   type="button"
                   onClick={() => setEmailDialogOpen(true)}
-                  className="flex min-h-[38px] shrink-0 items-center gap-1.5 self-start rounded-xl border border-white/10 px-3.5 text-xs font-medium text-zinc-400 transition hover:border-[#ff5a5f]/40 hover:text-zinc-100 sm:self-auto"
+                  className="flex min-h-[38px] shrink-0 items-center gap-1.5 self-start rounded-xl border border-border px-3.5 text-xs font-medium text-muted-foreground transition hover:border-[#ff5a5f]/40 hover:text-foreground sm:self-auto"
                 >
                   <Plus className="h-3.5 w-3.5" aria-hidden />
                   {connectedEmailCount > 0 ? t('settings.connect') : t('settings.connect')}
@@ -1516,9 +1516,9 @@ export function NexusSettingsMode() {
                 class on <html> flips the entire shell + chat + overlays
                 via the light-mode overrides in globals.css. */}
             <div className="flex items-center justify-between gap-4">
-              <span className="text-sm font-medium text-zinc-200">{t('settings.theme')}</span>
+              <span className="text-sm font-medium text-foreground">{t('settings.theme')}</span>
               <div
-                className="flex overflow-hidden rounded-full border border-white/10 bg-black/30"
+                className="flex overflow-hidden rounded-full border border-border bg-input"
                 role="group"
                 aria-label={t('settings.theme')}
               >
@@ -1528,8 +1528,8 @@ export function NexusSettingsMode() {
                   aria-pressed={theme === 'light'}
                   className={`flex min-h-[36px] items-center gap-1.5 px-5 text-sm font-semibold transition ${
                     theme === 'light'
-                      ? 'bg-[#ff5a5f]/15 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'bg-[#ff5a5f]/15 text-foreground'
+                      : 'text-muted-foreground/80 hover:text-muted-foreground'
                   }`}
                 >
                   <Sun className="h-3.5 w-3.5" aria-hidden />
@@ -1539,10 +1539,10 @@ export function NexusSettingsMode() {
                   type="button"
                   onClick={() => setTheme('dark')}
                   aria-pressed={theme === 'dark'}
-                  className={`flex min-h-[36px] items-center gap-1.5 border-l border-white/10 px-5 text-sm font-semibold transition ${
+                  className={`flex min-h-[36px] items-center gap-1.5 border-l border-border px-5 text-sm font-semibold transition ${
                     theme === 'dark'
-                      ? 'bg-[#ff5a5f]/15 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'bg-[#ff5a5f]/15 text-foreground'
+                      : 'text-muted-foreground/80 hover:text-muted-foreground'
                   }`}
                 >
                   <Moon className="h-3.5 w-3.5" aria-hidden />
@@ -1553,9 +1553,9 @@ export function NexusSettingsMode() {
 
             {/* Language */}
             <div className="flex items-center justify-between gap-4">
-              <span className="text-sm font-medium text-zinc-200">{t('settings.language')}</span>
+              <span className="text-sm font-medium text-foreground">{t('settings.language')}</span>
               <div
-                className="flex overflow-hidden rounded-full border border-white/10 bg-black/30"
+                className="flex overflow-hidden rounded-full border border-border bg-input"
                 role="group"
                 aria-label={t('settings.language')}
               >
@@ -1565,8 +1565,8 @@ export function NexusSettingsMode() {
                   aria-pressed={lang === 'en'}
                   className={`min-h-[36px] px-5 text-sm font-semibold transition ${
                     lang === 'en'
-                      ? 'bg-[#ff5a5f]/15 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'bg-[#ff5a5f]/15 text-foreground'
+                      : 'text-muted-foreground/80 hover:text-muted-foreground'
                   }`}
                 >
                   EN
@@ -1575,10 +1575,10 @@ export function NexusSettingsMode() {
                   type="button"
                   onClick={() => prefs.setLanguage('ar')}
                   aria-pressed={lang === 'ar'}
-                  className={`min-h-[36px] border-l border-white/10 px-5 text-sm font-semibold transition ${
+                  className={`min-h-[36px] border-l border-border px-5 text-sm font-semibold transition ${
                     lang === 'ar'
-                      ? 'bg-[#ff5a5f]/15 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'bg-[#ff5a5f]/15 text-foreground'
+                      : 'text-muted-foreground/80 hover:text-muted-foreground'
                   }`}
                 >
                   عربي
@@ -1598,7 +1598,7 @@ export function NexusSettingsMode() {
         >
           <div className="space-y-2.5">
             {providers.length === 0 ? (
-              <p className="rounded-xl border border-white/8 bg-black/20 p-3.5 text-xs leading-relaxed text-zinc-500">
+              <p className="rounded-xl border border-border bg-input p-3.5 text-xs leading-relaxed text-muted-foreground/80">
                 No providers connected — NEXUS runs on its built-in engine with automatic free
                 fallbacks. Add your own key for priority speed and quotas.
               </p>
@@ -1606,13 +1606,13 @@ export function NexusSettingsMode() {
               providers.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/30 p-3.5 transition hover:border-white/15"
+                  className="flex items-center gap-3 rounded-xl border border-border bg-input p-3.5 transition hover:border-border"
                 >
                   <StatusDot status={p.status} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-100">{p.label}</p>
+                    <p className="truncate text-sm font-medium text-foreground">{p.label}</p>
                     <p
-                      className="truncate font-mono text-[11px] text-zinc-500"
+                      className="truncate font-mono text-[11px] text-muted-foreground/80"
                       title={p.statusMessage || p.defaultModel}
                     >
                       {p.defaultModel}
@@ -1625,7 +1625,7 @@ export function NexusSettingsMode() {
                     disabled={deletingProviderId === p.id}
                     aria-label={`${t('common.delete')} ${p.label}`}
                     title={t('common.delete')}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-500 transition hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground/80 transition hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
                   >
                     {deletingProviderId === p.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -1640,7 +1640,7 @@ export function NexusSettingsMode() {
             <button
               type="button"
               onClick={() => setProviderDialogOpen(true)}
-              className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 text-sm font-medium text-zinc-400 transition hover:border-[#ff2a68]/50 hover:text-zinc-100"
+              className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border text-sm font-medium text-muted-foreground transition hover:border-[#ff2a68]/50 hover:text-foreground"
             >
               <Plus className="h-4 w-4" aria-hidden />
               {t('settings.addProvider')}
@@ -1660,28 +1660,28 @@ export function NexusSettingsMode() {
               <button
                 type="button"
                 onClick={() => setLegalPage('privacy')}
-                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-3.5 py-3 text-left transition hover:border-white/20 hover:bg-black/50"
+                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-input px-3.5 py-3 text-left transition hover:border-border hover:bg-input"
               >
-                <span className="flex items-center gap-2.5 text-sm text-zinc-300">
-                  <FileText className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+                <span className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden />
                   {t('settings.privacyPolicy')}
                 </span>
                 <ChevronRight
-                  className="h-4 w-4 shrink-0 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-zinc-400"
+                  className="h-4 w-4 shrink-0 text-muted-foreground/80 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground"
                   aria-hidden
                 />
               </button>
               <button
                 type="button"
                 onClick={() => setLegalPage('terms')}
-                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-3.5 py-3 text-left transition hover:border-white/20 hover:bg-black/50"
+                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-input px-3.5 py-3 text-left transition hover:border-border hover:bg-input"
               >
-                <span className="flex items-center gap-2.5 text-sm text-zinc-300">
-                  <FileText className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+                <span className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden />
                   {t('settings.termsOfService')}
                 </span>
                 <ChevronRight
-                  className="h-4 w-4 shrink-0 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-zinc-400"
+                  className="h-4 w-4 shrink-0 text-muted-foreground/80 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground"
                   aria-hidden
                 />
               </button>
@@ -1701,17 +1701,17 @@ export function NexusSettingsMode() {
               >
                 MS
               </div>
-              <h3 className="font-display mt-3 text-base font-bold tracking-tight text-zinc-100">
+              <h3 className="font-display mt-3 text-base font-bold tracking-tight text-foreground">
                 Mounir Shaaban
               </h3>
               <p className="mt-0.5 text-xs font-medium text-rose-600 dark:text-[#ff8a80]">
                 {t('settings.creatorRole')}
               </p>
-              <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-zinc-500">
+              <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/80">
                 <MapPin className="h-3 w-3" aria-hidden />
                 {t('settings.creatorLocation')}
               </p>
-              <p className="mt-3 w-full border-t border-white/8 pt-3 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
+              <p className="mt-3 w-full border-t border-border pt-3 text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
                 NEXUS AI © 2026
               </p>
             </div>
@@ -1742,7 +1742,7 @@ export function NexusSettingsMode() {
         )}
 
         {/* Footer */}
-        <p className="pt-2 text-center text-[10px] uppercase tracking-[0.22em] text-zinc-700">
+        <p className="pt-2 text-center text-[10px] uppercase tracking-[0.22em] text-muted-foreground/80">
           NEXUS AI · One AI. Every superpower.
         </p>
       </div>

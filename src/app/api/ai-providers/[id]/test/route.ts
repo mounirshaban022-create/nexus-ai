@@ -28,7 +28,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
     }
     const { id } = await context.params
-    const provider = await db.aiProvider.findUnique({ where: { id } })
+    // SECURITY: only the owner may test/use this provider's key.
+    const provider = await db.aiProvider.findFirst({
+      where: { id, userId: session.userId },
+    })
     if (!provider) {
       return NextResponse.json({ error: 'Provider not found.' }, { status: 404 })
     }

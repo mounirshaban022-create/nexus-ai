@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
   }
 
-  const account = await getWhatsAppAccount()
+  const account = await getWhatsAppAccount(session.userId)
   const appUrl = resolveAppUrl(req)
   return NextResponse.json({
     account: account ? toPublicAccount(account) : null,
@@ -105,29 +105,36 @@ export async function POST(req: NextRequest) {
     }
     const displayPhone = normalizeWaNumber(data.displayPhone || meta.display_phone_number || '')
 
-    const account = await db.whatsAppAccount.upsert({
-      where: { id: (await getWhatsAppAccount())?.id ?? '__none__' },
-      update: {
-        phoneNumberId: data.phoneNumberId,
-        accessTokenEnc: encryptSecret(data.accessToken),
-        displayPhone,
-        businessName: data.businessName,
-        agentPrompt: data.agentPrompt,
-        status: 'connected',
-        statusMessage: `Verified as “${meta.verified_name ?? 'WhatsApp number'}”`,
-        webhookVerified: false,
-      },
-      create: {
-        phoneNumberId: data.phoneNumberId,
-        accessTokenEnc: encryptSecret(data.accessToken),
-        verifyToken: generateVerifyToken(),
-        displayPhone,
-        businessName: data.businessName,
-        agentPrompt: data.agentPrompt,
-        status: 'connected',
-        statusMessage: `Verified as “${meta.verified_name ?? 'WhatsApp number'}”`,
-      },
-    })
+    // SECURITY: per-user. Find the caller's own account; create if none.
+    // (No global upsert — each user keeps their own private connection.)
+    const existing = await getWhatsAppAccount(session.userId)
+    const account = existing
+      ? await db.whatsAppAccount.update({
+          where: { id: existing.id },
+          data: {
+            phoneNumberId: data.phoneNumberId,
+            accessTokenEnc: encryptSecret(data.accessToken),
+            displayPhone,
+            businessName: data.businessName,
+            agentPrompt: data.agentPrompt,
+            status: 'connected',
+            statusMessage: `Verified as “${meta.verified_name ?? 'WhatsApp number'}”`,
+            webhookVerified: false,
+          },
+        })
+      : await db.whatsAppAccount.create({
+          data: {
+            userId: session.userId,
+            phoneNumberId: data.phoneNumberId,
+            accessTokenEnc: encryptSecret(data.accessToken),
+            verifyToken: generateVerifyToken(),
+            displayPhone,
+            businessName: data.businessName,
+            agentPrompt: data.agentPrompt,
+            status: 'connected',
+            statusMessage: `Verified as “${meta.verified_name ?? 'WhatsApp number'}”`,
+          },
+        })
 
     return NextResponse.json({ account: toPublicAccount(account) })
   } catch (error) {
@@ -154,7 +161,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
   }
 
-  const account = await getWhatsAppAccount()
+  const account = await getWhatsAppAccount(session.userId)
   if (!account) {
     return NextResponse.json({ error: 'No WhatsApp account connected yet.' }, { status: 404 })
   }
@@ -187,6 +194,8 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
   }
 
-  await db.whatsAppAccount.deleteMany({})
+  // SECURITY: only delete the caller's own account(s). Never wipe another
+  // user's WhatsApp connection.
+  await db.whatsAppAccount.deleteMany({ where: { userId: session.userId } })
   return NextResponse.json({ ok: true })
 }

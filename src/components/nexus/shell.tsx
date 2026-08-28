@@ -94,7 +94,7 @@ function LanguageToggle() {
       onClick={() => usePreferences.getState().setLanguage(lang === 'ar' ? 'en' : 'ar')}
       aria-label={t('settings.language')}
       title={t('settings.language')}
-      className="grid h-8 w-9 shrink-0 place-items-center rounded-lg border border-white/10 text-[12px] font-bold text-zinc-400 transition hover:border-white/25 hover:bg-white/5 hover:text-zinc-100"
+      className="grid h-8 w-9 shrink-0 place-items-center rounded-lg border border-border text-[12px] font-bold text-muted-foreground transition hover:border-border hover:bg-accent hover:text-foreground"
     >
       <span dir="ltr" className="leading-none">
         {lang === 'ar' ? 'EN' : 'ع'}
@@ -130,7 +130,7 @@ function NavItem({
   active,
   onClick,
   badge,
-  iconClassName = 'text-zinc-400',
+  iconClassName = 'text-muted-foreground',
 }: {
   icon: LucideIcon
   label: string
@@ -145,13 +145,13 @@ function NavItem({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={`flex min-h-[40px] w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${
-        active ? 'bg-white/8 font-medium text-zinc-100' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-200'
+        active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
       }`}
     >
       <Icon className={`h-4 w-4 shrink-0 ${iconClassName}`} aria-hidden />
       <span className="min-w-0 flex-1 truncate text-start">{label}</span>
       {badge ? (
-        <span className="shrink-0 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+        <span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
           {badge}
         </span>
       ) : null}
@@ -183,7 +183,7 @@ function SessionRow({
     return (
       <div className="flex min-h-[44px] w-full items-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/10 px-2.5 py-1.5">
         <Trash2 className="h-3.5 w-3.5 shrink-0 text-red-400" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-[11px] leading-tight text-zinc-300">
+        <span className="min-w-0 flex-1 truncate text-[11px] leading-tight text-muted-foreground">
           {t('common.deleteChatConfirm')}
         </span>
         <button
@@ -196,7 +196,7 @@ function SessionRow({
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-400 transition hover:bg-white/10 hover:text-zinc-200"
+          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
         >
           {t('common.no')}
         </button>
@@ -218,7 +218,7 @@ function SessionRow({
       aria-current={active ? 'page' : undefined}
       title={session.title || t('nav.untitled')}
       className={`group relative flex min-h-[44px] w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 outline-none transition focus-visible:ring-2 focus-visible:ring-[#ff5a5f]/50 ${
-        active ? 'bg-[rgba(255,90,95,0.12)]' : 'hover:bg-white/5'
+        active ? 'bg-[rgba(255,90,95,0.12)]' : 'hover:bg-accent/50'
       }`}
     >
       {active ? (
@@ -235,13 +235,13 @@ function SessionRow({
       >
         {agent.emoji}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-300 group-hover:text-zinc-200">
+      <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground group-hover:text-foreground">
         {session.title || t('nav.untitled')}
       </span>
       {session.agentPinned ? (
-        <Pin className="h-3 w-3 shrink-0 text-zinc-500" aria-label={t('nav.pinnedSpecialist')} />
+        <Pin className="h-3 w-3 shrink-0 text-muted-foreground/80" aria-label={t('nav.pinnedSpecialist')} />
       ) : null}
-      <span className="shrink-0 text-[10px] tabular-nums text-zinc-600">
+      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/80">
         {relTime(session.updatedAt, locale, t('common.now'))}
       </span>
       <button
@@ -252,7 +252,7 @@ function SessionRow({
         }}
         aria-label={t('common.deleteChat')}
         title={t('common.deleteChat')}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-600 opacity-70 transition hover:bg-red-500/15 hover:text-red-400 focus-visible:opacity-100 focus-visible:outline-none md:opacity-0 md:group-hover:opacity-100"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground/80 opacity-70 transition hover:bg-red-500/15 hover:text-red-400 focus-visible:opacity-100 focus-visible:outline-none md:opacity-0 md:group-hover:opacity-100"
       >
         <Trash2 className="h-3.5 w-3.5" aria-hidden />
       </button>
@@ -308,7 +308,7 @@ function SidebarContent({
       <div className="mt-3 px-2">
         <div className="relative">
           <Search
-            className="pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600"
+            className="pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/80"
             aria-hidden
           />
           <input
@@ -317,7 +317,7 @@ function SidebarContent({
             type="search"
             placeholder={t('nav.searchChats')}
             aria-label={t('nav.searchChats')}
-            className="h-9 w-full rounded-xl border border-white/8 bg-white/[0.04] ps-9 pe-3 text-[13px] text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#ff5a5f]/40 focus:bg-white/[0.06]"
+            className="h-9 w-full rounded-xl border border-border bg-muted/50 ps-9 pe-3 text-[13px] text-foreground outline-none transition placeholder:text-muted-foreground/80 focus:border-[#ff5a5f]/40 focus:bg-muted"
           />
         </div>
       </div>
@@ -327,11 +327,11 @@ function SidebarContent({
         {loading && sessions.length === 0 ? (
           <div className="space-y-1.5 p-1" aria-hidden>
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-11 animate-pulse rounded-lg bg-white/[0.04]" />
+              <div key={i} className="h-11 animate-pulse rounded-lg bg-muted/50" />
             ))}
           </div>
         ) : sessions.length === 0 ? (
-          <p className="px-3 py-4 text-xs leading-relaxed text-zinc-600">{t('nav.noConversations')}</p>
+          <p className="px-3 py-4 text-xs leading-relaxed text-muted-foreground/80">{t('nav.noConversations')}</p>
         ) : (
           <div className="space-y-0.5">
             {sessions.map((s) => (
@@ -349,7 +349,7 @@ function SidebarContent({
           </div>
         )}
 
-        <div className="my-3 border-t border-white/8" role="separator" />
+        <div className="my-3 border-t border-border" role="separator" />
 
         <div className="space-y-0.5">
           <NavItem
@@ -383,7 +383,7 @@ function SidebarContent({
       </nav>
 
       {/* User block + language quick-switch */}
-      <div className="shrink-0 border-t border-white/8 p-2">
+      <div className="shrink-0 border-t border-border p-2">
         {user ? (
           <div className="flex items-center gap-2 rounded-lg px-1.5 py-1.5">
             <span
@@ -393,8 +393,8 @@ function SidebarContent({
               {(user.name || user.email).charAt(0).toUpperCase()}
             </span>
             <span className="min-w-0 flex-1" title={user.email}>
-              <span className="block truncate text-[13px] text-zinc-300">{user.name || user.email}</span>
-              {user.name ? <span className="block truncate text-[11px] text-zinc-600">{user.email}</span> : null}
+              <span className="block truncate text-[13px] text-muted-foreground">{user.name || user.email}</span>
+              {user.name ? <span className="block truncate text-[11px] text-muted-foreground/80">{user.email}</span> : null}
             </span>
             <ThemeToggle />
             <LanguageToggle />
@@ -403,7 +403,7 @@ function SidebarContent({
               onClick={onSignOut}
               aria-label={t('nav.signOut')}
               title={t('nav.signOut')}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground/80 transition hover:bg-accent hover:text-foreground"
             >
               <LogOut className="h-4 w-4" aria-hidden />
             </button>
@@ -554,20 +554,20 @@ export function NexusShell(props: NexusShellProps) {
   )
 
   return (
-    <div className="flex min-h-screen bg-[#09090b] text-zinc-100">
+    <div className="flex min-h-screen bg-background text-foreground">
       {/* Desktop sidebar — border-e mirrors to the left edge under RTL */}
-      <aside className="hidden w-[264px] shrink-0 border-e border-white/8 bg-[#0c0c0e] md:flex">
+      <aside className="hidden w-[264px] shrink-0 border-e border-border bg-sidebar md:flex">
         {sidebar}
       </aside>
 
       {/* Mobile top bar + main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/8 bg-[#0c0c0e]/90 px-2 backdrop-blur-md md:hidden">
+        <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between border-b border-border bg-sidebar/90 px-2 backdrop-blur-md md:hidden">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
             aria-label={t('nav.openNav')}
-            className="grid h-10 w-10 place-items-center rounded-xl text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100"
+            className="grid h-10 w-10 place-items-center rounded-xl text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
           >
             <Menu className="h-5 w-5" aria-hidden />
           </button>
@@ -603,7 +603,7 @@ export function NexusShell(props: NexusShellProps) {
       {/* Mobile bottom tab bar — fast one-tap navigation (safe-area aware) */}
       <nav
         aria-label={t('nav.bottomNav')}
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-[#0c0c0e]/90 backdrop-blur-md md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-sidebar/90 backdrop-blur-md md:hidden"
       >
         <div className="flex h-[54px] items-stretch pb-[env(safe-area-inset-bottom)]">
           {tabs.map((tab) => {
@@ -614,7 +614,7 @@ export function NexusShell(props: NexusShellProps) {
                 type="button"
                 onClick={() => goTab(tab.type)}
                 aria-current={isActive ? 'page' : undefined}
-                className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 outline-none transition focus-visible:bg-white/5"
+                className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 outline-none transition focus-visible:bg-accent/50"
               >
                 {isActive ? (
                   <span
@@ -624,12 +624,12 @@ export function NexusShell(props: NexusShellProps) {
                   />
                 ) : null}
                 <tab.icon
-                  className={`h-[19px] w-[19px] transition ${isActive ? 'text-[#ff5a5f]' : 'text-zinc-500'}`}
+                  className={`h-[19px] w-[19px] transition ${isActive ? 'text-[#ff5a5f]' : 'text-muted-foreground/80'}`}
                   aria-hidden
                 />
                 <span
                   className={`max-w-full truncate px-1 text-[10px] leading-none transition ${
-                    isActive ? 'font-semibold text-zinc-100' : 'text-zinc-500'
+                    isActive ? 'font-semibold text-foreground' : 'text-muted-foreground/80'
                   }`}
                 >
                   {tab.label}
@@ -645,7 +645,7 @@ export function NexusShell(props: NexusShellProps) {
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side={isRTL ? 'right' : 'left'}
-          className="w-[282px] gap-0 border-white/8 bg-[#0c0c0e] p-0 text-zinc-100 sm:max-w-[282px]"
+          className="w-[282px] gap-0 border-border bg-sidebar p-0 text-foreground sm:max-w-[282px]"
         >
           <SheetTitle className="sr-only">{t('nav.sheetTitle')}</SheetTitle>
           {sidebar}

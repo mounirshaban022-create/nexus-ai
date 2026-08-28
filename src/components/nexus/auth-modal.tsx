@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { BrandMark } from './shared'
 
 const inputClass =
-  'w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[#ff5a5f]/50 focus:ring-4 focus:ring-[#ff5a5f]/10'
+  'w-full rounded-xl border border-border bg-input px-4 py-2.5 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/80 focus:border-[#ff5a5f]/50 focus:ring-4 focus:ring-[#ff5a5f]/10'
 
 export function NexusAuthModal({
   open,
@@ -63,7 +63,7 @@ export function NexusAuthModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-white/10 bg-[#101012] text-zinc-100 sm:max-w-sm">
+      <DialogContent className="border-border bg-card text-foreground sm:max-w-sm">
         {/* Brand + title */}
         <div className="flex flex-col items-center pb-1 pt-1 text-center">
           <span className="nx-aura relative grid place-items-center rounded-2xl p-2">
@@ -75,7 +75,7 @@ export function NexusAuthModal({
           <DialogDescription className="sr-only">
             {mode === 'signin' ? 'Sign in to NEXUS' : 'Create a NEXUS account'}
           </DialogDescription>
-          <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground/80">
             {mode === 'signin'
               ? 'Sign in to continue your conversations.'
               : 'One account for every superpower.'}
@@ -85,7 +85,7 @@ export function NexusAuthModal({
         <form onSubmit={submit} className="space-y-3.5">
           {mode === 'signup' ? (
             <label className="block">
-              <span className="mb-1.5 block text-xs font-medium text-zinc-400">Name</span>
+              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Name</span>
               <input
                 type="text"
                 value={name}
@@ -99,7 +99,7 @@ export function NexusAuthModal({
           ) : null}
 
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-zinc-400">Email</span>
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Email</span>
             <input
               type="email"
               required
@@ -112,7 +112,7 @@ export function NexusAuthModal({
           </label>
 
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-zinc-400">Password</span>
+            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Password</span>
             <input
               type="password"
               required
@@ -153,23 +153,23 @@ export function NexusAuthModal({
           <button
             type="button"
             onClick={switchMode}
-            className="w-full rounded-lg py-1.5 text-center text-sm text-zinc-400 transition hover:text-zinc-100"
+            className="w-full rounded-lg py-1.5 text-center text-sm text-muted-foreground transition hover:text-foreground"
           >
             {mode === 'signin' ? (
               <>
                 Don&apos;t have an account?{' '}
-                <span className="font-medium text-zinc-200">Create one</span>
+                <span className="font-medium text-foreground">Create one</span>
               </>
             ) : (
               <>
-                Already have an account? <span className="font-medium text-zinc-200">Sign in</span>
+                Already have an account? <span className="font-medium text-foreground">Sign in</span>
               </>
             )}
           </button>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="w-full rounded-lg py-1 text-center text-xs text-zinc-600 transition hover:text-zinc-400"
+            className="w-full rounded-lg py-1 text-center text-xs text-muted-foreground/80 transition hover:text-muted-foreground"
           >
             Continue as guest →
           </button>

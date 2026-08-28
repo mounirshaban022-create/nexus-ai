@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
 
 export const maxDuration = 120
 
@@ -122,6 +124,11 @@ export async function POST(req: NextRequest) {
         { status: 429 }
       )
     }
+
+    // MEDIA FIX: persist the generated file bytes to the DB so the download
+    // link NEVER 404s on Vercel (the next request hits a different lambda
+    // whose /tmp is empty). Guests get userId=null; signed-in users own it.
+    const user = await getCurrentUser(req).catch(() => null)
 
     const parsed = requestSchema.safeParse(await req.json())
     if (!parsed.success) {
@@ -670,6 +677,50 @@ export async function POST(req: NextRequest) {
     }
 
     await writeFile(path.join(FILES_DIR, filename), buffer)
+
+    // MEDIA FIX: persist the file bytes to the DB so the download URL is
+    // durable across Vercel's ephemeral /tmp. The record's id IS the file
+    // id, so /api/office/file/[id] can fall back to this row directly.
+    try {
+      await db.generatedDocument.create({
+        data: {
+          id,
+          filename: `${title.replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 60) || 'document'}.${format}`,
+          format,
+          title,
+          summary: '',
+          downloadUrl: `/api/office/file/${id}`,
+          size: buffer.length,
+          data: buffer.toString('base64'),
+          mimeType: MIME_TYPES[format],
+          userId: user?.id ?? null,
+        },
+      })
+    } catch (dbErr) {
+      // Schema drift (missing data/mimeType column) → retry metadata-only,
+      // then give up silently (the warm /tmp copy still serves this lambda).
+      const msg = dbErr instanceof Error ? dbErr.message : ''
+      if (/data|mimeType|column/i.test(msg)) {
+        try {
+          await db.generatedDocument.create({
+            data: {
+              id,
+              filename: `${title.replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 60) || 'document'}.${format}`,
+              format,
+              title,
+              summary: '',
+              downloadUrl: `/api/office/file/${id}`,
+              size: buffer.length,
+              userId: user?.id ?? null,
+            },
+          })
+        } catch {
+          /* best-effort */
+        }
+      } else {
+        console.error('[api/office/create] DB persist failed:', dbErr)
+      }
+    }
 
     return NextResponse.json({
       file: {

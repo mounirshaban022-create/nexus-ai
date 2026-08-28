@@ -67,15 +67,58 @@ export interface PublicWhatsAppAccount {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Get the single WhatsApp account (Phase 1: one per deployment). */
-export async function getWhatsAppAccount(): Promise<WhatsAppAccountRecord | null> {
+/**
+ * SECURITY: WhatsApp connections are now PRIVATE per user. Pass the
+ * verified session's userId to fetch the caller's own account.
+ * - `getWhatsAppAccount(userId)` → the caller's account (UI + send tools).
+ * - `getWhatsAppAccount()` (no arg) → returns null. The old "any account"
+ *   behaviour was the data-exposure bug; it is intentionally gone.
+ * - The Meta webhook resolves its account by verifyToken (see
+ *   getWhatsAppAccountByVerifyToken below), independent of userId.
+ */
+export async function getWhatsAppAccount(userId?: string | null): Promise<WhatsAppAccountRecord | null> {
   try {
+    if (!userId) return null
     const account = await db.whatsAppAccount.findFirst({
+      where: { userId },
       orderBy: { createdAt: 'asc' },
     })
     return account as unknown as WhatsAppAccountRecord | null
   } catch (error) {
     console.error('[whatsapp] getWhatsAppAccount error:', error)
+    return null
+  }
+}
+
+/** Used by the Meta webhook — resolves the account to verify against. */
+export async function getWhatsAppAccountByVerifyToken(
+  verifyToken: string
+): Promise<WhatsAppAccountRecord | null> {
+  try {
+    if (!verifyToken) return null
+    const account = await db.whatsAppAccount.findFirst({
+      where: { verifyToken },
+    })
+    return account as unknown as WhatsAppAccountRecord | null
+  } catch (error) {
+    console.error('[whatsapp] getWhatsAppAccountByVerifyToken error:', error)
+    return null
+  }
+}
+
+/** Used by the Meta webhook POST — resolves the account that owns a given
+ *  Meta phone_number_id, so inbound messages route to the right user. */
+export async function getWhatsAppAccountByPhoneNumberId(
+  phoneNumberId: string
+): Promise<WhatsAppAccountRecord | null> {
+  try {
+    if (!phoneNumberId) return null
+    const account = await db.whatsAppAccount.findFirst({
+      where: { phoneNumberId },
+    })
+    return account as unknown as WhatsAppAccountRecord | null
+  } catch (error) {
+    console.error('[whatsapp] getWhatsAppAccountByPhoneNumberId error:', error)
     return null
   }
 }

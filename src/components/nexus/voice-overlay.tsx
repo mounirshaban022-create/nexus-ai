@@ -1300,7 +1300,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           role="dialog"
           aria-modal="true"
           aria-label="NEXUS voice mode"
-          className="fixed inset-0 z-50 flex flex-col text-zinc-100"
+          className="fixed inset-0 z-50 flex flex-col text-foreground"
           style={{
             background:
               'linear-gradient(168deg, rgba(9,9,11,0.97) 0%, rgba(20,8,12,0.96) 55%, rgba(9,9,11,0.98) 100%)',
@@ -1312,7 +1312,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           <div className="flex items-center justify-between gap-3 px-5 pt-5 sm:px-8">
             <div className="flex min-w-0 items-center gap-2.5">
               <BrandMark size={22} />
-              <span className="hidden text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 sm:inline">
+              <span className="hidden text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground/80 sm:inline">
                 Voice
               </span>
               <VoicePicker
@@ -1325,7 +1325,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
             <button
               onClick={() => onOpenChange(false)}
               aria-label="Close voice mode"
-              className="shrink-0 rounded-full p-2.5 text-zinc-400 transition hover:bg-white/10 hover:text-zinc-100"
+              className="shrink-0 rounded-full p-2.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
             >
               <X className="h-5 w-5" />
             </button>
@@ -1406,7 +1406,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                   {/* mic-level scale layer — driven directly by the rAF loop */}
                   <div ref={orbScaleRef} style={{ transition: 'transform 0.12s ease-out' }}>
                     <div
-                      className="relative flex items-center justify-center overflow-hidden rounded-full border border-white/10"
+                      className="relative flex items-center justify-center overflow-hidden rounded-full border border-border"
                       style={{
                         width: 184,
                         height: 184,
@@ -1447,7 +1447,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
 
               {/* status */}
               <div className="mt-4 flex items-center gap-2" aria-live="polite">
-                <p className="text-sm font-medium text-zinc-300">{statusLabel}</p>
+                <p className="text-sm font-medium text-muted-foreground">{statusLabel}</p>
                 {state === 'speaking' && (
                   <span className="flex items-end gap-1" aria-hidden>
                     <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
@@ -1458,7 +1458,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
               </div>
 
               {noSpeech && (
-                <p className="mt-1.5 text-center text-xs italic text-zinc-500">
+                <p className="mt-1.5 text-center text-xs italic text-muted-foreground/80">
                   Didn&apos;t catch that — take your time, still listening.
                 </p>
               )}
@@ -1471,7 +1471,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                 <div className="nx-rise mt-3 flex max-w-md items-start gap-2.5 rounded-2xl border border-[#f5a623]/25 bg-[#f5a623]/10 px-3.5 py-2.5 text-left">
                   <MicOff className="mt-0.5 h-4 w-4 shrink-0 text-[#f5a623]" aria-hidden />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs leading-relaxed text-zinc-300">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
                       {inIframe
                         ? 'The microphone is blocked in this preview frame. Open the app in a new tab to talk — voice mode starts instantly there.'
                         : 'Microphone access is blocked. Allow the mic in your browser to talk — or type below and NEXUS will still reply out loud.'}
@@ -1504,7 +1504,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                       initial={{ opacity: 0.4 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="text-center text-lg italic leading-snug text-zinc-400"
+                      className="text-center text-lg italic leading-snug text-muted-foreground"
                     >
                       {interim}
                     </motion.p>
@@ -1514,7 +1514,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
-                      className="text-center text-base leading-relaxed text-zinc-200"
+                      className="text-center text-base leading-relaxed text-foreground"
                       style={{
                         maxHeight: '4.4em',
                         overflow: 'hidden',
@@ -1539,8 +1539,8 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                         opacity: recentTurns.length === 1 ? 1 : 0.3 + (0.7 * (i + 1)) / recentTurns.length,
                       }}
                     >
-                      <p className="text-sm font-medium text-zinc-200">{t.user}</p>
-                      <p className="mt-0.5 text-sm leading-relaxed text-zinc-400">{t.reply}</p>
+                      <p className="text-sm font-medium text-foreground">{t.user}</p>
+                      <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{t.reply}</p>
                     </div>
                   ))}
                 </div>
@@ -1561,7 +1561,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
               onChange={(e) => setTextInput(e.target.value)}
               placeholder={micDenied ? 'Type a message — NEXUS will reply out loud…' : 'Type instead…'}
               aria-label="Type a message for NEXUS"
-              className="min-w-0 flex-1 bg-transparent py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+              className="min-w-0 flex-1 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/80"
             />
             <button
               type="submit"
@@ -1592,7 +1592,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                     role="menu"
                     aria-label="Choose language"
                   >
-                    <p className="px-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+                    <p className="px-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
                       Language
                     </p>
                     <div className="nx-scroll grid max-h-64 grid-cols-2 gap-1 overflow-y-auto">
@@ -1605,7 +1605,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                           className={`rounded-lg px-2.5 py-1.5 text-left text-xs transition ${
                             lang === l.code
                               ? 'font-semibold text-white'
-                              : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-200'
+                              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
                           }`}
                           style={lang === l.code ? { background: 'rgba(255,90,95,0.22)' } : undefined}
                         >
@@ -1620,7 +1620,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                 onClick={() => setShowLangs((v) => !v)}
                 aria-label="Change language"
                 aria-expanded={showLangs}
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:border-white/25 hover:bg-white/10"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-accent/50 text-muted-foreground transition hover:border-border hover:bg-accent"
               >
                 <Globe className="h-5 w-5" />
               </button>
@@ -1635,7 +1635,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
                 className={`flex h-12 w-12 items-center justify-center rounded-full border transition disabled:opacity-40 ${
                   muted
                     ? 'border-[#ff5a5f]/50 bg-[#ff5a5f]/15 text-[#ff8a8d]'
-                    : 'border-white/15 bg-white/5 text-zinc-200 hover:bg-white/10'
+                    : 'border-border bg-accent/50 text-foreground hover:bg-accent'
                 }`}
               >
                 {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}

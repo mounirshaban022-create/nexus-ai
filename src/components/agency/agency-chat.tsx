@@ -74,7 +74,7 @@ function AttachmentCard({ item }: { item: unknown }) {
         src={url}
         alt={title || 'Generated image'}
         loading="lazy"
-        className="w-full max-w-sm rounded-xl border border-zinc-800/60"
+        className="w-full max-w-sm rounded-xl border border-border/60"
       />
     )
   }
@@ -85,19 +85,19 @@ function AttachmentCard({ item }: { item: unknown }) {
         href={url}
         download
         aria-label={title ? `Download ${title}` : 'Download document'}
-        className="flex max-w-sm items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 transition hover:border-zinc-700"
+        className="flex max-w-sm items-center gap-3 rounded-xl border border-border bg-muted/60 p-3 transition hover:border-border"
       >
         <FileText className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{title || 'Document'}</span>
-        <Download className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{title || 'Document'}</span>
+        <Download className="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden />
       </a>
     )
   }
 
   return (
-    <div className="flex max-w-sm items-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-3 py-2">
-      <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-      <span className="truncate text-xs text-zinc-400">{title || type || 'Attachment'}</span>
+    <div className="flex max-w-sm items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2">
+      <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" aria-hidden />
+      <span className="truncate text-xs text-muted-foreground">{title || type || 'Attachment'}</span>
     </div>
   )
 }
@@ -124,7 +124,7 @@ function ThinkingPanel({ thinking }: { thinking: string }) {
       <button
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex min-h-[32px] items-center gap-1.5 text-xs text-zinc-500 transition hover:text-zinc-400"
+        className="flex min-h-[32px] items-center gap-1.5 text-xs text-muted-foreground/80 transition hover:text-muted-foreground"
       >
         <Brain className="h-3.5 w-3.5 text-amber-400" aria-hidden />
         Thought process
@@ -134,7 +134,7 @@ function ThinkingPanel({ thinking }: { thinking: string }) {
         />
       </button>
       {open && (
-        <p className="mt-1 whitespace-pre-wrap border-l-2 border-amber-400/30 pl-3 text-xs italic leading-relaxed text-zinc-500">
+        <p className="mt-1 whitespace-pre-wrap border-l-2 border-amber-400/30 pl-3 text-xs italic leading-relaxed text-muted-foreground/80">
           {thinking}
         </p>
       )}
@@ -151,8 +151,8 @@ function ToolChip({ msg }: { msg: ChatMsg }) {
           msg.toolStatus === 'error'
             ? 'border-red-900/50 bg-red-950/30 text-red-300'
             : msg.toolStatus === 'done'
-              ? 'border-zinc-800/60 bg-zinc-900/40 text-zinc-500'
-              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400'
+              ? 'border-border/60 bg-muted/40 text-muted-foreground/80'
+              : 'border-border bg-muted/60 text-muted-foreground'
         }`}
       >
         {msg.toolStatus === 'running' ? (
@@ -599,11 +599,11 @@ export function AgencyChat({
   return (
     <div className="flex h-[calc(100vh-56px)] flex-col md:h-screen">
       {/* Header */}
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-800/60 px-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/60 px-4">
         <button
           onClick={() => setView(agentSlug ? { type: 'agent', agentSlug } : { type: 'home' })}
           aria-label={agentSlug ? `Back to ${agent.name} profile` : 'Back to home'}
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-400 transition hover:bg-zinc-800/60 hover:text-zinc-100"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-accent/60 hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" aria-hidden />
         </button>
@@ -618,7 +618,7 @@ export function AgencyChat({
             {agent.emoji}
           </span>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-zinc-100">{agent.name}</p>
+            <p className="truncate text-sm font-semibold text-foreground">{agent.name}</p>
             {division && (
               <span
                 className="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -633,7 +633,7 @@ export function AgencyChat({
           onClick={startNew}
           aria-label="New conversation"
           title="New conversation"
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-400 transition hover:bg-zinc-800/60 hover:text-zinc-100"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-accent/60 hover:text-foreground"
         >
           <RotateCcw className="h-4 w-4" aria-hidden />
         </button>
@@ -666,11 +666,11 @@ export function AgencyChat({
               >
                 {agent.emoji}
               </div>
-              <h2 className="mt-5 font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-zinc-100">
+              <h2 className="mt-5 font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-foreground">
                 {agent.name}
               </h2>
-              {agent.vibe && <p className="mt-1.5 text-sm italic text-zinc-500">{agent.vibe}</p>}
-              <p className="mt-4 max-w-md text-xs leading-relaxed text-zinc-600">
+              {agent.vibe && <p className="mt-1.5 text-sm italic text-muted-foreground/80">{agent.vibe}</p>}
+              <p className="mt-4 max-w-md text-xs leading-relaxed text-muted-foreground/80">
                 {agent.description}
               </p>
               <div className="mt-8 flex flex-col items-stretch gap-2 sm:items-center">
@@ -678,7 +678,7 @@ export function AgencyChat({
                   <button
                     key={s}
                     onClick={() => send(s)}
-                    className="min-h-[44px] rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 text-left text-sm text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100 sm:min-w-[320px]"
+                    className="min-h-[44px] rounded-xl border border-border bg-muted/60 px-4 py-2.5 text-left text-sm text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground sm:min-w-[320px]"
                   >
                     {s}
                   </button>
@@ -689,7 +689,7 @@ export function AgencyChat({
             messages.map((m) =>
               m.role === 'user' ? (
                 <div key={m.id} className="flex justify-end">
-                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-zinc-800 px-4 py-3 text-sm leading-relaxed text-zinc-100">
+                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-accent px-4 py-3 text-sm leading-relaxed text-foreground">
                     {m.content}
                   </div>
                 </div>
@@ -708,19 +708,19 @@ export function AgencyChat({
                   >
                     {agent.emoji}
                   </span>
-                  <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border border-zinc-800/60 bg-zinc-900/80 px-4 py-3">
+                  <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border border-border/60 bg-muted/80 px-4 py-3">
                     {m.thinking ? <ThinkingPanel thinking={m.thinking} /> : null}
                     {m.isError ? (
                       <p className="text-sm leading-relaxed text-red-400">{m.content}</p>
                     ) : m.streaming && !m.content ? (
-                      <span className="flex items-center gap-2 text-xs text-zinc-500">
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground/80">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" aria-hidden />
                         thinking…
                       </span>
                     ) : (
                       /* Theme-aware prose (no forced `dark` wrapper — it made
                          bold/links invisible in light mode) */
-                      <div className="text-sm text-zinc-100">
+                      <div className="text-sm text-foreground">
                         <Markdown content={m.content} />
                         {m.streaming && (
                           <span
@@ -740,14 +740,14 @@ export function AgencyChat({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-zinc-800/60 p-3 md:p-4">
+      <div className="shrink-0 border-t border-border/60 p-3 md:p-4">
         <div className="mx-auto w-full max-w-3xl">
           <form
             onSubmit={(e) => {
               e.preventDefault()
               send(input)
             }}
-            className="flex items-end gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-2 transition focus-within:border-zinc-600"
+            className="flex items-end gap-2 rounded-2xl border border-border bg-muted p-2 transition focus-within:border-border"
           >
             <textarea
               ref={textareaRef}
@@ -757,7 +757,7 @@ export function AgencyChat({
               rows={1}
               placeholder={`Message ${agent.name}…`}
               aria-label={`Message ${agent.name}`}
-              className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/80"
             />
             <button
               type="button"
@@ -768,7 +768,7 @@ export function AgencyChat({
               className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition ${
                 thinkingEnabled
                   ? 'bg-amber-400/15 text-amber-400'
-                  : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                  : 'text-muted-foreground/80 hover:bg-accent hover:text-muted-foreground'
               }`}
             >
               <Brain className="h-4 w-4" aria-hidden />
@@ -777,7 +777,7 @@ export function AgencyChat({
               type="submit"
               disabled={!canSend}
               aria-label="Send message"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-400 text-zinc-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-400 text-foreground transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {streaming ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -786,7 +786,7 @@ export function AgencyChat({
               )}
             </button>
           </form>
-          <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
+          <p className="mt-2 px-1 text-center text-[10px] text-muted-foreground/80">
             {agent.name} can use NEXUS superpowers — images, documents, code, live data & search.
           </p>
         </div>

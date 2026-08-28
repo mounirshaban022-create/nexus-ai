@@ -90,7 +90,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
   const year = new Date().getFullYear()
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-x-clip bg-[#09090b] text-zinc-100">
+    <div className="relative flex min-h-screen flex-col overflow-x-clip bg-background text-foreground">
       {/* Ambient brand glow */}
       <div
         aria-hidden
@@ -98,14 +98,14 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
       />
 
       {/* ---------- Sticky glass header ---------- */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#09090b]/70 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <BrandLockup height={24} />
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onGuest}
-              className="hidden rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100 sm:block"
+              className="hidden rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-accent/50 hover:text-foreground sm:block"
             >
               Explore as guest
             </button>
@@ -141,10 +141,10 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
 
             <motion.p
               variants={fadeUp}
-              className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-zinc-400 sm:text-lg"
+              className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg"
             >
               Chat · images · videos · documents · code · voice · email · WhatsApp · real browser —
-              and <span className="text-zinc-200">{AGENCY_STATS.agents} specialists</span> that
+              and <span className="text-foreground">{AGENCY_STATS.agents} specialists</span> that
               auto-take-over the moment you need them.
             </motion.p>
 
@@ -160,7 +160,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
               <button
                 type="button"
                 onClick={onGuest}
-                className="flex min-h-[48px] items-center rounded-full border border-white/15 px-7 text-sm font-semibold text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100"
+                className="flex min-h-[48px] items-center rounded-full border border-border px-7 text-sm font-semibold text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
               >
                 Explore as guest
               </button>
@@ -178,7 +178,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
                     <span className="nx-gradient-text font-display block text-3xl font-bold sm:text-4xl">
                       {s.value}
                     </span>
-                    <span className="mt-1 block text-xs uppercase tracking-widest text-zinc-500">
+                    <span className="mt-1 block text-xs uppercase tracking-widest text-muted-foreground/80">
                       {s.label}
                     </span>
                   </dd>
@@ -196,7 +196,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
               <h2 id="nx-caps" className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 Everything, in one chat.
               </h2>
-              <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-zinc-500">
+              <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground/80">
                 No add-ons, no plugins — every power is native to the conversation.
               </p>
             </motion.div>
@@ -211,8 +211,8 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
                   >
                     <c.icon className="h-5 w-5" />
                   </span>
-                  <h3 className="text-sm font-semibold text-zinc-100">{c.title}</h3>
-                  <p className="mt-1.5 text-[13px] leading-relaxed text-zinc-500">{c.desc}</p>
+                  <h3 className="text-sm font-semibold text-foreground">{c.title}</h3>
+                  <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground/80">{c.desc}</p>
                 </motion.div>
               ))}
             </div>
@@ -220,7 +220,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
         </section>
 
         {/* ---------- How it works ---------- */}
-        <section className="border-y border-white/5 bg-white/[0.015]" aria-labelledby="nx-how">
+        <section className="border-y border-border/60 bg-muted/50" aria-labelledby="nx-how">
           <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
             <motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }}>
               <motion.div variants={fadeUp} className="text-center">
@@ -232,11 +232,11 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
               <div className="mt-12 grid grid-cols-1 gap-8 sm:grid-cols-3 sm:gap-6">
                 {STEPS.map((s) => (
                   <motion.div key={s.n} variants={fadeUp} className="relative">
-                    <span className="font-display text-5xl font-bold text-white/8" aria-hidden>
+                    <span className="font-display text-5xl font-bold text-foreground/8" aria-hidden>
                       {s.n}
                     </span>
-                    <h3 className="font-display mt-3 text-lg font-semibold text-zinc-100">{s.title}</h3>
-                    <p className="mt-2 text-[13px] leading-relaxed text-zinc-500">{s.desc}</p>
+                    <h3 className="font-display mt-3 text-lg font-semibold text-foreground">{s.title}</h3>
+                    <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground/80">{s.desc}</p>
                   </motion.div>
                 ))}
               </div>
@@ -260,7 +260,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
             <h2 className="font-display relative text-3xl font-bold tracking-tight sm:text-4xl">
               Ready when <span className="nx-gradient-text">you are.</span>
             </h2>
-            <p className="relative mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-500">
+            <p className="relative mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted-foreground/80">
               Start free — your first specialist is already on call.
             </p>
             <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -275,7 +275,7 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
               <button
                 type="button"
                 onClick={onGuest}
-                className="flex min-h-[48px] items-center rounded-full border border-white/15 px-7 text-sm font-semibold text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100"
+                className="flex min-h-[48px] items-center rounded-full border border-border px-7 text-sm font-semibold text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
               >
                 Explore as guest
               </button>
@@ -285,11 +285,11 @@ export function NexusLanding({ onJoin, onGuest }: { onJoin: () => void; onGuest:
       </main>
 
       {/* ---------- Sticky footer ---------- */}
-      <footer className="mt-auto border-t border-white/5 pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 text-sm text-zinc-500 sm:flex-row sm:px-6">
+      <footer className="mt-auto border-t border-border/60 pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 text-sm text-muted-foreground/80 sm:flex-row sm:px-6">
           <BrandLockup height={18} />
           <p>
-            Built by <span className="font-medium text-zinc-300">Mounir Shaaban</span>
+            Built by <span className="font-medium text-muted-foreground">Mounir Shaaban</span>
           </p>
           <p>© {year} NEXUS</p>
         </div>

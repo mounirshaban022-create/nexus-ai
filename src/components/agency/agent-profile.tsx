@@ -202,13 +202,13 @@ export function AgencyAgentProfile({
       <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
         <button
           onClick={() => setView({ type: 'roster' })}
-          className="mb-6 flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 transition hover:text-zinc-200"
+          className="mb-6 flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden /> Back to roster
         </button>
-        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/40 py-16 text-center">
-          <p className="text-sm font-medium text-zinc-300">Agent not found.</p>
-          <p className="mt-1 text-xs text-zinc-500">
+        <div className="rounded-2xl border border-border/60 bg-muted/40 py-16 text-center">
+          <p className="text-sm font-medium text-muted-foreground">Agent not found.</p>
+          <p className="mt-1 text-xs text-muted-foreground/80">
             This specialist may have left the agency. Browse the roster to find another.
           </p>
         </div>
@@ -223,7 +223,7 @@ export function AgencyAgentProfile({
       {/* Back */}
       <button
         onClick={() => setView({ type: 'roster' })}
-        className="mb-6 flex min-h-[44px] items-center gap-2 text-sm text-zinc-400 transition hover:text-zinc-200"
+        className="mb-6 flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden /> Roster
       </button>
@@ -233,7 +233,7 @@ export function AgencyAgentProfile({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
-        className="rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-6 md:p-8"
+        className="rounded-2xl border border-border/60 bg-muted/60 p-6 md:p-8"
         aria-label={`${agent.name} profile`}
       >
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
@@ -246,7 +246,7 @@ export function AgencyAgentProfile({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-zinc-100 md:text-4xl">
+              <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
                 {agent.name}
               </h1>
               {division && (
@@ -260,14 +260,14 @@ export function AgencyAgentProfile({
               )}
             </div>
             {agent.vibe && (
-              <p className="mt-1.5 text-sm italic text-zinc-400">{agent.vibe}</p>
+              <p className="mt-1.5 text-sm italic text-muted-foreground">{agent.vibe}</p>
             )}
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-300">
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               {agent.description}
             </p>
             <button
               onClick={() => startChat(setView, agent.slug)}
-              className="mt-5 inline-flex h-11 items-center gap-2 rounded-xl bg-amber-400 px-5 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+              className="mt-5 inline-flex h-11 items-center gap-2 rounded-xl bg-amber-400 px-5 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
             >
               <MessageSquare className="h-4 w-4" aria-hidden />
               Start conversation
@@ -278,17 +278,17 @@ export function AgencyAgentProfile({
 
       {/* Suggested openers */}
       <section className="mt-8" aria-label="Suggested openers">
-        <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Start with</p>
+        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">Start with</p>
         <div className="mt-3 flex flex-wrap gap-2">
           {openers.map((opener) => (
             <button
               key={opener}
               onClick={() => startChat(setView, agent.slug, opener)}
-              className="group flex min-h-[44px] max-w-full items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 text-left text-xs text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100"
+              className="group flex min-h-[44px] max-w-full items-center gap-2 rounded-xl border border-border bg-muted/60 px-4 py-2.5 text-left text-xs text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground"
             >
               <span className="line-clamp-2">{opener}</span>
               <ArrowUpRight
-                className="h-3.5 w-3.5 shrink-0 text-zinc-600 transition group-hover:text-amber-400"
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80 transition group-hover:text-amber-400"
                 aria-hidden
               />
             </button>
@@ -299,8 +299,8 @@ export function AgencyAgentProfile({
       {/* Recent conversations with this agent */}
       <section className="mt-8" aria-label="Recent conversations">
         <div className="flex items-center gap-2">
-          <History className="h-4 w-4 text-zinc-500" aria-hidden />
-          <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+          <History className="h-4 w-4 text-muted-foreground/80" aria-hidden />
+          <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
             Recent conversations
           </p>
         </div>
@@ -309,12 +309,12 @@ export function AgencyAgentProfile({
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
-                className="h-16 animate-pulse rounded-xl border border-zinc-800/60 bg-zinc-900/40"
+                className="h-16 animate-pulse rounded-xl border border-border/60 bg-muted/40"
               />
             ))}
           </div>
         ) : sessions.length === 0 ? (
-          <p className="mt-3 rounded-xl border border-zinc-800/60 bg-zinc-900/40 px-4 py-6 text-center text-xs text-zinc-500">
+          <p className="mt-3 rounded-xl border border-border/60 bg-muted/40 px-4 py-6 text-center text-xs text-muted-foreground/80">
             No conversations with {agent.name} yet — start the first one above.
           </p>
         ) : (
@@ -323,19 +323,19 @@ export function AgencyAgentProfile({
               <li key={s.id}>
                 <button
                   onClick={() => setView({ type: 'chat', agentSlug: agent.slug, sessionId: s.id })}
-                  className="flex w-full items-center justify-between gap-4 rounded-xl border border-zinc-800/60 bg-zinc-900/60 px-4 py-3 text-left transition hover:border-zinc-700 hover:bg-zinc-900"
+                  className="flex w-full items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/60 px-4 py-3 text-left transition hover:border-border hover:bg-muted"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-zinc-200">
+                    <span className="block truncate text-sm font-medium text-foreground">
                       {s.title || 'Untitled conversation'}
                     </span>
                     {s.preview && (
-                      <span className="mt-0.5 block truncate text-xs text-zinc-500">
+                      <span className="mt-0.5 block truncate text-xs text-muted-foreground/80">
                         {s.preview}
                       </span>
                     )}
                   </span>
-                  <span className="shrink-0 text-[11px] text-zinc-600">
+                  <span className="shrink-0 text-[11px] text-muted-foreground/80">
                     {relativeTime(s.updatedAt)}
                   </span>
                 </button>

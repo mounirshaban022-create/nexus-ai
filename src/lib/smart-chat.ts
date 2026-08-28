@@ -41,6 +41,10 @@ export interface SmartChatOptions {
   /** Per-request timeout in ms (passed through to externalChatCompletion).
    *  Defaults to 15s for voice, 120s otherwise. */
   timeoutMs?: number
+  /** SECURITY: the verified caller's userId. Required to access the user's
+   *  own connected AI provider key (Layer 1). null/undefined = skip Layer 1
+   *  (guests + background jobs use the premium + free pools only). */
+  userId?: string | null
 }
 
 /** Specialist models per task, per provider.
@@ -195,7 +199,7 @@ export async function smartChat(
   messages: ExternalChatMessage[] | Array<{ role: string; content: string }>,
   opts: SmartChatOptions = {}
 ): Promise<string> {
-  const { maxTokens = 4000, temperature = 0.7, builtinOnly = false, task = 'chat' } = opts
+  const { maxTokens = 4000, temperature = 0.7, builtinOnly = false, task = 'chat', userId = null } = opts
   const isVoiceTask = task === 'voice'
   const effectiveTimeoutMs = opts.timeoutMs ?? (isVoiceTask ? 15_000 : undefined)
   const maxModelAttempts = isVoiceTask ? 2 : 4
@@ -252,7 +256,7 @@ export async function smartChat(
 
   /* ---- Layer 1: the user's connected provider (their key, their quota) ---- */
   if (!builtinOnly) {
-    const provider = await getActiveAiProvider()
+    const provider = await getActiveAiProvider(userId)
     if (provider) {
       const providerSpecialists = TASK_SPECIALISTS_BY_PROVIDER[provider.providerId]
       const specialists = (providerSpecialists?.[task] ?? TASK_SPECIALISTS[task]) ?? TASK_SPECIALISTS.chat

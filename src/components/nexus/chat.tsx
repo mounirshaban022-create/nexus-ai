@@ -787,15 +787,15 @@ export function NexusChat(props: NexusChatProps) {
   return (
     <div className="flex h-[calc(100dvh_-_111px_-_env(safe-area-inset-bottom))] flex-col md:h-screen">
       {/* ---------- Header: current agent identity ---------- */}
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/8 px-3 sm:px-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-3 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {isPinned ? (
             <>
               <AgentAvatar agent={headerAgent} size={34} />
               <div className="min-w-0">
-                <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                   <span className="truncate">{headerAgent.name}</span>
-                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                     <Pin className="h-2.5 w-2.5" aria-hidden />
                     {t('chat.pinned')}
                   </span>
@@ -811,7 +811,7 @@ export function NexusChat(props: NexusChatProps) {
                 onClick={() => onPinnedAgentChange(null)}
                 aria-label={t('chat.unpinAgent', { name: headerAgent.name })}
                 title={t('chat.unpin')}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground/80 transition hover:bg-accent hover:text-foreground"
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
@@ -820,13 +820,13 @@ export function NexusChat(props: NexusChatProps) {
             <>
               <AgentAvatar agent={headerAgent} size={34} />
               <div className="min-w-0">
-                <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                   <span className="truncate">{headerAgent.name}</span>
-                  <span className="shrink-0 rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+                  <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                     {t('chat.auto')}
                   </span>
                 </p>
-                <p className="truncate text-[11px] text-zinc-500">
+                <p className="truncate text-[11px] text-muted-foreground/80">
                   {assign.divisionLabel ?? headerDivision?.label ?? t('chat.core')}
                 </p>
               </div>
@@ -834,14 +834,14 @@ export function NexusChat(props: NexusChatProps) {
           ) : (
             <>
               <BrandMark size={26} />
-              <p className="text-sm font-semibold text-zinc-100">NEXUS</p>
+              <p className="text-sm font-semibold text-foreground">NEXUS</p>
             </>
           )}
         </div>
         <button
           type="button"
           onClick={props.onOpenAgents}
-          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/5"
+          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-border hover:bg-accent/50"
         >
           <Users className="h-3.5 w-3.5" aria-hidden />
           {t('nav.agents')}
@@ -865,11 +865,11 @@ export function NexusChat(props: NexusChatProps) {
               </motion.div>
               <motion.h1
                 variants={fadeUp}
-                className="font-display mt-5 text-3xl font-bold tracking-tight text-zinc-100 sm:text-4xl"
+                className="font-display mt-5 text-3xl font-bold tracking-tight text-foreground sm:text-4xl"
               >
                 {t('chat.welcomeTitleA')} <span className="nx-gradient-text">{t('chat.welcomeTitleB')}</span>
               </motion.h1>
-              <motion.p variants={fadeUp} className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-zinc-500">
+              <motion.p variants={fadeUp} className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted-foreground/80">
                 {t('chat.welcomeSub')}
               </motion.p>
 
@@ -892,8 +892,8 @@ export function NexusChat(props: NexusChatProps) {
                     >
                       <c.icon className="h-5 w-5" />
                     </span>
-                    <span className="block text-sm font-semibold text-zinc-100">{t(c.titleKey)}</span>
-                    <span className="mt-1 block text-xs leading-relaxed text-zinc-500">{t(c.descKey)}</span>
+                    <span className="block text-sm font-semibold text-foreground">{t(c.titleKey)}</span>
+                    <span className="mt-1 block text-xs leading-relaxed text-muted-foreground/80">{t(c.descKey)}</span>
                   </motion.button>
                 ))}
               </motion.div>
@@ -909,7 +909,7 @@ export function NexusChat(props: NexusChatProps) {
                         setInput(s)
                         textareaRef.current?.focus()
                       }}
-                      className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-zinc-300 transition hover:border-[#ff5a5f]/40 hover:bg-white/[0.06] hover:text-zinc-100"
+                      className="rounded-full border border-border bg-muted/50 px-3.5 py-2 text-xs text-muted-foreground transition hover:border-[#ff5a5f]/40 hover:bg-muted hover:text-foreground"
                     >
                       {s}
                     </button>
@@ -924,14 +924,14 @@ export function NexusChat(props: NexusChatProps) {
               if (m.role === 'user') {
                 return (
                   <div key={m.id} className="flex justify-end">
-                    <div className="nx-rise max-w-[85%] rounded-2xl rounded-ee-md bg-white/8 px-4 py-2.5">
+                    <div className="nx-rise max-w-[85%] rounded-2xl rounded-ee-md bg-accent px-4 py-2.5">
                       {m.attachName ? (
-                        <p className="mb-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+                        <p className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                           <FileText className="h-3 w-3 shrink-0" aria-hidden />
                           <span className="truncate">{m.attachName}</span>
                         </p>
                       ) : null}
-                      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-100">
+                      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
                         {m.content}
                       </p>
                     </div>
@@ -997,7 +997,7 @@ export function NexusChat(props: NexusChatProps) {
                           <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                         </span>
                         {statusText ? (
-                          <span className="nx-status-shimmer text-xs text-zinc-500">{localizeStatus(statusText)}</span>
+                          <span className="nx-status-shimmer text-xs text-muted-foreground/80">{localizeStatus(statusText)}</span>
                         ) : null}
                       </span>
                     ) : (
@@ -1006,7 +1006,7 @@ export function NexusChat(props: NexusChatProps) {
                        * render dark text. (A hardcoded `dark` wrapper here used
                        * to force near-white bold/links on the light background
                        * — the "invisible words in light mode" bug.) */
-                      <div className="text-sm text-zinc-100">
+                      <div className="text-sm text-foreground">
                         <Markdown content={m.content} />
                         {m.streaming ? (
                           <span
@@ -1038,7 +1038,7 @@ export function NexusChat(props: NexusChatProps) {
                       <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                       <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                     </span>
-                    <span className="nx-status-shimmer text-xs text-zinc-500">
+                    <span className="nx-status-shimmer text-xs text-muted-foreground/80">
                       {localizeStatus(statusText) || t('chat.thinking')}
                     </span>
                   </div>
@@ -1047,7 +1047,7 @@ export function NexusChat(props: NexusChatProps) {
             })()}
 
             {streaming && messages.length === 0 ? (
-              <p className="flex items-center gap-2 ps-11 text-xs text-zinc-500">
+              <p className="flex items-center gap-2 ps-11 text-xs text-muted-foreground/80">
                 <span className="nx-dot h-1.5 w-1.5 rounded-full bg-[#ff5a5f]" />
                 {localizeStatus(statusText) || t('chat.routing')}
               </p>
@@ -1065,14 +1065,14 @@ export function NexusChat(props: NexusChatProps) {
             </p>
           ) : null}
           {attach ? (
-            <div className="nx-rise mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-300">
+            <div className="nx-rise mb-2 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               <FileText className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{attach.filename}</span>
               <button
                 type="button"
                 onClick={() => setAttach(null)}
                 aria-label={t('chat.removeAttachment')}
-                className="shrink-0 rounded-md p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+                className="shrink-0 rounded-md p-0.5 text-muted-foreground/80 transition hover:bg-accent hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" aria-hidden />
               </button>
@@ -1113,7 +1113,7 @@ export function NexusChat(props: NexusChatProps) {
               disabled={streaming}
               aria-label={t('chat.attachFile')}
               title={t('chat.attachFile')}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground/80 transition hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Paperclip className="h-[18px] w-[18px]" aria-hidden />
             </button>
@@ -1126,7 +1126,7 @@ export function NexusChat(props: NexusChatProps) {
               disabled={streaming}
               placeholder={placeholder}
               aria-label={placeholder}
-              className="max-h-[144px] min-h-[40px] flex-1 resize-none bg-transparent px-1.5 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-60"
+              className="max-h-[144px] min-h-[40px] flex-1 resize-none bg-transparent px-1.5 py-2.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/80 disabled:opacity-60"
             />
             <button
               type="button"
@@ -1134,7 +1134,7 @@ export function NexusChat(props: NexusChatProps) {
               disabled={streaming}
               aria-label={t('chat.voiceMode')}
               title={t('chat.voiceMode')}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground/80 transition hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Mic className="h-[18px] w-[18px]" aria-hidden />
             </button>
@@ -1159,7 +1159,7 @@ export function NexusChat(props: NexusChatProps) {
               </button>
             )}
           </form>
-          <p className="mt-2 px-1 text-center text-[10px] text-zinc-600">
+          <p className="mt-2 px-1 text-center text-[10px] text-muted-foreground/80">
             {pinnedAgent
               ? t('chat.hintPinned', { name: headerAgent.name })
               : t('chat.hintAuto', { name: headerAgent.name })}

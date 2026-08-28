@@ -29,7 +29,7 @@ export function AgencyLanding({
   onGuest: () => void
 }) {
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#09090b] text-zinc-100">
+    <div className="relative flex min-h-screen flex-col bg-background text-foreground">
       {/* Ambient glow */}
       <div
         aria-hidden
@@ -40,11 +40,11 @@ export function AgencyLanding({
       <header className="relative z-10 flex items-center justify-between px-6 py-5 md:px-10">
         <div className="flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400">
-            <Hexagon className="h-5 w-5 text-zinc-950" fill="currentColor" aria-hidden />
+            <Hexagon className="h-5 w-5 text-foreground" fill="currentColor" aria-hidden />
           </span>
           <div>
             <p className="font-display text-lg font-bold leading-none tracking-tight">NEXUS</p>
-            <p className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+            <p className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-muted-foreground/80">
               The Agency
             </p>
           </div>
@@ -52,7 +52,7 @@ export function AgencyLanding({
         <button
           type="button"
           onClick={onJoin}
-          className="flex h-11 items-center justify-center rounded-xl bg-amber-400 px-5 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+          className="flex h-11 items-center justify-center rounded-xl bg-amber-400 px-5 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
         >
           Join the Agency
         </button>
@@ -68,7 +68,7 @@ export function AgencyLanding({
         >
           <motion.p
             variants={item}
-            className="text-[11px] uppercase tracking-[0.2em] text-zinc-500"
+            className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80"
           >
             NEXUS presents · The Agency
           </motion.p>
@@ -78,7 +78,7 @@ export function AgencyLanding({
           >
             Hire the entire agency.
           </motion.h1>
-          <motion.p variants={item} className="mt-6 max-w-2xl text-base leading-relaxed text-zinc-400 md:text-lg">
+          <motion.p variants={item} className="mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
             {AGENCY_STATS.agents} specialist AI agents across {AGENCY_STATS.divisions}{' '}
             divisions — designers, engineers, marketers, analysts. Each with real
             personality, real process, real deliverables. One conversation away.
@@ -101,12 +101,12 @@ export function AgencyLanding({
           </motion.div>
 
           {/* Stats line */}
-          <motion.p variants={item} className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-zinc-400">
-            <span className="font-medium text-zinc-300">{AGENCY_STATS.agents} specialists</span>
-            <span aria-hidden className="text-zinc-700">·</span>
-            <span className="font-medium text-zinc-300">{AGENCY_STATS.divisions} divisions</span>
-            <span aria-hidden className="text-zinc-700">·</span>
-            <span className="font-medium text-zinc-300">Free while in beta</span>
+          <motion.p variants={item} className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <span className="font-medium text-muted-foreground">{AGENCY_STATS.agents} specialists</span>
+            <span aria-hidden className="text-muted-foreground/80">·</span>
+            <span className="font-medium text-muted-foreground">{AGENCY_STATS.divisions} divisions</span>
+            <span aria-hidden className="text-muted-foreground/80">·</span>
+            <span className="font-medium text-muted-foreground">Free while in beta</span>
           </motion.p>
 
           {/* CTAs */}
@@ -114,14 +114,14 @@ export function AgencyLanding({
             <button
               type="button"
               onClick={onJoin}
-              className="flex h-12 w-full items-center justify-center rounded-xl bg-amber-400 px-8 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 sm:w-auto"
+              className="flex h-12 w-full items-center justify-center rounded-xl bg-amber-400 px-8 text-sm font-semibold text-foreground transition hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 sm:w-auto"
             >
               Join the Agency
             </button>
             <button
               type="button"
               onClick={onGuest}
-              className="flex h-12 w-full items-center justify-center rounded-xl border border-zinc-700 px-8 text-sm font-medium text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500 sm:w-auto"
+              className="flex h-12 w-full items-center justify-center rounded-xl border border-border px-8 text-sm font-medium text-muted-foreground transition hover:border-border hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:w-auto"
             >
               Explore as guest
             </button>
@@ -132,7 +132,7 @@ export function AgencyLanding({
       {/* Featured specialists strip */}
       <section className="relative z-10 py-16" aria-labelledby="featured-heading">
         <div className="mx-auto w-full max-w-6xl px-6">
-          <p id="featured-heading" className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+          <p id="featured-heading" className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">
             Meet the specialists
           </p>
           <div className="agency-scroll -mx-6 mt-6 flex gap-4 overflow-x-auto px-6 pb-4">
@@ -145,7 +145,7 @@ export function AgencyLanding({
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: '-40px' }}
                   transition={{ duration: 0.45, ease: 'easeOut', delay: i * 0.05 }}
-                  className="w-[240px] flex-shrink-0 rounded-2xl border border-zinc-800/60 bg-zinc-900/60 p-5"
+                  className="w-[240px] flex-shrink-0 rounded-2xl border border-border/60 bg-muted/60 p-5"
                 >
                   <div
                     className="flex h-11 w-11 items-center justify-center rounded-xl text-xl"
@@ -153,7 +153,7 @@ export function AgencyLanding({
                   >
                     <span aria-hidden>{a.emoji}</span>
                   </div>
-                  <h3 className="mt-4 font-semibold text-zinc-100">{a.name}</h3>
+                  <h3 className="mt-4 font-semibold text-foreground">{a.name}</h3>
                   {div && (
                     <span
                       className="mt-2 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-medium"
@@ -162,7 +162,7 @@ export function AgencyLanding({
                       {div.label}
                     </span>
                   )}
-                  <p className="mt-3 text-sm leading-relaxed text-zinc-500 italic line-clamp-2">
+                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground/80 italic line-clamp-2">
                     {a.vibe}
                   </p>
                 </motion.article>
@@ -173,9 +173,9 @@ export function AgencyLanding({
       </section>
 
       {/* Footer — pinned to viewport bottom when content is short */}
-      <footer className="relative z-10 mt-auto border-t border-zinc-800/60 py-8">
-        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-3 px-6 text-xs text-zinc-500 sm:flex-row">
-          <p className="font-display font-semibold text-zinc-400">NEXUS — The Agency</p>
+      <footer className="relative z-10 mt-auto border-t border-border/60 py-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-3 px-6 text-xs text-muted-foreground/80 sm:flex-row">
+          <p className="font-display font-semibold text-muted-foreground">NEXUS — The Agency</p>
           <p>Agent roster: agency-agents (MIT)</p>
           <p>© 2026</p>
         </div>

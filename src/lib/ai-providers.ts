@@ -335,9 +335,15 @@ export interface ResolvedAiProvider {
 }
 
 /** Returns the first connected provider, or null. */
-export async function getActiveAiProvider(): Promise<ResolvedAiProvider | null> {
+/**
+ * SECURITY: AI provider keys are PRIVATE per user. Pass the verified
+ * session's userId to fetch the caller's own configured provider.
+ * null userId → null (guests use the built-in pool, never a stored key).
+ */
+export async function getActiveAiProvider(userId?: string | null): Promise<ResolvedAiProvider | null> {
+  if (!userId) return null
   const provider = await db.aiProvider.findFirst({
-    where: { status: 'connected' },
+    where: { userId, status: 'connected' },
     orderBy: { createdAt: 'asc' },
   })
   if (!provider) return null

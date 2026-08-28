@@ -17,7 +17,14 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
     }
     const { id } = await context.params
-    await db.aiProvider.delete({ where: { id } })
+    // SECURITY: ownership check — deleteMany with userId filter is atomic;
+    // returns count=0 when the id belongs to another user (no leak).
+    const result = await db.aiProvider.deleteMany({
+      where: { id, userId: session.userId },
+    })
+    if (result.count === 0) {
+      return NextResponse.json({ error: 'Provider not found.' }, { status: 404 })
+    }
     return NextResponse.json({ success: true })
   } catch {
     return NextResponse.json({ error: 'Failed to remove provider.' }, { status: 500 })

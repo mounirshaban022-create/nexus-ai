@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
+import { getVerifiedSession } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 const requestSchema = z.object({
@@ -33,7 +34,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: validated.error }, { status: 400 })
     }
 
-    const result = await connector.execute(validated.args)
+    // SECURITY: resolve the caller's verified userId so email connectors
+    // only ever read the caller's own mailbox (never another user's).
+    const session = await getVerifiedSession(req)
+    const result = await connector.execute(validated.args, { userId: session?.userId ?? null })
     const text = JSON.stringify(result)
     return NextResponse.json({
       result: text.length > 6000 ? { truncated: true, preview: text.slice(0, 6000) } : result,

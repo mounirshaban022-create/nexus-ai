@@ -17,7 +17,15 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
     }
     const { id } = await context.params
-    await db.emailAccount.delete({ where: { id } })
+    // SECURITY: ownership check — only the account's owner may delete it.
+    // deleteMany with the userId filter atomically guards against cross-user
+    // deletion (returns count=0 when the id belongs to someone else).
+    const result = await db.emailAccount.deleteMany({
+      where: { id, userId: session.userId },
+    })
+    if (result.count === 0) {
+      return NextResponse.json({ error: 'Account not found.' }, { status: 404 })
+    }
     return NextResponse.json({ success: true })
   } catch {
     return NextResponse.json({ error: 'Failed to delete account.' }, { status: 500 })

@@ -343,22 +343,22 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       {/* Toolbar: title, count badge, search, category chips */}
-      <div className="shrink-0 border-b border-white/8 px-4 py-4 md:px-5">
+      <div className="shrink-0 border-b border-border px-4 py-4 md:px-5">
         <div className="mx-auto w-full max-w-5xl">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2.5">
-                <h2 className="font-display text-lg font-bold tracking-tight text-zinc-100">
+                <h2 className="font-display text-lg font-bold tracking-tight text-foreground">
                   Agent Skills
                 </h2>
                 <span
-                  className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-zinc-400"
+                  className="shrink-0 rounded-full border border-border bg-accent/50 px-2.5 py-1 text-xs font-medium text-muted-foreground"
                   aria-live="polite"
                 >
                   {countLabel}
                 </span>
               </div>
-              <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-zinc-500">
+              <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-muted-foreground/80">
                 {total || 79} CLI-Anything skills that let NEXUS control real apps — Blender, GIMP,
                 Obsidian, LibreOffice, browser automation, n8n, Zoom, mailchimp and more.
               </p>
@@ -366,15 +366,15 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
 
             {/* Search (debounced 250ms, filters live) */}
             <div className="lg:w-80 lg:shrink-0">
-              <div className="flex h-11 items-center gap-2.5 rounded-xl border border-white/10 bg-black/40 px-3.5 transition focus-within:border-[#ff5a5f]/45 focus-within:shadow-[0_0_0_4px_rgba(255,90,95,0.08)]">
-                <Search className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+              <div className="flex h-11 items-center gap-2.5 rounded-xl border border-border bg-input px-3.5 transition focus-within:border-[#ff5a5f]/45 focus-within:shadow-[0_0_0_4px_rgba(255,90,95,0.08)]">
+                <Search className="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden />
                 <input
                   value={rawQuery}
                   onChange={(e) => setRawQuery(e.target.value)}
                   type="search"
                   placeholder="Search skills — try “blender” or “browser”…"
                   aria-label="Search skills"
-                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/80"
                 />
                 {rawQuery && (
                   <button
@@ -384,7 +384,7 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
                       setQuery('')
                     }}
                     aria-label="Clear search"
-                    className="rounded-lg p-1 text-zinc-500 transition hover:text-zinc-200"
+                    className="rounded-lg p-1 text-muted-foreground/80 transition hover:text-foreground"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -422,7 +422,7 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
                 type="button"
                 onClick={() => setShowAllCats((v) => !v)}
                 aria-expanded={showAllCats}
-                className="flex min-h-[34px] shrink-0 items-center rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-medium text-zinc-400 transition hover:border-white/25 hover:text-zinc-200"
+                className="flex min-h-[34px] shrink-0 items-center rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:border-border hover:text-foreground"
               >
                 {showAllCats ? 'Show less' : `+${hiddenCatCount} more`}
               </button>
@@ -438,10 +438,10 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
             <SkeletonGrid />
           ) : loadError ? (
             <div className="flex flex-col items-center gap-3 py-16 text-center">
-              <AlertTriangle className="h-9 w-9 text-zinc-600" aria-hidden />
+              <AlertTriangle className="h-9 w-9 text-muted-foreground/80" aria-hidden />
               <div>
-                <p className="text-sm font-medium text-zinc-300">Couldn&rsquo;t load the skills catalog</p>
-                <p className="mt-1 text-xs text-zinc-500">Check your connection and try again.</p>
+                <p className="text-sm font-medium text-muted-foreground">Couldn&rsquo;t load the skills catalog</p>
+                <p className="mt-1 text-xs text-muted-foreground/80">Check your connection and try again.</p>
               </div>
               <button
                 type="button"
@@ -468,10 +468,10 @@ export function SkillsMode({ onUseInChat }: SkillsModeProps) {
 
               {filtered.length === 0 && (
                 <div className="col-span-full flex flex-col items-center gap-3 py-16 text-center">
-                  <Puzzle className="h-9 w-9 text-zinc-600" aria-hidden />
+                  <Puzzle className="h-9 w-9 text-muted-foreground/80" aria-hidden />
                   <div>
-                    <p className="text-sm font-medium text-zinc-300">No skills match — try another word</p>
-                    <p className="mt-1 text-xs text-zinc-500">
+                    <p className="text-sm font-medium text-muted-foreground">No skills match — try another word</p>
+                    <p className="mt-1 text-xs text-muted-foreground/80">
                       Search &ldquo;blender&rdquo;, &ldquo;browser&rdquo;, &ldquo;notes&rdquo;… or clear the filters.
                     </p>
                   </div>
@@ -532,14 +532,14 @@ function CategoryChip({
       aria-selected={active}
       className={`flex min-h-[34px] shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
         active
-          ? 'text-zinc-100'
-          : 'border-white/10 text-zinc-400 hover:border-white/25 hover:text-zinc-200'
+          ? 'text-foreground'
+          : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
       }`}
       style={active ? { background: tint(accent, 0.2), borderColor: tint(accent, 0.6) } : undefined}
     >
       {Icon ? <Icon className="h-3 w-3" style={{ color: active ? accent : undefined }} aria-hidden /> : null}
       {label}
-      <span className="text-[9px] font-semibold text-zinc-500">{count}</span>
+      <span className="text-[9px] font-semibold text-muted-foreground/80">{count}</span>
     </button>
   )
 }
@@ -599,7 +599,7 @@ function SkillCard({
           <Icon className="h-5 w-5" style={{ color }} />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-zinc-100" title={skill.displayName}>
+          <h3 className="truncate text-sm font-semibold text-foreground" title={skill.displayName}>
             {skill.displayName}
           </h3>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -658,25 +658,25 @@ function SkillCard({
                 exit={{ scale: 0.4, opacity: 0 }}
                 className="grid place-items-center"
               >
-                <Wand2 className="h-4 w-4 text-zinc-500 transition group-hover:text-rose-600 dark:group-hover:text-[#ff8a8d]" aria-hidden />
+                <Wand2 className="h-4 w-4 text-muted-foreground/80 transition group-hover:text-rose-600 dark:group-hover:text-[#ff8a8d]" aria-hidden />
               </motion.span>
             )}
           </AnimatePresence>
         </button>
       </div>
 
-      <p className="mt-2.5 line-clamp-3 min-h-[3.4rem] text-xs leading-relaxed text-zinc-400">
+      <p className="mt-2.5 line-clamp-3 min-h-[3.4rem] text-xs leading-relaxed text-muted-foreground">
         {skill.description || 'No description provided.'}
       </p>
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-        <span className="pointer-events-none flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-zinc-300 transition group-hover:border-[#ff5a5f]/40 group-hover:text-rose-600 dark:group-hover:text-[#ff8a8d]">
+        <span className="pointer-events-none flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition group-hover:border-[#ff5a5f]/40 group-hover:text-rose-600 dark:group-hover:text-[#ff8a8d]">
           <BookOpen className="h-3.5 w-3.5" aria-hidden />
           View manual
         </span>
         {skill.requires ? (
           <span
-            className="max-w-[52%] truncate text-[10px] text-zinc-600"
+            className="max-w-[52%] truncate text-[10px] text-muted-foreground/80"
             title={`Requires ${skill.requires}`}
           >
             needs {skill.requires}
@@ -716,7 +716,7 @@ function SkillDetailDialog({
     <Dialog open={!!skill} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-h-[88vh] flex-col overflow-hidden border-white/10 bg-[#0c0c0e] p-0 text-zinc-100 sm:max-w-3xl"
+        className="flex max-h-[88vh] flex-col overflow-hidden border-border bg-sidebar p-0 text-foreground sm:max-w-3xl"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>{skill ? `${skill.displayName} — skill manual` : 'Skill manual'}</DialogTitle>
@@ -728,7 +728,7 @@ function SkillDetailDialog({
         {skill && (
           <>
             {/* Header */}
-            <div className="flex shrink-0 items-start gap-3 border-b border-white/8 px-5 py-4">
+            <div className="flex shrink-0 items-start gap-3 border-b border-border px-5 py-4">
               <div
                 className="grid h-11 w-11 shrink-0 place-items-center rounded-xl"
                 style={{ background: tint(color, 0.12), border: `1px solid ${tint(color, 0.28)}` }}
@@ -737,7 +737,7 @@ function SkillDetailDialog({
                 <Icon className="h-5 w-5" style={{ color }} />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="truncate text-base font-semibold text-zinc-100">{skill.displayName}</h3>
+                <h3 className="truncate text-base font-semibold text-foreground">{skill.displayName}</h3>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <span
                     className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
@@ -745,7 +745,7 @@ function SkillDetailDialog({
                   >
                     {categoryLabel(skill.category)}
                   </span>
-                  <code className="font-mono text-[11px] text-zinc-500">{skill.name}</code>
+                  <code className="font-mono text-[11px] text-muted-foreground/80">{skill.name}</code>
                 </div>
               </div>
               <button
@@ -753,7 +753,7 @@ function SkillDetailDialog({
                 onClick={() => onCopy(skill.name, 'name')}
                 aria-label="Copy skill name"
                 title="Copy skill name"
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 text-zinc-400 transition hover:border-white/25 hover:text-zinc-100"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border text-muted-foreground transition hover:border-border hover:text-foreground"
               >
                 {copied === 'name' ? (
                   <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
@@ -765,14 +765,14 @@ function SkillDetailDialog({
                 type="button"
                 onClick={onClose}
                 aria-label="Close skill details"
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
             </div>
 
             {/* Actions + install + meta */}
-            <div className="shrink-0 space-y-3 border-b border-white/8 px-5 py-4">
+            <div className="shrink-0 space-y-3 border-b border-border px-5 py-4">
               {/* Cloud-action mapping banner */}
               {(() => {
                 const action = resolveSkillAction(skill.name, skill.category)
@@ -790,7 +790,7 @@ function SkillDetailDialog({
                       <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                         Runs in NEXUS cloud — free
                       </p>
-                      <p className="mt-0.5 truncate text-[11px] text-zinc-400">
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
                         Mapped to: {action.label.replace(' with FLUX', '')} · {action.chip}
                       </p>
                     </div>
@@ -811,7 +811,7 @@ function SkillDetailDialog({
                 <button
                   type="button"
                   onClick={() => onCopy(skill.name, 'name')}
-                  className="flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-white/15 px-4 text-sm font-medium text-zinc-300 transition hover:border-white/30 hover:bg-white/5"
+                  className="flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-muted-foreground transition hover:border-border hover:bg-accent/50"
                 >
                   {copied === 'name' ? (
                     <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
@@ -824,11 +824,11 @@ function SkillDetailDialog({
 
               {skill.installCmd && (
                 <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
                     Install command
                   </p>
-                  <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5">
-                    <code className="nx-scroll min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-zinc-300">
+                  <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-border bg-input px-3.5 py-2.5">
+                    <code className="nx-scroll min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-muted-foreground">
                       {skill.installCmd}
                     </code>
                     <button
@@ -836,7 +836,7 @@ function SkillDetailDialog({
                       onClick={() => onCopy(skill.installCmd as string, 'cmd')}
                       aria-label="Copy install command"
                       title="Copy install command"
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-white/8 hover:text-zinc-100"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground"
                     >
                       {copied === 'cmd' ? (
                         <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
@@ -849,12 +849,12 @@ function SkillDetailDialog({
               )}
 
               {(skill.requires || skill.homepage) && (
-                <div className="flex flex-col gap-1.5 text-xs text-zinc-500 sm:flex-row sm:flex-wrap sm:gap-x-5">
+                <div className="flex flex-col gap-1.5 text-xs text-muted-foreground/80 sm:flex-row sm:flex-wrap sm:gap-x-5">
                   {skill.requires && (
                     <span className="flex min-w-0 items-center gap-1.5">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400/80" aria-hidden />
                       <span className="truncate">
-                        Requires: <span className="text-zinc-400">{skill.requires}</span>
+                        Requires: <span className="text-muted-foreground">{skill.requires}</span>
                       </span>
                     </span>
                   )}
@@ -875,7 +875,7 @@ function SkillDetailDialog({
 
             {/* SKILL.md manual */}
             <div className="nx-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
                 SKILL.md manual
               </p>
               {docLoading ? (
@@ -887,7 +887,7 @@ function SkillDetailDialog({
               ) : doc ? (
                 <DocBody doc={doc} />
               ) : (
-                <p className="text-xs leading-relaxed text-zinc-500">
+                <p className="text-xs leading-relaxed text-muted-foreground/80">
                   No manual text is available for this skill — the metadata above is everything the
                   catalog ships.
                 </p>
@@ -914,18 +914,18 @@ function SkeletonGrid() {
       {Array.from({ length: 9 }).map((_, i) => (
         <div key={i} className="nx-glow-card p-4">
           <div className="flex items-start gap-3">
-            <div className="h-10 w-10 shrink-0 animate-pulse rounded-xl bg-white/8" />
+            <div className="h-10 w-10 shrink-0 animate-pulse rounded-xl bg-accent" />
             <div className="flex-1 space-y-2 pt-1">
-              <div className="h-3.5 w-2/3 animate-pulse rounded bg-white/8" />
-              <div className="h-3 w-1/3 animate-pulse rounded bg-white/5" />
+              <div className="h-3.5 w-2/3 animate-pulse rounded bg-accent" />
+              <div className="h-3 w-1/3 animate-pulse rounded bg-accent/50" />
             </div>
           </div>
           <div className="mt-3 space-y-2">
-            <div className="h-2.5 w-full animate-pulse rounded bg-white/5" />
-            <div className="h-2.5 w-5/6 animate-pulse rounded bg-white/5" />
-            <div className="h-2.5 w-2/3 animate-pulse rounded bg-white/5" />
+            <div className="h-2.5 w-full animate-pulse rounded bg-accent/50" />
+            <div className="h-2.5 w-5/6 animate-pulse rounded bg-accent/50" />
+            <div className="h-2.5 w-2/3 animate-pulse rounded bg-accent/50" />
           </div>
-          <div className="mt-4 h-7 w-24 animate-pulse rounded-lg bg-white/5" />
+          <div className="mt-4 h-7 w-24 animate-pulse rounded-lg bg-accent/50" />
         </div>
       ))}
     </div>
@@ -936,7 +936,7 @@ function DocSkeleton() {
   return (
     <div className="space-y-2.5" aria-hidden aria-label="Loading manual">
       {[6, 5, 6, 4, 5, 6, 3, 5].map((w, i) => (
-        <div key={i} className="h-3 animate-pulse rounded bg-white/5" style={{ width: `${w * 16}%` }} />
+        <div key={i} className="h-3 animate-pulse rounded bg-accent/50" style={{ width: `${w * 16}%` }} />
       ))}
     </div>
   )
@@ -963,14 +963,14 @@ function inline(text: string): React.ReactNode[] {
     .map((t, i) => {
       if (t.startsWith('**') && t.endsWith('**') && t.length > 4) {
         return (
-          <strong key={i} className="font-semibold text-zinc-100">
+          <strong key={i} className="font-semibold text-foreground">
             {t.slice(2, -2)}
           </strong>
         )
       }
       if (t.startsWith('`') && t.endsWith('`') && t.length > 2) {
         return (
-          <code key={i} className="rounded bg-white/8 px-1 py-0.5 font-mono text-[11px] text-rose-600 dark:text-[#ffb3b5]">
+          <code key={i} className="rounded bg-accent px-1 py-0.5 font-mono text-[11px] text-rose-600 dark:text-[#ffb3b5]">
             {t.slice(1, -1)}
           </code>
         )
@@ -990,7 +990,7 @@ function DocBody({ doc }: { doc: string }) {
         ci % 2 === 1 ? (
           <pre
             key={ci}
-            className="nx-scroll overflow-x-auto rounded-xl border border-white/8 bg-black/50 p-3.5 font-mono text-[11px] leading-relaxed text-zinc-300"
+            className="nx-scroll overflow-x-auto rounded-xl border border-border bg-input p-3.5 font-mono text-[11px] leading-relaxed text-muted-foreground"
           >
             {chunk.replace(/^[a-zA-Z0-9_-]*\n/, '')}
           </pre>
@@ -1009,10 +1009,10 @@ function DocBody({ doc }: { doc: string }) {
                     key={li}
                     className={
                       level === 1
-                        ? 'pt-2 text-sm font-bold text-zinc-100'
+                        ? 'pt-2 text-sm font-bold text-foreground'
                         : level === 2
-                          ? 'pt-2 text-[13px] font-semibold text-zinc-100'
-                          : 'pt-1 text-xs font-semibold uppercase tracking-wide text-zinc-400'
+                          ? 'pt-2 text-[13px] font-semibold text-foreground'
+                          : 'pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'
                     }
                   >
                     {inline(heading[2])}
@@ -1024,7 +1024,7 @@ function DocBody({ doc }: { doc: string }) {
               const bullet = trimmed.match(/^[-*]\s+(.*)$/)
               if (bullet) {
                 return (
-                  <p key={li} className="flex gap-2 text-xs leading-relaxed text-zinc-300">
+                  <p key={li} className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
                     <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-[#ff5a5f]/70" aria-hidden />
                     <span>{inline(bullet[1])}</span>
                   </p>
@@ -1033,8 +1033,8 @@ function DocBody({ doc }: { doc: string }) {
               const numbered = trimmed.match(/^\d+[.)]\s+(.*)$/)
               if (numbered) {
                 return (
-                  <p key={li} className="flex gap-2 text-xs leading-relaxed text-zinc-300">
-                    <span className="shrink-0 font-mono text-[10px] text-zinc-500" aria-hidden>
+                  <p key={li} className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground/80" aria-hidden>
                       {trimmed.match(/^\d+/)?.[0]}
                     </span>
                     <span>{inline(numbered[1])}</span>
@@ -1049,7 +1049,7 @@ function DocBody({ doc }: { doc: string }) {
                   <p
                     key={li}
                     className={`whitespace-pre font-mono text-[11px] leading-relaxed ${
-                      isSeparator ? 'text-zinc-600' : 'text-zinc-400'
+                      isSeparator ? 'text-muted-foreground/80' : 'text-muted-foreground'
                     }`}
                   >
                     {trimmed}
@@ -1062,7 +1062,7 @@ function DocBody({ doc }: { doc: string }) {
                 return (
                   <p
                     key={li}
-                    className="border-l-2 border-[#ff5a5f]/40 pl-3 text-xs italic leading-relaxed text-zinc-400"
+                    className="border-l-2 border-[#ff5a5f]/40 pl-3 text-xs italic leading-relaxed text-muted-foreground"
                   >
                     {inline(trimmed.replace(/^>\s?/, ''))}
                   </p>
@@ -1071,7 +1071,7 @@ function DocBody({ doc }: { doc: string }) {
 
               /* paragraph */
               return (
-                <p key={li} className="text-xs leading-relaxed text-zinc-300">
+                <p key={li} className="text-xs leading-relaxed text-muted-foreground">
                   {inline(trimmed)}
                 </p>
               )

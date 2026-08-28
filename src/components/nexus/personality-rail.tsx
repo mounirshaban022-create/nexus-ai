@@ -107,7 +107,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
   return (
     <div className="mb-2 flex items-center gap-2" role="group" aria-label={t('personality.label')}>
       {/* Label — names the selector exactly "Personality" */}
-      <span className="hidden shrink-0 select-none items-center gap-1.5 ps-1 text-[11px] font-medium text-zinc-500 sm:flex">
+      <span className="hidden shrink-0 select-none items-center gap-1.5 ps-1 text-[11px] font-medium text-muted-foreground/80 sm:flex">
         <Sparkles className="h-3 w-3 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
         {t('personality.label')}
       </span>
@@ -127,8 +127,8 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
           title={t('personality.autoDesc')}
           className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
             selected == null
-              ? 'border-[#ff5a5f]/60 bg-[#ff5a5f]/15 text-zinc-100 shadow-[0_0_0_3px_rgba(255,90,95,0.08)]'
-              : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-200'
+              ? 'border-[#ff5a5f]/60 bg-[#ff5a5f]/15 text-foreground shadow-[0_0_0_3px_rgba(255,90,95,0.08)]'
+              : 'border-border bg-muted/50 text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'
           }`}
         >
           <Zap className="h-3 w-3" aria-hidden />
@@ -151,7 +151,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
               disabled={disabled}
               onClick={() => onSelect(null)}
               title={`${agent.name}${division ? ` — ${division.label}` : ''} (${t('personality.pinnedFromDir')})`}
-              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium text-zinc-100 transition disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium text-foreground transition disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 borderColor: `${color}99`,
                 backgroundColor: tint(color, 0.16),
@@ -182,8 +182,8 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
               title={`${agent.name}${division ? ` — ${division.label}` : ''} · ${agent.vibe}${active ? ` (${t('personality.pinnedInstant')})` : ''}`}
               className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? 'text-zinc-100'
-                  : 'border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-200'
+                  ? 'text-foreground'
+                  : 'border-border bg-muted/50 text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'
               }`}
               style={
                 active
@@ -207,7 +207,7 @@ export function PersonalityRail({ selected, onSelect, onOpenDirectory, disabled 
           onClick={onOpenDirectory}
           disabled={disabled}
           title={t('agents.specialistsCount', { count: String(total) })}
-          className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-white/15 px-3 text-xs font-medium text-zinc-500 transition hover:border-[#ff5a5f]/40 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border px-3 text-xs font-medium text-muted-foreground/80 transition hover:border-[#ff5a5f]/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Users className="h-3 w-3" aria-hidden />
           {t('personality.allAgents', { count: String(total) })}

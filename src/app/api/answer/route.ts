@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { smartChat } from '@/lib/smart-chat'
 import { freeWebSearch } from '@/lib/web-access'
+import { getVerifiedSession } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 /**
@@ -280,6 +281,11 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // SECURITY: resolve the verified caller so the email search only ever
+  // reads the caller's own mailbox (never another user's).
+  const session = await getVerifiedSession(req)
+  const verifiedUserId = session?.userId ?? null
+
   const parsed = requestSchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {
     return NextResponse.json(
@@ -338,7 +344,7 @@ export async function POST(req: NextRequest) {
           if (!includeEmail) return { matches: [] }
           try {
             const { getPrimaryAccount, searchEmails } = await import('@/lib/email')
-            const account = await getPrimaryAccount()
+            const account = await getPrimaryAccount(verifiedUserId)
             if (!account) {
               return { matches: [], skipped: 'No email account connected' }
             }

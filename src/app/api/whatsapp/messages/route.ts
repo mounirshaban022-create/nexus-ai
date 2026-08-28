@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
   }
 
-  const account = await getWhatsAppAccount()
+  const account = await getWhatsAppAccount(session.userId)
   if (!account) {
     return NextResponse.json({ messages: [], conversations: [] })
   }
