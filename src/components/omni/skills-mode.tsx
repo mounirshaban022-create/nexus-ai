@@ -66,7 +66,8 @@ const INSTALLED_KEY = 'nexus-installed-skills'
 function readInstalled(): Set<string> {
   try {
     const raw = localStorage.getItem(INSTALLED_KEY)
-    return new Set(Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [])
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return new Set(Array.isArray(parsed) ? (parsed as string[]) : [])
   } catch {
     return new Set()
   }

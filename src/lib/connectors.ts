@@ -5,6 +5,8 @@ import path from 'path'
 import { getZAI } from './zai'
 import { freeWebSearch, readPageSmart, wikipediaSearch } from './web-access'
 import { getPrimaryAccount, listEmails, searchEmails, readEmail, sendEmail } from './email'
+// SSRF guard used by every URL-taking connector handler below.
+import { assertPublicUrl } from './safe-url'
 
 /* ------------------------------------------------------------------ */
 /* Safe math expression evaluator (recursive descent — never eval())   */
@@ -128,7 +130,7 @@ export interface ConnectorParam {
 export interface ConnectorDefinition {
   id: string
   name: string
-  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance'
+  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance' | 'work'
   description: string // human-facing
   /** LLM-facing: what it does + when to use it */
   llmDescription: string
@@ -150,7 +152,9 @@ const IMAGES_DIR = path.join(process.cwd(), 'generated-images')
 
 /** Blocks requests to private/internal networks (SSRF guard).
  *  Shared implementation lives in ./safe-url (re-exported for backwards
- *  compatibility with existing imports). */
+ *  compatibility with existing imports; imported above for local use —
+ *  without that binding every read_page/weather call would crash with a
+ *  ReferenceError). */
 export { assertPublicUrl } from './safe-url'
 
 async function fetchJson(url: string, timeoutMs = 15000): Promise<unknown> {

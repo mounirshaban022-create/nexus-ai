@@ -254,7 +254,8 @@ export async function listEmails(
   try {
     const lock = await client.getMailboxLock(folder)
     try {
-      const exists = client.mailbox?.exists ?? 0
+      const mailbox = client.mailbox
+      const exists = typeof mailbox === 'object' && mailbox !== null ? mailbox.exists : 0
       if (exists === 0) return { folder, total: 0, emails: [] }
 
       const start = Math.max(1, exists - limit + 1)
@@ -307,13 +308,17 @@ export async function searchEmails(
     try {
       let uids: number[] = []
       try {
-        uids = await client.search({ subject: query })
+        // imapflow typings: search() returns false | number[] (false when no
+        // mailbox is selected — can't happen inside the lock, but guard anyway)
+        const subjectRes = await client.search({ subject: query })
+        uids = Array.isArray(subjectRes) ? subjectRes : []
       } catch {
         uids = []
       }
       let fromUids: number[] = []
       try {
-        fromUids = await client.search({ from: query })
+        const fromRes = await client.search({ from: query })
+        fromUids = Array.isArray(fromRes) ? fromRes : []
       } catch {
         fromUids = []
       }
@@ -412,7 +417,8 @@ export async function organizeEmail(
       const lock = await client.getMailboxLock(folder)
       try {
         await client.messageFlagsAdd(range, ['\\Deleted'], { uid: true })
-        await client.expunge()
+        // imapflow ships expunge() at runtime but the installed typings omit it.
+        await (client as unknown as { expunge: () => Promise<void> }).expunge()
         applied = uidList.length
       } finally {
         lock.release()

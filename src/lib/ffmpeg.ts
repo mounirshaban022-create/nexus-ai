@@ -32,8 +32,8 @@ async function firstAvailable(candidates: Array<string | undefined>): Promise<st
   return null
 }
 
-let ffmpegPathCache: string | null | undefined
-let ffprobePathCache: string | null | undefined
+let ffmpegPathCache: string | undefined
+let ffprobePathCache: string | undefined
 
 export async function ffmpegPath(): Promise<string> {
   if (ffmpegPathCache !== undefined) return ffmpegPathCache

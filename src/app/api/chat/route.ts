@@ -1125,8 +1125,8 @@ async function executeChatTool(
       throw new Error('sheets required: [{ name, headers, rows }]')
     }
 
-    const XLSX = await import('xlsx')
-    const wb = XLSX.utils.book_new()
+    const ExcelJS = await import('exceljs')
+    const wb = new ExcelJS.Workbook()
     const usedNames = new Set<string>()
     for (const raw of sheetsArg.slice(0, 10)) {
       const sheet = raw as {
@@ -1160,19 +1160,26 @@ async function executeChatTool(
       let n = 2
       while (usedNames.has(name)) name = `${String(sheet.name ?? 'Sheet').slice(0, 25)}_${n++}`
       usedNames.add(name)
-      const ws = XLSX.utils.aoa_to_sheet(data)
+      const ws = wb.addWorksheet(name)
       // Column widths sized to content (cap 40)
       const cols = Math.max(headers.length, ...rows.map((r) => r.length), 1)
-      ws['!cols'] = Array.from({ length: cols }, (_, i) => ({
-        wch: Math.min(
+      for (let i = 0; i < cols; i++) {
+        ws.getColumn(i + 1).width = Math.min(
           40,
           Math.max(
             10,
             ...data.slice(0, 40).map((row) => String((row as unknown[])[i] ?? '').length + 2)
           )
-        ),
-      }))
-      XLSX.utils.book_append_sheet(wb, ws, name)
+        )
+      }
+      for (const row of data) {
+        ws.addRow(
+          row.map((v) =>
+            // exceljs stores formulas without the leading '='
+            typeof v === 'string' && v.startsWith('=') ? { formula: v.slice(1) } : v
+          )
+        )
+      }
     }
 
     // Save + serve through the shared file route
@@ -1182,7 +1189,7 @@ async function executeChatTool(
     const dir = pathMod.join(process.env.VERCEL ? '/tmp' : process.cwd(), 'generated-images')
     await mkdir(dir, { recursive: true })
     const id = randomUUID()
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer())
     await writeFile(pathMod.join(dir, `${id}.xlsx`), buffer)
 
     return {
@@ -1716,7 +1723,7 @@ export async function POST(req: NextRequest) {
             ],
             thinking: { type: 'disabled' },
           })
-          const description = response.choices[0]?.message?.content ?? ''
+          const description = response.choices?.[0]?.message?.content ?? ""
           if (description.trim()) {
             activeImage.description = description.slice(0, 500)
             attachmentContextMessage =

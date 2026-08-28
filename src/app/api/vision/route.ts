@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       thinking: { type: 'disabled' },
     })
 
-    const analysis = response.choices[0]?.message?.content
+    const analysis = response.choices?.[0]?.message?.content
     if (!analysis || !analysis.trim()) {
       throw new Error('Vision analysis returned an empty response. Please try again.')
     }

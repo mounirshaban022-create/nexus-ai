@@ -291,7 +291,7 @@ export async function POST(req: NextRequest) {
           job.message = `Rendering scene ${i + 1} of ${scenes.length}…`
           const dur = Math.max(narrations[i].dur + 0.6, 3.2)
           const out = path.join(workDir, `clip${i}.mp4`)
-          const caption = scenes[i].caption ? scenes[i].caption.slice(0, 40) : ''
+          const caption = (scenes[i]?.caption ?? '').slice(0, 40)
           const inputPng = await burnCaption(i, caption)
           // Alternate zoom direction for visual variety
           const zoomIn = i % 2 === 0

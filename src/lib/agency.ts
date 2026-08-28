@@ -28,6 +28,9 @@ export interface AgencyAgent {
   description: string
   emoji: string
   vibe: string
+  /** Optional accent color (hex) from the generated catalog — the chat
+   *  agent_assign event forwards it to the UI when present. */
+  color?: string
 }
 
 export interface AgencyCatalog {

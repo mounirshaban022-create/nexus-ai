@@ -54,13 +54,44 @@ export async function POST(req: NextRequest) {
       const result = await extractRawText({ buffer })
       extracted = { format, text: result.value?.slice(0, 60000) }
     } else if (format === 'xlsx') {
-      const XLSX = await import('xlsx')
-      const wb = XLSX.read(buffer, { type: 'buffer' })
-      const sheets = wb.SheetNames.map((name) => {
-        const rows = XLSX.utils.sheet_to_json<string[]>(wb.Sheets[name], { header: 1, raw: false })
+      const ExcelJS = await import('exceljs')
+      const wb = new ExcelJS.Workbook()
+      await wb.xlsx.load(buffer as unknown as Parameters<typeof wb.xlsx.load>[0])
+      // Flatten exceljs cell values (string | number | Date | rich text |
+      // formula objects) to display strings.
+      const cellToString = (v: unknown): string => {
+        if (v == null) return ''
+        if (typeof v === 'string') return v
+        if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+        if (v instanceof Date) return v.toISOString().slice(0, 10)
+        if (typeof v === 'object') {
+          const o = v as Record<string, unknown>
+          const rich = o.richText
+          if (Array.isArray(rich)) {
+            return rich
+              .map((t) => (t && typeof t === 'object' && 'text' in t ? String((t as { text?: unknown }).text ?? '') : ''))
+              .join('')
+          }
+          if ('result' in o && o.result != null) return cellToString(o.result)
+          if ('formula' in o) {
+            // exceljs may or may not keep the leading '=' — normalize to one.
+            const f = String(o.formula ?? '')
+            return f.startsWith('=') ? f : `=${f}`
+          }
+          if ('text' in o) return cellToString(o.text)
+          if ('hyperlink' in o && typeof o.hyperlink === 'string') return o.hyperlink
+        }
+        return String(v)
+      }
+      const sheets = wb.worksheets.map((ws) => {
+        const rows: string[][] = []
+        ws.eachRow({ includeEmpty: false }, (row) => {
+          const values = (row.values as unknown[]) ?? []
+          rows.push(values.slice(1).map(cellToString))
+        })
         return {
-          name,
-          rows: rows.slice(0, 100).map((r) => (r as unknown[]).map((c) => String(c ?? ''))),
+          name: ws.name,
+          rows: rows.slice(0, 100),
         }
       })
       extracted = {

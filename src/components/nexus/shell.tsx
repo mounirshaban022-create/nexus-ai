@@ -115,6 +115,8 @@ interface SidebarContentProps {
   onSignOut: () => void
   sessions: SessionItem[]
   loading: boolean
+  loadError: boolean
+  onRetryLoad: () => void
   query: string
   setQuery: (q: string) => void
   activeSessionId: string | undefined
@@ -268,6 +270,8 @@ function SidebarContent({
   onSignOut,
   sessions,
   loading,
+  loadError,
+  onRetryLoad,
   query,
   setQuery,
   activeSessionId,
@@ -329,6 +333,17 @@ function SidebarContent({
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="h-11 animate-pulse rounded-lg bg-muted/50" />
             ))}
+          </div>
+        ) : loadError && sessions.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-muted-foreground" role="status">
+            <p className="leading-relaxed">Couldn&apos;t load conversations.</p>
+            <button
+              type="button"
+              onClick={onRetryLoad}
+              className="mt-2 rounded-lg border border-border px-2.5 py-1 text-[11px] text-foreground transition hover:bg-muted"
+            >
+              Try again
+            </button>
           </div>
         ) : sessions.length === 0 ? (
           <p className="px-3 py-4 text-xs leading-relaxed text-muted-foreground/80">{t('nav.noConversations')}</p>
@@ -437,6 +452,8 @@ export function NexusShell(props: NexusShellProps) {
 
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [retryTick, setRetryTick] = useState(0)
   const [query, setQuery] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
   /** local refetch trigger (used to restore the list after a failed delete) */
@@ -449,10 +466,13 @@ export function NexusShell(props: NexusShellProps) {
     const load = async () => {
       try {
         const res = await fetch('/api/chat/sessions?kind=chat')
-        if (!res.ok) return
+        // Non-OK responses must not leave the skeleton hanging forever —
+        // surface an error row with a retry instead of an early return.
+        if (!res.ok) throw new Error(`sessions HTTP ${res.status}`)
         const data = (await res.json().catch(() => null)) as { sessions?: unknown } | null
         const rows = Array.isArray(data?.sessions) ? data.sessions : []
         if (cancelled) return
+        setLoadError(false)
         setSessions(
           rows
             .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
@@ -471,9 +491,11 @@ export function NexusShell(props: NexusShellProps) {
             .filter((s) => s.id)
         )
       } catch {
-        /* offline — keep the current list */
+        /* offline / server error — keep the current list, show the retry row */
+        if (!cancelled) setLoadError(true)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      if (!cancelled) setLoading(false)
     }
     const timer = setTimeout(() => {
       void load()
@@ -482,7 +504,7 @@ export function NexusShell(props: NexusShellProps) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [refreshKey, reload])
+  }, [refreshKey, reload, retryTick])
 
   /* Live client-side filter over the fetched sessions. */
   const filtered = useMemo(() => {
@@ -541,6 +563,11 @@ export function NexusShell(props: NexusShellProps) {
       onSignOut={onSignOut}
       sessions={filtered}
       loading={loading}
+      loadError={loadError}
+      onRetryLoad={() => {
+        setLoading(true)
+        setRetryTick((n) => n + 1)
+      }}
       query={query}
       setQuery={setQuery}
       activeSessionId={activeSessionId}
