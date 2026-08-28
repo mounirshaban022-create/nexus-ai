@@ -49,6 +49,9 @@ export type PremiumProviderId =
   | 'grok'
   | 'vercel-gateway'
   | 'agnes'
+  | 'groq'
+  | 'cerebras'
+  | 'gemini'
 
 export type PoolMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
@@ -401,6 +404,166 @@ const POOL_ENTRIES: PoolEntry[] = [
       return { content, model }
     },
   },
+  /* ---- Free high-capacity providers (activate when a key is added) ----
+   * These multiply the pool's daily capacity at $0 and absorb traffic
+   * spikes so the PAID accounts never drain first:
+   *   Groq     — ~14,400 free requests/day, fastest tokens/sec available
+   *   Cerebras — ~1M free tokens/day, near-instant first token
+   *   Gemini   — AI Studio free tier (gemini-2.5-flash), generous limits
+   * All three are OpenAI-compatible endpoints → shared compat helpers. */
+  {
+    id: 'groq',
+    label: 'Groq (free)',
+    configured: () => (process.env.GROQ_API_KEY || '').trim().length > 0,
+    stream: async (messages, onDelta, opts) => {
+      const models = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile']
+      let lastErr: unknown = null
+      for (const model of models) {
+        try {
+          const content = await openAiCompatStream({
+            baseUrl: 'https://api.groq.com/openai/v1',
+            apiKey: (process.env.GROQ_API_KEY || '').trim(),
+            model,
+            messages,
+            onDelta,
+            maxTokens: opts.maxTokens,
+            temperature: opts.temperature,
+            timeoutMs: opts.timeoutMs,
+            signal: opts.signal,
+            label: 'Groq',
+          })
+          if (content.trim()) return { content, model }
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      throw lastErr ?? new Error('Groq produced no content')
+    },
+    complete: async (messages, opts) => {
+      const models = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile']
+      let lastErr: unknown = null
+      for (const model of models) {
+        try {
+          const content = await openAiCompatComplete({
+            baseUrl: 'https://api.groq.com/openai/v1',
+            apiKey: (process.env.GROQ_API_KEY || '').trim(),
+            model,
+            messages,
+            maxTokens: opts.maxTokens,
+            temperature: opts.temperature,
+            timeoutMs: opts.timeoutMs,
+            label: 'Groq',
+          })
+          return { content, model }
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      throw lastErr ?? new Error('Groq produced no content')
+    },
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras (free)',
+    configured: () => (process.env.CEREBRAS_API_KEY || '').trim().length > 0,
+    stream: async (messages, onDelta, opts) => {
+      const models = ['llama-3.3-70b', 'llama3.1-8b']
+      let lastErr: unknown = null
+      for (const model of models) {
+        try {
+          const content = await openAiCompatStream({
+            baseUrl: 'https://api.cerebras.ai/v1',
+            apiKey: (process.env.CEREBRAS_API_KEY || '').trim(),
+            model,
+            messages,
+            onDelta,
+            maxTokens: opts.maxTokens,
+            temperature: opts.temperature,
+            timeoutMs: opts.timeoutMs,
+            signal: opts.signal,
+            label: 'Cerebras',
+          })
+          if (content.trim()) return { content, model }
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      throw lastErr ?? new Error('Cerebras produced no content')
+    },
+    complete: async (messages, opts) => {
+      const models = ['llama-3.3-70b', 'llama3.1-8b']
+      let lastErr: unknown = null
+      for (const model of models) {
+        try {
+          const content = await openAiCompatComplete({
+            baseUrl: 'https://api.cerebras.ai/v1',
+            apiKey: (process.env.CEREBRAS_API_KEY || '').trim(),
+            model,
+            messages,
+            maxTokens: opts.maxTokens,
+            temperature: opts.temperature,
+            timeoutMs: opts.timeoutMs,
+            label: 'Cerebras',
+          })
+          return { content, model }
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      throw lastErr ?? new Error('Cerebras produced no content')
+    },
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini (free tier)',
+    configured: () => (process.env.GEMINI_API_KEY || '').trim().length > 0,
+    stream: async (messages, onDelta, opts) => {
+      const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+      let lastErr: unknown = null
+      for (const model of models) {
+        try {
+          const content = await openAiCompatStream({
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+            apiKey: (process.env.GEMINI_API_KEY || '').trim(),
+            model,
+            messages,
+            onDelta,
+            maxTokens: opts.maxTokens,
+            temperature: opts.temperature,
+            timeoutMs: opts.timeoutMs,
+            signal: opts.signal,
+            label: 'Gemini',
+          })
+          if (content.trim()) return { content, model }
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      throw lastErr ?? new Error('Gemini produced no content')
+    },
+    complete: async (messages, opts) => {
+      const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+      let lastErr: unknown = null
+      for (const model of models) {
+        try {
+          const content = await openAiCompatComplete({
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+            apiKey: (process.env.GEMINI_API_KEY || '').trim(),
+            model,
+            messages,
+            maxTokens: opts.maxTokens,
+            temperature: opts.temperature,
+            timeoutMs: opts.timeoutMs,
+            label: 'Gemini',
+          })
+          return { content, model }
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      throw lastErr ?? new Error('Gemini produced no content')
+    },
+  },
 ]
 
 /* ------------------------------------------------------------------ */
@@ -469,6 +632,9 @@ export function premiumEngineStatus(): Record<string, boolean> {
     grok: xaiConfigured(),
     vercelGateway: vercelGatewayConfigured(),
     agnes: agnesChatConfigured(),
+    groq: (process.env.GROQ_API_KEY || '').trim().length > 0,
+    cerebras: (process.env.CEREBRAS_API_KEY || '').trim().length > 0,
+    gemini: (process.env.GEMINI_API_KEY || '').trim().length > 0,
   }
 }
 
