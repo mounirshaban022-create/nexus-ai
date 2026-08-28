@@ -980,12 +980,31 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     setLang(recLang)
 
     unlockAudio()
+
     // NOTE: no eager Whisper pre-warm anymore. The PRIMARY recognition path
     // is now the SERVER-side Whisper-large-v3 (accurate, instant, zero
     // downloads) — the on-device engine only spins up as an emergency
     // fallback when the server path fails, so its ~45 MB one-time download
-    // is no longer spent up-front for every user.
+    // is no longer spent up-front for every user. EXCEPTION below: when the
+    // server has NO speech engine at all, we DO pre-warm.
     let cancelled = false
+
+    // Ask the server which speech engines exist in THIS deployment. When
+    // NEITHER server engine is configured (HF_TOKEN missing + the Z.ai SDK
+    // unreachable — the "voice doesn't hear me on the deployment" case),
+    // every server transcription attempt is doomed: pre-warm the on-device
+    // Whisper engine NOW so its ~45 MB download overlaps the user's first
+    // sentence instead of starting after a failed server round-trip.
+    fetch('/api/asr/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { serverAsr?: boolean } | null) => {
+        if (cancelled || !s || s.serverAsr !== false) return
+        warmUpOnDeviceAsr((pct, note) => {
+          if (pct > 0 && pct < 100) setCaption(`${note} ${pct}%`)
+        })
+      })
+      .catch(() => {})
+
     const t = window.setTimeout(() => {
       if (cancelled) return
       void (async () => {

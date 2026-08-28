@@ -104,6 +104,8 @@ Add EACH of these for **Production + Preview + Development** environments (or at
 | `AGNES_API_KEY` | `sk-i9TG...` | Agnes AI video generation |
 | `AGNES_BASE_URL` | `https://api.agnes.ai/v1` | Update if Agnes uses a different host |
 | `NEXUS_EMAIL_SECRET` | (any random 32-char string) | Used to AES-encrypt stored email passwords. **Must match across deploys** — if you change it later, saved email accounts must be re-connected. Generate with `openssl rand -hex 32` |
+| `AUTH_SECRET` | (any random 32-char string) | Signs the session cookie. **Required in production** — without it a hardcoded dev fallback is used. Generate with `openssl rand -hex 32` |
+| `HF_TOKEN` | `hf_...` (free at huggingface.co/settings/tokens) | **Voice input in production.** Powers server-side Whisper transcription (`/api/asr`, `/api/voice/turn`). Without it, voice mode falls back to the Z.ai SDK (unreachable on Vercel) and then to a ~45 MB in-browser model — the "voice doesn't hear me" failure on deployments. Set it and voice hears users instantly in every browser. |
 | `ADMIN_MIGRATION_TOKEN` | (any random 32+ char string) | Required to hit `/api/admin/migrate` in production (Vercel). Used to provision the Supabase schema from the Vercel runtime — no manual SQL paste needed. Generate with `openssl rand -hex 24`. Already set in your `.env.vercel.local`. |
 | `APP_URL` | `https://<your-vercel-domain>.vercel.app` | |
 | `PORT` | `3000` | |
@@ -204,6 +206,8 @@ bun run db:push  # apply schema changes to local SQLite
 | Videos never complete | `AGNES_API_KEY` / `AGNES_BASE_URL` wrong. Check the Agnes API docs for the correct base URL. |
 | Supabase tables empty after chat | `SUPABASE_SERVICE_ROLE_KEY` not set or wrong. Sync is fire-and-forget — check Vercel logs for `[supabase-sync] ... failed`. |
 | Light mode toggle does nothing | Hard-refresh (Ctrl+Shift+R) — next-themes needs the client bundle. |
+| **Voice mode doesn't hear the user** (deployed) | `HF_TOKEN` not set → server Whisper + Z.ai ASR are both unavailable. Set `HF_TOKEN` (free) in Vercel env vars and redeploy. Check with `GET /api/asr/status` → `{"serverAsr": true}`. Without it users depend on a ~45 MB in-browser model that some networks block. |
+| Skills produce nothing / "sign in required" in chat | Old behavior: skills tried to pip-install desktop CLIs on the server (impossible). New behavior routes every skill to its cloud engine via `run_skill_action` — redeploy to get it. Shell `run_command` remains signed-in-only by design. |
 
 ---
 
