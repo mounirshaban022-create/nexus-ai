@@ -23,6 +23,27 @@
 let pipePromise = null
 let pipe = null
 
+/* Route every Hugging Face model download through our own origin.
+ * Direct huggingface.co fetches die in production (401 on anonymous/gated
+ * files + missing CORS headers on some networks), which silently killed
+ * the on-device fallback. /api/hf-proxy streams the same files same-origin
+ * (with the deployment's HF token when present). */
+const HF_PROXY_PREFIX = '/api/hf-proxy/'
+if (typeof self.fetch === 'function') {
+  const rawFetch = self.fetch.bind(self)
+  self.fetch = (input, init) => {
+    try {
+      const url = typeof input === 'string' ? input : input && input.url
+      if (url && url.startsWith('https://huggingface.co/')) {
+        input = HF_PROXY_PREFIX + url.slice('https://huggingface.co/'.length)
+      }
+    } catch {
+      /* fall through to the original fetch */
+    }
+    return rawFetch(input, init)
+  }
+}
+
 async function getPipeline() {
   if (pipe) return pipe
   if (!pipePromise) {

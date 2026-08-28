@@ -464,6 +464,17 @@ export function NexusShell(props: NexusShellProps) {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
+      // Guests have no server sessions (their chats are local-only) — skip
+      // the fetch instead of burning a guaranteed 401 on every mount and
+      // flashing the "couldn't load conversations" error row.
+      if (!user) {
+        if (!cancelled) {
+          setSessions([])
+          setLoadError(false)
+          setLoading(false)
+        }
+        return
+      }
       try {
         const res = await fetch('/api/chat/sessions?kind=chat')
         // Non-OK responses must not leave the skeleton hanging forever —
@@ -504,7 +515,7 @@ export function NexusShell(props: NexusShellProps) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [refreshKey, reload, retryTick])
+  }, [refreshKey, reload, retryTick, user])
 
   /* Live client-side filter over the fetched sessions. */
   const filtered = useMemo(() => {

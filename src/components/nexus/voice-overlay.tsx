@@ -173,6 +173,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
   const micGenRef = useRef(0)
   const recorderActiveRef = useRef(false)
   const srLastHeardRef = useRef(0)
+  const srStartedAtRef = useRef(0)
   const speechEnergyRef = useRef(0)
   const watchdogFiredRef = useRef(false)
   const waveRef = useRef<HTMLDivElement | null>(null)
@@ -557,8 +558,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
         let speechMs = 0
         const startedAt = performance.now()
         let noiseFloor = 0
-        let noiseSamples = 0
-        let noiseSum = 0
+        const noiseWindow: number[] = []
         const SILENCE_MS = 1200
         const MIN_SPEECH_MS = 240
         const MAX_WAIT = 15_000
@@ -577,13 +577,24 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           }
           const rms = Math.sqrt(sum / data.length)
           const now = performance.now()
-          // Ambient calibration — first ~36 frames (≈600 ms) while silent.
-          if (noiseSamples < 36 && speechStart === null) {
-            noiseSum += rms
-            noiseSamples++
-            if (noiseSamples === 36) noiseFloor = Math.max(0.002, noiseSum / 36)
+          // Ambient calibration — collect ~36 frames (≈600 ms) and take the
+          // MEDIAN as the noise floor. The old MEAN was poisoned when the
+          // user started talking (or any beep played) during calibration:
+          // the floor inflated, the 2.5× threshold rose ABOVE the speech
+          // level itself, and the overlay sat at "Listening…" forever —
+          // "the mic doesn't hear me". The median ignores those spikes and
+          // the hard cap keeps the threshold reachable in noisy rooms.
+          if (noiseFloor === 0 && speechStart === null) {
+            noiseWindow.push(rms)
+            if (noiseWindow.length === 36) {
+              const sorted = [...noiseWindow].sort((a, b) => a - b)
+              noiseFloor = Math.max(0.002, sorted[18])
+            }
           }
-          const threshold = Math.max(0.01, noiseFloor > 0 ? noiseFloor * 2.5 : 0.012)
+          const threshold =
+            noiseFloor > 0
+              ? Math.min(0.06, Math.max(0.01, noiseFloor * 2.5))
+              : 0.012
           if (rms > threshold) {
             speechMs += 16 // rAF frame ≈ 16 ms
             if (speechStart === null && speechMs >= MIN_SPEECH_MS) {
@@ -857,6 +868,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
       restartCountRef.current = 0
       // Watchdog bookkeeping — give SR a fair startup window.
       srLastHeardRef.current = performance.now()
+      srStartedAtRef.current = performance.now()
       speechEnergyRef.current = 0
       try {
         rec.start()
@@ -943,6 +955,7 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
     watchdogFiredRef.current = false
     speechEnergyRef.current = 0
     srLastHeardRef.current = performance.now()
+    srStartedAtRef.current = performance.now()
     recorderActiveRef.current = false
     micGenRef.current++
     setTurns([])
@@ -1116,14 +1129,27 @@ export function VoiceOverlay({ open, onOpenChange }: { open: boolean; onOpenChan
           }
 
           // ---- Web Speech watchdog (SR mode only) ----
+          // Two rescue triggers:
+          //   1. speech detected for >2.2 s with zero SR output (SR answers
+          //      but never transcribes), or
+          //   2. DEAD-MAN: SR has been running >8 s and has produced no
+          //      result/error/interim since start. Headless/WebView/embedded
+          //      Chromium ships SpeechRecognition that silently does nothing
+          //      — the overlay sat at "Listening…" forever and voice looked
+          //      completely dead. Force-switching to the recorder path is
+          //      always safe: the recorder simply waits for real speech.
           if (recognitionRef.current && !watchdogFiredRef.current) {
             const overallRms = energySum / n
             if (overallRms > 0.012) {
               speechEnergyRef.current += dt
             }
+            const srSilentSinceStart =
+              srLastHeardRef.current <= srStartedAtRef.current &&
+              now - srStartedAtRef.current > 8000
             if (
-              speechEnergyRef.current > 2200 &&
-              now - srLastHeardRef.current > 3000
+              (speechEnergyRef.current > 2200 &&
+                now - srLastHeardRef.current > 3000) ||
+              srSilentSinceStart
             ) {
               watchdogFiredRef.current = true
               speechEnergyRef.current = 0

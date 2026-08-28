@@ -13,10 +13,33 @@
 let ttsInstance: any = null
 let loadingPromise: Promise<any> | null = null
 
+/* Route Hugging Face model downloads through our own origin (/api/hf-proxy).
+ * Direct fetches from the browser die in production (401 + missing CORS
+ * headers) — "Kokoro offline voices unavailable: Failed to fetch". The
+ * patch is idempotent and only rewrites huggingface.co URLs. */
+function installHfProxyFetch(): void {
+  if (typeof window === 'undefined' || (window as any).__nexusHfProxyInstalled) return
+  const rawFetch = window.fetch.bind(window)
+  window.fetch = (input, init) => {
+    try {
+      const url = typeof input === 'string' ? input : (input as Request)?.url
+      if (url && url.startsWith('https://huggingface.co/')) {
+        input = '/api/hf-proxy/' + url.slice('https://huggingface.co/'.length)
+      }
+    } catch {
+      /* fall through */
+    }
+    return rawFetch(input as RequestInfo, init)
+  }
+  ;(window as any).__nexusHfProxyInstalled = true
+}
+
 /** Loads the Kokoro model (downloads ~90MB on first use). Rejects after `timeoutMs`. */
 export async function loadKokoro(timeoutMs = 60_000): Promise<any> {
   if (ttsInstance) return ttsInstance
   if (loadingPromise) return loadingPromise
+
+  installHfProxyFetch()
 
   const attempt = (async () => {
     const { KokoroTTS } = await import('kokoro-js')
