@@ -670,18 +670,29 @@ export async function freeWebSearch(query: string, num = 8): Promise<WebSearchRe
  * fallback (handles JS-heavy pages its own service can render).
  */
 export async function readPageSmart(url: string): Promise<PageContent> {
+  let direct: PageContent | null = null
   try {
-    return await readPageDirect(url)
+    direct = await readPageDirect(url)
+    // Table-based pages (e.g. Hacker News) survive the direct fetch but
+    // the extractor strips <table> content → very thin text. In that case
+    // fall through to Jina, which renders/extracts the full page.
+    if (direct.text.length >= 300) return direct
+    console.warn(`[web-access] direct read thin (${direct.text.length} chars), trying Jina Reader`)
   } catch (err) {
     console.error('[web-access] direct read failed, trying Jina Reader:', err instanceof Error ? err.message : err)
   }
   // Jina Reader — renders JavaScript, bypasses most bot walls (keyless;
   // an optional JINA_API_KEY raises the rate limits)
   try {
-    return await readPageJina(url)
+    const jina = await readPageJina(url)
+    if (!direct || jina.text.length > direct.text.length) return jina
+    return direct
   } catch (err) {
     console.error('[web-access] Jina Reader failed, trying Z.ai reader:', err instanceof Error ? err.message : err)
   }
+  // Direct content existed but was thin — still better than nothing when
+  // Jina and Z.ai are both unavailable.
+  if (direct && direct.text.length >= 40) return direct
   // Z.ai fallback
   const { getZAI } = await import('./zai')
   const zai = await getZAI()
