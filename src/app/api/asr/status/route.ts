@@ -27,10 +27,14 @@ export async function GET() {
     ])
 
   const hf = hfConfigured()
+  // Groq Whisper (GROQ_API_KEY) is a second server-side engine — counted
+  // toward serverAsr so the voice UI doesn't needlessly pre-warm the
+  // on-device model when a server engine is available.
+  const groq = (process.env.GROQ_API_KEY || '').trim().length > 0
   const zai = hf ? false : await withTimeout(zaiConfigured(), 2000)
 
   return NextResponse.json(
-    { hf, zai, serverAsr: hf || zai },
+    { hf, groq, zai, serverAsr: hf || groq || zai },
     { headers: { 'Cache-Control': 'no-store' } }
   )
 }
