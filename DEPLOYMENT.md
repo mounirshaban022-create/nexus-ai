@@ -52,7 +52,7 @@ The sandbox uses SQLite; Vercel needs a real Postgres. Supabase gives you one fr
 
 1. **Supabase Dashboard → your project** (`wopzantzdnobajjlzwzl`)
 2. **Use the DIRECT connection** (recommended for this project):
-   - `postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres`
+   - `postgresql://postgres:<DB-PASSWORD-ROTATED-SEE-SECURITY-NOTE>@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres`
    - Why direct (not the pooler): the Supavisor transaction pooler returned `tenant/user postgres.wopzantzdnobajjlzwzl not found` for this project — the pooler doesn't recognize the tenant. The direct connection bypasses the pooler and uses native Postgres auth (user `postgres`, no tenant lookup). For low-to-medium traffic this is fine on Vercel.
    - (If you later enable the pooler in Dashboard → Database → Connection pooling, you can switch to `postgresql://postgres.wopzantzdnobajjlzwzl:<PASSWORD>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true`.)
 3. **Create the 13 tables** — pick ONE:
@@ -121,7 +121,7 @@ The first deploy runs `prisma generate` (via the `postinstall` hook). Creating t
    - **Or: run the SQL manually** in Supabase Dashboard → SQL Editor → paste [`supabase-schema.sql`](./supabase-schema.sql) → Run.
    - **Or: run `prisma db push` locally** with the Supabase `DATABASE_URL` (requires the direct connection — the pooler rejects this project as a tenant):
      ```bash
-     DATABASE_URL="postgresql://postgres:Dubai%4020302025@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres" bun run db:push
+     DATABASE_URL="postgresql://postgres:<DB-PASSWORD-ROTATED-SEE-SECURITY-NOTE>@db.wopzantzdnobajjlzwzl.supabase.co:5432/postgres" bun run db:push
      ```
      (The provider swap is handled by the `build` script on Vercel; for a local push you can pass `--schema=prisma/schema.prisma` after temporarily switching the provider to `postgresql`.)
 2. Confirm in Supabase → Table Editor → you see `ChatSession`, `ChatMessage`, `User`, `EmailAccount`, etc. (or just look at the JSON `tablesAfter` from the endpoint).
