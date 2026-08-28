@@ -6,6 +6,7 @@ import path from 'path'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 
 export const maxDuration = 120
 
@@ -681,6 +682,7 @@ export async function POST(req: NextRequest) {
     // MEDIA FIX: persist the file bytes to the DB so the download URL is
     // durable across Vercel's ephemeral /tmp. The record's id IS the file
     // id, so /api/office/file/[id] can fall back to this row directly.
+    await ensurePerUserColumns()
     try {
       await db.generatedDocument.create({
         data: {

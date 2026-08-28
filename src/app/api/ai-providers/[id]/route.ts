@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getVerifiedSession } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -18,6 +19,7 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     }
     const { id } = await context.params
     // SECURITY: ownership check — deleteMany with userId filter is atomic;
+    await ensurePerUserColumns()
     // returns count=0 when the id belongs to another user (no leak).
     const result = await db.aiProvider.deleteMany({
       where: { id, userId: session.userId },

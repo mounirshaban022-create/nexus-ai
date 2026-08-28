@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getVerifiedSession } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 import { encryptSecret } from '@/lib/email'
 import {
   getWhatsAppAccount,
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
 
   const account = await getWhatsAppAccount(session.userId)
   const appUrl = resolveAppUrl(req)
+  await ensurePerUserColumns()
   return NextResponse.json({
     account: account ? toPublicAccount(account) : null,
     webhookUrl: `${appUrl}/api/whatsapp/webhook`,
@@ -107,6 +109,7 @@ export async function POST(req: NextRequest) {
 
     // SECURITY: per-user. Find the caller's own account; create if none.
     // (No global upsert — each user keeps their own private connection.)
+    await ensurePerUserColumns()
     const existing = await getWhatsAppAccount(session.userId)
     const account = existing
       ? await db.whatsAppAccount.update({
@@ -165,7 +168,7 @@ export async function PATCH(req: NextRequest) {
   if (!account) {
     return NextResponse.json({ error: 'No WhatsApp account connected yet.' }, { status: 404 })
   }
-
+  await ensurePerUserColumns()
   const parsed = patchSchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid settings.' }, { status: 400 })
@@ -196,6 +199,7 @@ export async function DELETE(req: NextRequest) {
 
   // SECURITY: only delete the caller's own account(s). Never wipe another
   // user's WhatsApp connection.
+  await ensurePerUserColumns()
   await db.whatsAppAccount.deleteMany({ where: { userId: session.userId } })
   return NextResponse.json({ ok: true })
 }

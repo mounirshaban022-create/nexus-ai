@@ -79,6 +79,8 @@ export interface PublicWhatsAppAccount {
 export async function getWhatsAppAccount(userId?: string | null): Promise<WhatsAppAccountRecord | null> {
   try {
     if (!userId) return null
+    const { ensurePerUserColumns } = await import('@/lib/schema-guard')
+    await ensurePerUserColumns()
     const account = await db.whatsAppAccount.findFirst({
       where: { userId },
       orderBy: { createdAt: 'asc' },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getVerifiedSession } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 import { encryptSecret, verifyAccount, EMAIL_PRESETS } from '@/lib/email'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
 
     // SECURITY: only the caller's OWN accounts. Never expose another
     // user's connected mailboxes (email address, IMAP/SMTP host, username).
+    await ensurePerUserColumns()
     const accounts = await db.emailAccount.findMany({
       where: { userId: session.userId },
       orderBy: { createdAt: 'asc' },
@@ -79,6 +81,7 @@ export async function POST(req: NextRequest) {
     })
 
     // SECURITY: stamp the caller's userId so this account is private.
+    await ensurePerUserColumns()
     const account = await db.emailAccount.create({
       data: {
         userId: session.userId,

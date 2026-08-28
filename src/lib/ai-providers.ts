@@ -342,6 +342,8 @@ export interface ResolvedAiProvider {
  */
 export async function getActiveAiProvider(userId?: string | null): Promise<ResolvedAiProvider | null> {
   if (!userId) return null
+  const { ensurePerUserColumns } = await import('@/lib/schema-guard')
+  await ensurePerUserColumns()
   const provider = await db.aiProvider.findFirst({
     where: { userId, status: 'connected' },
     orderBy: { createdAt: 'asc' },

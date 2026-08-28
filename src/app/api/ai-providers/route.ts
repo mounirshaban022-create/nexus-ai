@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getVerifiedSession } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 import { encryptSecret } from '@/lib/email'
 import {
   AI_PROVIDER_PRESETS,
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
 
     // SECURITY: only the caller's OWN provider configs. Never expose
     // another user's API keys (even masked) or connection status.
+    await ensurePerUserColumns()
     const providers = await db.aiProvider.findMany({
       where: { userId: session.userId },
       orderBy: { createdAt: 'asc' },
@@ -90,6 +92,7 @@ export async function POST(req: NextRequest) {
 
     // SECURITY: per-user upsert — find this user's existing config for the
     // provider, or create a new private row. (No global providerId unique.)
+    await ensurePerUserColumns()
     const existing = await db.aiProvider.findFirst({
       where: { providerId: preset.id, userId: session.userId },
     })

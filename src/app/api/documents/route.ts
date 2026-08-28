@@ -8,6 +8,7 @@ import { smartChat } from '@/lib/smart-chat'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
 import { getCurrentUser } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 import { extractPdfText } from '@/lib/pdf-text'
 
 export const maxDuration = 120
@@ -400,6 +401,7 @@ export async function PUT(req: NextRequest) {
     await writeFile(filePath, buffer)
 
     // Persist the exported document to the library DB.
+    await ensurePerUserColumns()
     try {
       const docRecord = await db.generatedDocument.create({
         data: {

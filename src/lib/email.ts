@@ -149,6 +149,8 @@ export interface ResolvedAccount {
  */
 export async function getPrimaryAccount(userId?: string | null): Promise<ResolvedAccount | null> {
   if (!userId) return null
+  const { ensurePerUserColumns } = await import('@/lib/schema-guard')
+  await ensurePerUserColumns()
   const account = await db.emailAccount.findFirst({
     where: { userId, status: 'connected' },
     orderBy: { createdAt: 'asc' },

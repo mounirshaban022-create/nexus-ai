@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getVerifiedSession } from '@/lib/auth'
+import { ensurePerUserColumns } from '@/lib/schema-guard'
 import {
   decryptApiKey,
   verifyAiProvider,
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
     const { id } = await context.params
     // SECURITY: only the owner may test/use this provider's key.
+    await ensurePerUserColumns()
     const provider = await db.aiProvider.findFirst({
       where: { id, userId: session.userId },
     })
