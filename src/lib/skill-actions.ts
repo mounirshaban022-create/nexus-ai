@@ -71,10 +71,19 @@ function origin(req: Request): string {
   return `http://localhost:${process.env.PORT || 3000}`
 }
 
-async function callApi<T>(base: string, path: string, body: unknown): Promise<T> {
+async function callApi<T>(
+  base: string,
+  path: string,
+  body: unknown,
+  cookie = ''
+): Promise<T> {
+  // Forward the caller's session cookie — every internal capability route
+  // (/api/image, /api/office/create, /api/search, /api/reader, /api/video/*)
+  // is auth-gated (owner guest-lockdown directive). Without the cookie the
+  // self-fetch gets 401 and EVERY skill run fails on production.
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
     body: JSON.stringify(body),
   })
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
@@ -191,14 +200,16 @@ async function writeOfficeDoc(
   base: string,
   format: 'docx' | 'xlsx' | 'pptx' | 'md',
   title: string,
-  blocks: CleanBlock[]
+  blocks: CleanBlock[],
+  cookie = ''
 ): Promise<{ url: string; format: string } | null> {
   if (blocks.length === 0) return null
   try {
     const data = await callApi<{ file: { url: string; format: string } }>(
       base,
       '/api/office/create',
-      { format, title: title.slice(0, 200), blocks }
+      { format, title: title.slice(0, 200), blocks },
+      cookie
     )
     return data.file
   } catch (err) {
@@ -255,7 +266,8 @@ async function knowledgeBrief(
   skillCategory: string | undefined,
   skillName: string,
   task: string,
-  systemPrompt: string
+  systemPrompt: string,
+  cookie = ''
 ): Promise<SkillRunResult> {
   let raw = ''
   try {
@@ -312,7 +324,7 @@ async function knowledgeBrief(
     }
   }
 
-  const file = await writeOfficeDoc(base, 'docx', title, blocks)
+  const file = await writeOfficeDoc(base, 'docx', title, blocks, cookie)
   if (file) {
     return {
       ok: true,
@@ -325,10 +337,23 @@ async function knowledgeBrief(
       },
     }
   }
-  // Office backend down too — return the markdown in chat.
+  // Office backend down too — paste the briefing INLINE as clean markdown
+  // (NEVER raw JSON — convert the parsed blocks back to readable text).
+  const inline = blocks
+    .map((b) => {
+      if (b.type === 'heading') return `${'#'.repeat(Number(b.level ?? 2))} ${String(b.text ?? '')}`
+      if (b.type === 'bullets') return (Array.isArray(b.items) ? b.items : []).map((i) => `- ${String(i)}`).join('\n')
+      if (b.type === 'table' && Array.isArray(b.rows))
+        return (b.rows as string[][]).map((r) => `| ${(r as string[]).join(' | ')} |`).join('\n')
+      return String(b.text ?? '')
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .trim()
+  const fallbackText = inline || raw.slice(0, 2200)
   return {
     ok: true,
-    summary: `**${skillLabel}** — here's the briefing I drafted (the document builder is momentarily unavailable, so I'm pasting it inline):\n\n${raw.slice(0, 2200)}`,
+    summary: `**${skillLabel}** — here's the briefing I drafted (the document builder is momentarily unavailable, so I'm pasting it inline):\n\n${fallbackText.slice(0, 2200)}`,
   }
 }
 
@@ -476,6 +501,9 @@ export async function runSkillAction(
   const base = origin(req)
   const action = resolveSkillAction(skillName, skillCategory)
   const task = userTask.trim().slice(0, 1200)
+  // Session cookie — forwarded to every internal capability API so the
+  // auth-gated self-fetches succeed (guest lockdown made them 401 otherwise).
+  const cookie = req.headers.get('cookie') ?? ''
   const user = await getCurrentUser(req).catch(() => null)
 
   try {
@@ -497,7 +525,7 @@ export async function runSkillAction(
           const data = await callApi<{ image: { url: string } }>(base, '/api/image', {
             prompt: `${prompt}, ${styleSuffix}`,
             size: action.kind === 'diagram' ? '1344x768' : '1024x1024',
-          })
+          }, cookie)
           return {
             ok: true,
             summary:
@@ -514,7 +542,8 @@ export async function runSkillAction(
           // Fallback: produce a real design brief document.
           return await knowledgeBrief(
             base, displayLabel, skillCategory, skillName, task,
-            `The image backend is unavailable, so produce a detailed DESIGN BRIEF instead: describe the visual concept, palette, composition, style references, and concrete production steps for this image/diagram. `
+            `The image backend is unavailable, so produce a detailed DESIGN BRIEF instead: describe the visual concept, palette, composition, style references, and concrete production steps for this image/diagram. `,
+            cookie
           )
         }
       }
@@ -525,7 +554,7 @@ export async function runSkillAction(
           const data = await callApi<{ jobId: string }>(base, '/api/video/create', {
             prompt: task,
             scenes: '4',
-          })
+          }, cookie)
           return {
             ok: true,
             summary: `Your **${displayLabel}** video is rendering now — scene planning, AI narration and cinematic editing happen live. The finished MP4 appears below. 🎬`,
@@ -538,7 +567,8 @@ export async function runSkillAction(
           )
           return await knowledgeBrief(
             base, displayLabel, skillCategory, skillName, task,
-            `The video backend is unavailable, so produce a detailed STORYBOARD / SHOT PLAN instead: scene-by-scene shots, narration script, pacing, and visual references for this video. `
+            `The video backend is unavailable, so produce a detailed STORYBOARD / SHOT PLAN instead: scene-by-scene shots, narration script, pacing, and visual references for this video. `,
+            cookie
           )
         }
       }
@@ -606,7 +636,7 @@ export async function runSkillAction(
             summary: `**${displayLabel}** — here's what I drafted:\n\n${contentRaw.slice(0, 2200)}`,
           }
         }
-        const file = await writeOfficeDoc(base, format, title, blocks)
+        const file = await writeOfficeDoc(base, format, title, blocks, cookie)
         if (!file) {
           // Office backend down — return content as inline markdown.
           return {
@@ -641,7 +671,8 @@ export async function runSkillAction(
           const data = await callApi<{ results?: Array<{ url: string; name: string; snippet?: string }> }>(
             base,
             '/api/search',
-            { query, summarize: false }
+            { query, summarize: false },
+            cookie
           )
           results = Array.isArray(data.results) ? data.results.slice(0, 6) : []
         } catch (searchErr) {
@@ -687,7 +718,7 @@ export async function runSkillAction(
         }
         let data: { title?: string; text?: string }
         try {
-          data = await callApi<{ title?: string; text?: string }>(base, '/api/reader', { url })
+          data = await callApi<{ title?: string; text?: string }>(base, '/api/reader', { url }, cookie)
         } catch (readErr) {
           console.warn(
             '[skill-runtime] page reader failed:',
@@ -860,7 +891,7 @@ export async function runSkillAction(
             { type: 'paragraph', text: `Chart type: ${String(params.type ?? 'bar')}. Rendered as a data table because the chart image service was unavailable.` },
             { type: 'table', rows },
           ]
-          const file = await writeOfficeDoc(base, 'docx', chartTitle, blocks)
+          const file = await writeOfficeDoc(base, 'docx', chartTitle, blocks, cookie)
           if (file) {
             return {
               ok: true,
@@ -966,7 +997,8 @@ export async function runSkillAction(
           const search = await callApi<{ results?: Array<{ url: string; name: string; snippet?: string }> }>(
             base,
             '/api/search',
-            { query: task.slice(0, 300), summarize: false }
+            { query: task.slice(0, 300), summarize: false },
+            cookie
           )
           results = Array.isArray(search.results) ? search.results.slice(0, 6) : []
         } catch (searchErr) {
@@ -1041,7 +1073,7 @@ export async function runSkillAction(
         }
 
         if (blocks.length > 0) {
-          const file = await writeOfficeDoc(base, 'docx', title, blocks)
+          const file = await writeOfficeDoc(base, 'docx', title, blocks, cookie)
           if (file) {
             return {
               ok: true,

@@ -289,6 +289,10 @@ export async function POST(req: NextRequest) {
   // reads the caller's own mailbox (never another user's).
   const session = await getVerifiedSession(req)
   const verifiedUserId = session?.userId ?? null
+  // Session cookie — forwarded to internal self-fetches (/api/reader is
+  // auth-gated since the guest lockdown; without the cookie every Pro-Search
+  // READ stage got 401 and the answer pipeline degraded to snippets only).
+  const sessionCookie = req.headers.get('cookie') ?? ''
 
   const parsed = requestSchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {
@@ -477,7 +481,10 @@ export async function POST(req: NextRequest) {
             try {
               const res = await fetch(READER_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(sessionCookie ? { cookie: sessionCookie } : {}),
+                },
                 body: JSON.stringify({ url: r.url }),
                 signal: AbortSignal.timeout(READ_TIMEOUT_MS),
               })

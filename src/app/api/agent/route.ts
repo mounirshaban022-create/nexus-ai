@@ -268,7 +268,9 @@ export async function POST(req: NextRequest) {
               result = { error: validated.error }
             } else {
               try {
-                result = await connector.execute(validated.args)
+                result = await connector.execute(validated.args, {
+                  cookie: req.headers.get('cookie') ?? '',
+                })
               } catch (error) {
                 ok = false
                 result = { error: error instanceof Error ? error.message : 'Tool failed.' }

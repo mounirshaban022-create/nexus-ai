@@ -77,3 +77,124 @@ export async function ensurePerUserColumns(): Promise<void> {
     console.warn('[schema-guard] overall failed (non-fatal):', err instanceof Error ? err.message : err)
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* PARSED DOCUMENT STORE — durable parsed-document persistence.        */
+/*                                                                     */
+/* WHY: documents were parsed into an in-memory Map (per-instance). On */
+/* Vercel, the upload (POST) and the follow-up read (GET — chat        */
+/* attachment context, Studio import, document Q&A) can land on        */
+/* DIFFERENT serverless instances → "Document not found" → the chat    */
+/* only ever saw a 500-char preview. This table makes parsed docs      */
+/* durable (additive, self-healing — same pattern as the columns       */
+/* above; no existing table is touched).                               */
+/* ------------------------------------------------------------------ */
+
+export interface ParsedDocumentRow {
+  id: string
+  userId: string | null
+  filename: string
+  format: string
+  title: string
+  text: string
+  sections: string // JSON
+  tables: string // JSON
+  metadata: string // JSON
+  createdAt?: string
+}
+
+const globalForParsedDocGuard = globalThis as unknown as { __nexusParsedDocGuard?: boolean }
+
+/** True when the live datasource is Postgres (Supabase); SQLite in local dev. */
+function isPostgres(): boolean {
+  const url = process.env.DATABASE_URL ?? ''
+  return !url.startsWith('file:')
+}
+
+/**
+ * Ensures the ParsedDocument table exists. Runs at most once per process,
+ * best-effort (a DB hiccup logs but never throws — in-memory store still
+ * covers the warm-instance path).
+ */
+export async function ensureParsedDocumentTable(): Promise<void> {
+  if (globalForParsedDocGuard.__nexusParsedDocGuard) return
+  globalForParsedDocGuard.__nexusParsedDocGuard = true
+  try {
+    await db.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "ParsedDocument" (
+        "id" TEXT PRIMARY KEY,
+        "userId" TEXT,
+        "filename" TEXT NOT NULL,
+        "format" TEXT NOT NULL,
+        "title" TEXT NOT NULL,
+        "text" TEXT NOT NULL,
+        "sections" TEXT NOT NULL DEFAULT '[]',
+        "tables" TEXT NOT NULL DEFAULT '[]',
+        "metadata" TEXT NOT NULL DEFAULT '{}',
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+    await db
+      .$executeRawUnsafe(
+        `CREATE INDEX IF NOT EXISTS "ParsedDocument_userId_createdAt_idx" ON "ParsedDocument"("userId", "createdAt")`
+      )
+      .catch(() => {
+        /* index may already exist — non-fatal */
+      })
+  } catch (err) {
+    console.warn(
+      '[schema-guard] ParsedDocument table ensure failed (non-fatal):',
+      err instanceof Error ? err.message : err
+    )
+  }
+}
+
+/** Positional placeholder for the live dialect ($1.. Postgres, ?.. SQLite). */
+function ph(n: number): string {
+  return isPostgres() ? `$${n}` : '?'
+}
+
+/** Persist a parsed document (best-effort — never throws). */
+export async function persistParsedDocument(row: ParsedDocumentRow): Promise<void> {
+  await ensureParsedDocumentTable()
+  try {
+    await db.$executeRawUnsafe(
+      `INSERT INTO "ParsedDocument" ("id","userId","filename","format","title","text","sections","tables","metadata")
+       VALUES (${ph(1)},${ph(2)},${ph(3)},${ph(4)},${ph(5)},${ph(6)},${ph(7)},${ph(8)},${ph(9)})
+       ON CONFLICT ("id") DO NOTHING`,
+      row.id,
+      row.userId,
+      row.filename,
+      row.format,
+      row.title,
+      row.text,
+      row.sections,
+      row.tables,
+      row.metadata
+    )
+  } catch (err) {
+    console.warn(
+      '[schema-guard] parsed-document persist failed (non-fatal):',
+      err instanceof Error ? err.message : err
+    )
+  }
+}
+
+/** Load a parsed document by id (null when missing / DB unavailable). */
+export async function loadParsedDocument(id: string): Promise<ParsedDocumentRow | null> {
+  await ensureParsedDocumentTable()
+  try {
+    const rows = (await db.$queryRawUnsafe<ParsedDocumentRow[]>(
+      `SELECT "id","userId","filename","format","title","text","sections","tables","metadata","createdAt"
+       FROM "ParsedDocument" WHERE "id" = ${ph(1)} LIMIT 1`,
+      id
+    )) as ParsedDocumentRow[]
+    return rows[0] ?? null
+  } catch (err) {
+    console.warn(
+      '[schema-guard] parsed-document load failed (non-fatal):',
+      err instanceof Error ? err.message : err
+    )
+    return null
+  }
+}

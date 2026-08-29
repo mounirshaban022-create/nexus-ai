@@ -142,9 +142,14 @@ export interface ConnectorDefinition {
 
 /** SECURITY: per-call context so connectors that touch private data
  *  (email accounts) only ever read the CALLER's own records. The
- *  userId is derived from a verified session by every caller. */
+ *  userId is derived from a verified session by every caller.
+ *  `cookie` lets connectors that self-fetch internal capability APIs
+ *  (/api/image, /api/studio/export, /api/code/run …) carry the caller's
+ *  session through — those routes are auth-gated (guest lockdown), so
+ *  without the cookie every agent tool self-fetch got 401. */
 export interface ConnectorContext {
   userId?: string | null
+  cookie?: string
 }
 
 const IMAGES_DIR = path.join(process.cwd(), 'generated-images')

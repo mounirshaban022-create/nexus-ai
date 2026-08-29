@@ -36,14 +36,14 @@ export const AGENT_SKILLS: ConnectorDefinition[] = [
       { name: 'format', type: 'string', description: 'docx (default), xlsx or pptx', required: false },
     ],
     sampleArgs: { title: 'Project Plan', content: '# Project Plan\n\n## Goals\n- Ship v1', format: 'docx' },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const format = String(args.format ?? 'docx').toLowerCase()
       const title = String(args.title ?? 'Document').slice(0, 200)
       const content = String(args.content ?? '')
       if (!content) throw new Error('content required')
       const res = await fetch(`${ORIGIN}/api/studio/export`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(ctx?.cookie ? { cookie: ctx.cookie } : {}) },
         body: JSON.stringify({ format: ['docx', 'md'].includes(format) ? format : 'docx', title, markdown: content }),
       })
       const data = await res.json()
@@ -74,7 +74,7 @@ export const AGENT_SKILLS: ConnectorDefinition[] = [
       rows: 'Rent, 1200\nFood, 400',
       formulas: '3,1,=SUM(B2:B3)',
     },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const title = String(args.title ?? 'Spreadsheet').slice(0, 120)
       // Flat string params (reliable for models of every size). Also accept
       // structured arrays when the model passes them anyway.
@@ -121,7 +121,7 @@ export const AGENT_SKILLS: ConnectorDefinition[] = [
 
       const res = await fetch(`${ORIGIN}/api/agent/spreadsheet`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(ctx?.cookie ? { cookie: ctx.cookie } : {}) },
         body: JSON.stringify({ title, sheets: [{ name: title.slice(0, 24) || 'Sheet', headers, rows, formulas }] }),
       })
       const data = await res.json()
@@ -145,12 +145,12 @@ export const AGENT_SKILLS: ConnectorDefinition[] = [
       { name: 'prompt', type: 'string', description: 'Detailed visual description', required: true },
     ],
     sampleArgs: { prompt: 'A minimalist logo of a mountain, warm colors' },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const prompt = String(args.prompt ?? '').slice(0, 2000)
       if (!prompt) throw new Error('prompt required')
       const res = await fetch(`${ORIGIN}/api/image`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(ctx?.cookie ? { cookie: ctx.cookie } : {}) },
         body: JSON.stringify({ prompt, size: '1024x1024' }),
       })
       const data = await res.json()
@@ -170,13 +170,13 @@ export const AGENT_SKILLS: ConnectorDefinition[] = [
       { name: 'code', type: 'string', description: 'The code to run', required: true },
     ],
     sampleArgs: { language: 'javascript', code: 'console.log(2+2)' },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const language = String(args.language ?? 'javascript').toLowerCase()
       const code = String(args.code ?? '')
       if (!code) throw new Error('code required')
       const res = await fetch(`${ORIGIN}/api/code/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(ctx?.cookie ? { cookie: ctx.cookie } : {}) },
         body: JSON.stringify({ language: ['javascript', 'typescript', 'python'].includes(language) ? language : 'javascript', code }),
       })
       const data = await res.json()

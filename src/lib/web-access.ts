@@ -393,11 +393,105 @@ export async function readPageDirect(url: string): Promise<PageContent> {
 /* Unified chains (search + read) with Z.ai as last resort            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Provider 0: Gemini + Google Search grounding (API — IP-proof)       */
+/* ------------------------------------------------------------------ */
+
 /**
- * FREE WEB SEARCH CHAIN: Brave → DuckDuckGo → Wikipedia → Z.ai.
- * Each provider has an independent rate-limit budget. Z.ai is kept as
- * the final fallback so quality is unchanged whenever its quota is
- * available.
+ * THE QUALITY ENGINE: real Google Search results via Gemini's built-in
+ * google_search grounding (GEMINI_API_KEY — already provisioned on Vercel).
+ * Unlike the scrapers below, this is a first-class API: it works from any
+ * datacenter IP (Vercel included), needs no cookies, and returns the same
+ * index quality famous answer engines use. Grounding metadata carries the
+ * result URL + title + domain for each source chunk.
+ */
+export async function geminiGroundSearch(query: string, num = 8): Promise<WebSearchResult[]> {
+  const key = process.env.GEMINI_API_KEY?.trim()
+  if (!key) throw new Error('Gemini grounding not configured')
+
+  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-flash-latest']
+  let lastError = 'no model answered'
+
+  for (const model of models) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text:
+                      `Search the web for: ${query}\n\n` +
+                      `Return the top ${num} most relevant, high-quality results. Do not answer the question — just search and ground yourself in the results.`,
+                  },
+                ],
+              },
+            ],
+            tools: [{ google_search: {} }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+          }),
+          signal: AbortSignal.timeout(20_000),
+        }
+      )
+      if (!res.ok) {
+        lastError = `${model}: HTTP ${res.status} ${(await res.text()).slice(0, 140)}`
+        continue
+      }
+      const data = (await res.json()) as {
+        candidates?: Array<{
+          groundingMetadata?: {
+            groundingChunks?: Array<{ web?: { uri?: string; title?: string; domain?: string } }>
+          }
+        }>
+      }
+      const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
+      const results: WebSearchResult[] = []
+      const seen = new Set<string>()
+      for (const c of chunks) {
+        const web = c.web
+        if (!web?.uri || !/^https?:\/\//.test(web.uri)) continue
+        const uri = web.uri
+        // Grounding can return the same domain many times — diversify hosts
+        let host = ''
+        try {
+          host = new URL(uri).hostname.replace(/^www\./, '')
+        } catch {
+          continue
+        }
+        const dedupeKey = `${host}${new URL(uri).pathname}`
+        if (seen.has(dedupeKey)) continue
+        seen.add(dedupeKey)
+        results.push({
+          title: web.title || host,
+          url: uri,
+          snippet: '',
+          host_name: web.domain || host,
+          rank: results.length + 1,
+          favicon: faviconFor(uri),
+        })
+        if (results.length >= num) break
+      }
+      if (results.length === 0) {
+        lastError = `${model}: no grounding chunks returned`
+        continue
+      }
+      return results
+    } catch (err) {
+      lastError = `${model}: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+  throw new Error(lastError)
+}
+
+/**
+ * FREE WEB SEARCH CHAIN: Gemini(Google) → Brave → DuckDuckGo → Wikipedia.
+ * Each provider has an independent rate-limit budget. Gemini grounding is
+ * tried FIRST: it's a real API (immune to datacenter-IP blocks that break
+ * the Brave/DDG scrapers on Vercel) and returns Google-index quality.
  */
 export async function freeWebSearch(
   query: string,
@@ -407,6 +501,13 @@ export async function freeWebSearch(
   if (!trimmed) return []
 
   const errors: string[] = []
+
+  // 0. Gemini + Google Search grounding (API-grade quality, IP-proof)
+  try {
+    return await geminiGroundSearch(trimmed, num)
+  } catch (err) {
+    errors.push(`gemini: ${err instanceof Error ? err.message : err}`)
+  }
 
   // 1. Brave (best general coverage — verified live)
   try {

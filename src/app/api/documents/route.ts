@@ -8,7 +8,7 @@ import { smartChat } from '@/lib/smart-chat'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
 import { requireVerifiedSession, getCurrentUser } from '@/lib/auth'
-import { ensurePerUserColumns } from '@/lib/schema-guard'
+import { ensurePerUserColumns, persistParsedDocument, loadParsedDocument } from '@/lib/schema-guard'
 import { extractPdfText } from '@/lib/pdf-text'
 import type { Paragraph } from 'docx'
 
@@ -232,6 +232,23 @@ export async function POST(req: NextRequest) {
     }
     docStore.set(doc.id, doc)
 
+    // DURABLE PERSISTENCE — the in-memory docStore is per-serverless-instance;
+    // on Vercel the follow-up GET (chat attachment context, Studio import,
+    // document Q&A) can hit a different instance → "Document not found".
+    // Persisting makes every later read work (additive table, best-effort).
+    const user = await getCurrentUser(req).catch(() => null)
+    void persistParsedDocument({
+      id: doc.id,
+      userId: user?.id ?? null,
+      filename: doc.filename,
+      format: doc.format,
+      title: doc.title,
+      text: doc.text,
+      sections: JSON.stringify(doc.sections),
+      tables: JSON.stringify(doc.tables),
+      metadata: JSON.stringify(doc.metadata),
+    })
+
     // AI summary for instant context
     let summary = ''
     try {
@@ -261,6 +278,12 @@ export async function POST(req: NextRequest) {
         tableCount: doc.tables.length,
         preview: text.slice(0, 500),
         summary,
+        // FULL parsed text + sections in the upload response itself — the
+        // caller (chat attachment context) must not depend on a second GET
+        // that can land on a different serverless instance.
+        text: doc.text.slice(0, 40_000),
+        sections: doc.sections,
+        tables: doc.tables,
       },
     })
   } catch (error) {
@@ -280,11 +303,45 @@ export async function GET(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get('id')
     const question = req.nextUrl.searchParams.get('q')
-    if (!id || !docStore.has(id)) {
-      return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+    if (!id) {
+      return NextResponse.json({ error: 'Document id required.' }, { status: 400 })
     }
 
-    const doc = docStore.get(id)!
+    let doc = docStore.get(id) ?? null
+    if (!doc) {
+      // Cold instance — rebuild from the durable store (survives instance
+      // switches on Vercel; the in-memory map covers the warm path).
+      const row = await loadParsedDocument(id)
+      if (row) {
+        let sections: ParsedDoc['sections'] = []
+        let tables: ParsedDoc['tables'] = []
+        let metadata: ParsedDoc['metadata'] = { wordCount: 0, charCount: 0, readingTime: 0 }
+        try {
+          sections = JSON.parse(row.sections) as ParsedDoc['sections']
+        } catch { /* keep empty */ }
+        try {
+          tables = JSON.parse(row.tables) as ParsedDoc['tables']
+        } catch { /* keep empty */ }
+        try {
+          metadata = { ...metadata, ...(JSON.parse(row.metadata) as Partial<ParsedDoc['metadata']>) }
+        } catch { /* keep defaults */ }
+        doc = {
+          id: row.id,
+          filename: row.filename,
+          format: row.format as ParsedDoc['format'],
+          title: row.title,
+          text: row.text,
+          sections,
+          tables,
+          metadata,
+          uploadedAt: row.createdAt ?? new Date().toISOString(),
+        }
+        docStore.set(doc.id, doc) // warm the cache for subsequent reads
+      }
+    }
+    if (!doc) {
+      return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+    }
 
     if (!question) {
       return NextResponse.json({

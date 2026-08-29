@@ -1593,8 +1593,12 @@ async function executeChatTool(
   const validated = validateConnectorArgs(connector, args)
   if (!validated.ok) return { result: { error: validated.error } }
   // SECURITY: pass the caller's userId so email connectors read only
-  // the caller's own mailbox.
-  const result = await connector.execute(validated.args, { userId })
+  // the caller's own mailbox. Cookie forwarded so connectors that
+  // self-fetch auth-gated internal capability APIs succeed.
+  const result = await connector.execute(validated.args, {
+    userId,
+    cookie: req.headers.get('cookie') ?? '',
+  })
   // Attach search results richly
   if (toolId === 'web_search' && Array.isArray((result as { results?: unknown[] }).results)) {
     const results = (result as { results: Array<{ title: string; url: string; snippet: string }> }).results
