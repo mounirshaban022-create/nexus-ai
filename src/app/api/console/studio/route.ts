@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { requireConsole } from '@/lib/console/auth'
 import { audit } from '@/lib/console/guard'
 import { premiumImageCascade, premiumImageEngines } from '@/lib/premium-image'
+import { pollinationsImage } from '@/lib/pollinations'
 import { hfConfigured, xaiConfigured, geminiConfigured } from '@/lib/console/engines'
 
 export const runtime = 'nodejs'
@@ -153,21 +154,16 @@ export async function POST(req: NextRequest) {
         const attempts = (err as Error & { attempts?: { engine: string; error: string }[] }).attempts ?? [
           { engine: 'cascade', error: err instanceof Error ? err.message : String(err) },
         ]
-        // Even the premium engines failed — fall through to the app's own
-        // free Pollinations path so the console still demonstrates the pipeline.
+        // Even the premium engines failed — fall through to the free
+        // Pollinations engine directly so the console still demonstrates
+        // the full pipeline end-to-end.
         try {
-          const res = await fetch(new URL('/api/image', req.url), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') ?? '' },
-            body: JSON.stringify({ prompt, size: '1024x1024', provider: 'free' }),
+          const buf = await pollinationsImage(prompt, '1024x1024')
+          const created = await db.generatedImage.create({
+            data: { prompt, size: '1024x1024', provider: 'pollinations-fallback', url: '', data: buf.toString('base64'), userId: null },
           })
-          if (res.ok) {
-            const j = (await res.json()) as { record?: { id?: string }, id?: string }
-            const id = j.record?.id ?? j.id
-            if (id) {
-              return NextResponse.json({ ok: true, engine: 'pollinations-fallback', fileUrl: `/api/console/generations/file/images/${id}`, attempts })
-            }
-          }
+          await db.generatedImage.update({ where: { id: created.id }, data: { url: `/api/console/generations/file/images/${created.id}` } }).catch(() => {})
+          return NextResponse.json({ ok: true, engine: 'pollinations-fallback', fileUrl: `/api/console/generations/file/images/${created.id}`, attempts })
         } catch { /* fallthrough */ }
         return NextResponse.json({ error: 'Image engines unavailable', attempts }, { status: 502 })
       }
