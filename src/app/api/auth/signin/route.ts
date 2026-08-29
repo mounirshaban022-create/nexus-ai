@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { verifyPassword, signToken, setSessionCookie } from '@/lib/auth'
+import { verifyPassword, signToken, setSessionCookie, isUserSuspended } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
@@ -44,6 +44,12 @@ export async function POST(req: NextRequest) {
   const ok = await verifyPassword(parsed.data.password, user.passwordHash)
   if (!ok) {
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
+  }
+
+  // Console control hook: suspended accounts cannot sign in (fail-open on
+  // any storage error — see isUserSuspended in src/lib/auth.ts).
+  if (await isUserSuspended(user.id)) {
+    return NextResponse.json({ error: 'This account has been suspended. Contact support.' }, { status: 403 })
   }
 
   const token = await signToken({ userId: user.id })

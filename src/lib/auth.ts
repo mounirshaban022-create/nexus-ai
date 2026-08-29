@@ -68,7 +68,49 @@ export async function verifyToken(token: string): Promise<{ userId: string } | n
 export async function getSession(req: NextRequest): Promise<{ userId: string } | null> {
   const token = req.cookies.get(SESSION_COOKIE)?.value
   if (!token) return null
-  return verifyToken(token)
+  const verified = await verifyToken(token)
+  if (!verified) return null
+
+  // ── CONSOLE CONTROL HOOK (additive, fail-open) ──────────────────────
+  // The admin console can suspend an account (/console → Users). When a
+  // suspension flag exists for this user, their session is void effective
+  // immediately — the next request from the suspended account is treated
+  // as signed-out, and new sign-ins are refused by the same lookup in the
+  // signin route. The check is cached for 30s per process, wrapped in
+  // try/catch, and returns "no flag" on ANY failure so console storage
+  // problems can NEVER take the app's own auth down.
+  if (await isUserSuspended(verified.userId)) return null
+
+  return verified
+}
+
+/* Suspension lookup shared with the signin route (one cached read). */
+const SUSPEND_CACHE_TTL_MS = 30_000
+const globalForSuspend = globalThis as unknown as {
+  __nexusSuspendCache?: { at: number; map: Map<string, boolean> }
+}
+
+export async function isUserSuspended(userId: string): Promise<boolean> {
+  const cache = globalForSuspend.__nexusSuspendCache
+  if (!cache || Date.now() - cache.at > SUSPEND_CACHE_TTL_MS) {
+    const map = new Map<string, boolean>()
+    globalForSuspend.__nexusSuspendCache = { at: Date.now(), map }
+  }
+  const map = globalForSuspend.__nexusSuspendCache!.map
+  if (map.has(userId)) return map.get(userId)!
+  try {
+    const rows = await db.$queryRawUnsafe<{ suspended: boolean }[]>(
+      `SELECT "suspended" FROM "ConsoleUserFlag" WHERE "userId" = $1 LIMIT 1`,
+      userId
+    )
+    const suspended = rows.length > 0 && Boolean(rows[0].suspended)
+    map.set(userId, suspended)
+    return suspended
+  } catch {
+    // Table not created yet (console never used) or DB hiccup → fail open.
+    map.set(userId, false)
+    return false
+  }
 }
 
 /**

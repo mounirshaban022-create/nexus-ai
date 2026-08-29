@@ -5,7 +5,7 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
-import { getZAI, zaiConfigured } from '@/lib/zai'
+import { geminiImage, hfImage, premiumImageEngines } from '@/lib/premium-image'
 import { openrouterConfigured, openrouterGenerateImage } from '@/lib/openrouter'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { getVerifiedSession, getCurrentUser } from '@/lib/auth'
@@ -22,12 +22,16 @@ const IMAGES_DIR = IS_VERCEL
   : path.join(process.cwd(), 'generated-images')
 
 /**
- * IMAGE GENERATION — free-first pipeline (works everywhere, no paid keys):
+ * IMAGE GENERATION — premium-first pipeline (Vercel-native, no Z.ai):
  *
- *   1. Pollinations FLUX (FREE, open, no API key) — primary engine.
- *   2. Z.ai engine — optional enhancement when the platform gateway is
- *      reachable (sandbox only).
- *   3. OpenRouter — optional fallback when the user configured a key.
+ *   1. Google Gemini (gemini-2.5-flash-image → 2.0 preview fallback) —
+ *      flagship quality, key already provisioned in the deployment.
+ *   2. Hugging Face FLUX.1-dev → schnell — flagship open diffusion.
+ *   3. Pollinations FLUX (FREE, open, no API key) — universal fallback.
+ *   4. OpenRouter — optional last resort with a user key.
+ *
+ * Every engine failure cascades to the next; the response records which
+ * engine actually produced the bytes.
  *
  * Bytes are persisted BOTH to disk and to the DB (base64) so generated
  * images survive Vercel's ephemeral /tmp across serverless invocations.
@@ -78,32 +82,36 @@ export async function POST(req: NextRequest) {
     let buffer: Buffer | null = null
     let usedEngine = 'pollinations'
 
-    /* ---- 1. FREE engine first — Pollinations FLUX (no key, works on Vercel) ---- */
-    try {
-      buffer = await pollinationsImage(trimmedPrompt, chosenSize)
-    } catch (freeErr) {
-      console.warn('[api/image] Pollinations failed:', freeErr instanceof Error ? freeErr.message : freeErr)
-    }
-
-    /* ---- 2. Z.ai engine — optional enhancement when reachable ---- */
-    if (!buffer && (await zaiConfigured().catch(() => false))) {
+    /* ---- 1. PREMIUM engine — Google Gemini (deployment-provisioned key) ---- */
+    if (premiumImageEngines().gemini) {
       try {
-        const zai = await getZAI()
-        const response = await zai.images.generations.create({
-          prompt: trimmedPrompt,
-          size: chosenSize,
-        })
-        const base64 = response.data?.[0]?.base64
-        if (base64) {
-          buffer = Buffer.from(base64, 'base64')
-          usedEngine = 'zai'
-        }
-      } catch (zaiImgErr) {
-        console.warn('[api/image] Z.ai image gen failed:', zaiImgErr instanceof Error ? zaiImgErr.message : zaiImgErr)
+        buffer = await geminiImage(trimmedPrompt, chosenSize)
+        usedEngine = 'gemini'
+      } catch (geminiErr) {
+        console.warn('[api/image] Gemini image gen failed:', geminiErr instanceof Error ? geminiErr.message : geminiErr)
       }
     }
 
-    /* ---- 3. OpenRouter — optional last resort with a user key ---- */
+    /* ---- 2. PREMIUM engine — Hugging Face FLUX ---- */
+    if (!buffer && premiumImageEngines().huggingface) {
+      try {
+        buffer = await hfImage(trimmedPrompt, chosenSize)
+        usedEngine = 'hf-flux'
+      } catch (hfErr) {
+        console.warn('[api/image] HF FLUX failed:', hfErr instanceof Error ? hfErr.message : hfErr)
+      }
+    }
+
+    /* ---- 3. FREE engine — Pollinations FLUX (no key, works on Vercel) ---- */
+    if (!buffer) {
+      try {
+        buffer = await pollinationsImage(trimmedPrompt, chosenSize)
+      } catch (freeErr) {
+        console.warn('[api/image] Pollinations failed:', freeErr instanceof Error ? freeErr.message : freeErr)
+      }
+    }
+
+    /* ---- 4. OpenRouter — optional last resort with a user key ---- */
     if (!buffer && openrouterConfigured()) {
       const { base64 } = await openrouterGenerateImage({ prompt: trimmedPrompt, size: chosenSize })
       buffer = Buffer.from(base64, 'base64')

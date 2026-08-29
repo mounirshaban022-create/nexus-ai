@@ -80,6 +80,18 @@ function configFromEnv(): ZaiConfig | null {
  *  file-based config (sandbox) nor env vars (Vercel) are available.
  *  Memoized. */
 async function loadZaiSdk(): Promise<ZaiSdk | null> {
+  // ── Z.AI PERMANENTLY DISABLED (owner directive) ─────────────────────
+  // The owner mandates: "Don't use Z.ai AI at all — it doesn't work on
+  // Vercel." Rather than touching the 10+ guarded call sites (risky),
+  // this single choke point now always returns null, so every guarded
+  // branch (zaiConfigured() === false) skips Z.ai instantly and the
+  // premium engine chain (Gemini / HF / OpenRouter / Pollinations) takes
+  // over. All exports are kept so static imports still resolve.
+  globalForZAI.zaiInitFailed = true
+  globalForZAI.zaiInitError = 'Z.ai permanently disabled by owner directive — premium engines handle all AI workloads'
+  return null
+
+  /* eslint-disable no-unreachable -- retained for history/revert */
   if (globalForZAI.zai) return globalForZAI.zai
   if (globalForZAI.zaiInitFailed) return null
   try {
