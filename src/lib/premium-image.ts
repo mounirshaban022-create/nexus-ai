@@ -21,12 +21,14 @@
 
 const GEMINI_ENDPOINTS = [
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent',
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent',
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent',
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent',
 ]
 
 const HF_ENDPOINTS = [
-  'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev',
-  'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
+  'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-dev',
+  'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
 ]
 
 export function geminiImageConfigured(): boolean {
@@ -86,7 +88,8 @@ export async function geminiImage(prompt: string, size: string): Promise<Buffer>
         signal: t.signal,
       })
       if (!res.ok) {
-        lastErr = new Error(`Gemini ${endpoint.split('/models/')[1]} → ${res.status}`)
+        const bodyText = await res.text().catch(() => '')
+        lastErr = new Error(`Gemini ${endpoint.split('/models/')[1]?.split(':')[0]} → ${res.status}: ${bodyText.slice(0, 160)}`)
         continue
       }
       const json = await res.json().catch(() => null)
@@ -121,7 +124,8 @@ export async function hfImage(prompt: string, size: string): Promise<Buffer> {
         signal: t.signal,
       })
       if (!res.ok) {
-        lastErr = new Error(`HF ${endpoint.split('/models/')[1]} → ${res.status}`)
+        const errText = await res.text().catch(() => '')
+        lastErr = new Error(`HF ${endpoint.split('/models/')[1]} → ${res.status}: ${errText.slice(0, 140)}`)
         continue
       }
       const arr = new Uint8Array(await res.arrayBuffer())
