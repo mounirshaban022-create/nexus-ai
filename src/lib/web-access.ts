@@ -487,15 +487,137 @@ export async function geminiGroundSearch(query: string, num = 8): Promise<WebSea
   throw new Error(lastError)
 }
 
+/* ------------------------------------------------------------------ */
+/* Provider 0b: Bing News RSS (keyless, datacenter-friendly)           */
+/* ------------------------------------------------------------------ */
+
+/** XML text cleanup: CDATA + entity decoding + tag strip. */
+function xmlClean(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .trim()
+}
+
+/** Bing News RSS item links are apiclick redirects with the real article
+ *  URL inside the `url` param — decode it when present. */
+function decodeBingNewsLink(link: string): string {
+  try {
+    const flat = xmlClean(link)
+    if (!/bing\.com\/news\/apiclick/.test(flat)) return flat
+    const urlParam = /[?&]url=([^&]+)/.exec(flat)
+    if (urlParam) {
+      const decoded = decodeURIComponent(urlParam[1])
+      if (/^https?:\/\//.test(decoded)) return decoded
+    }
+  } catch {
+    /* fall through to raw link */
+  }
+  return xmlClean(link)
+}
+
+export async function bingNewsSearch(query: string, num = 8): Promise<WebSearchResult[]> {
+  const res = await fetch(
+    `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=RSS&mkt=en-US`,
+    { headers: { 'User-Agent': BROWSER_HEADERS['User-Agent'] }, signal: AbortSignal.timeout(12_000) }
+  )
+  if (!res.ok) throw new Error(`Bing News RSS responded ${res.status}`)
+  const xml = await res.text()
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)]
+  if (items.length === 0) throw new Error('Bing News RSS returned no items')
+  const results: WebSearchResult[] = []
+  for (const item of items) {
+    if (results.length >= num) break
+    const block = item[1]
+    const title = xmlClean(/<title>([\s\S]*?)<\/title>/.exec(block)?.[1] ?? '')
+    const rawLink = /<link>([\s\S]*?)<\/link>/.exec(block)?.[1] ?? ''
+    const url = decodeBingNewsLink(rawLink)
+    if (!title || !/^https?:\/\//.test(url)) continue
+    const snippet = xmlClean(/<description>([\s\S]*?)<\/description>/.exec(block)?.[1] ?? '')
+    const date = /<pubDate>([^<]+)<\/pubDate>/.exec(block)?.[1]
+    let host = ''
+    try {
+      host = new URL(url).hostname.replace(/^www\./, '')
+    } catch {
+      continue
+    }
+    results.push({
+      title,
+      url,
+      snippet,
+      host_name: host,
+      rank: results.length + 1,
+      date: date ? new Date(date).toISOString().slice(0, 10) : undefined,
+      favicon: faviconFor(url),
+    })
+  }
+  if (results.length === 0) throw new Error('Bing News RSS: no parseable results')
+  return results
+}
+
+/* ------------------------------------------------------------------ */
+/* Provider 0c: Google News RSS (keyless, datacenter-friendly)         */
+/* ------------------------------------------------------------------ */
+
+export async function googleNewsSearch(query: string, num = 8): Promise<WebSearchResult[]> {
+  const res = await fetch(
+    `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`,
+    { headers: { 'User-Agent': BROWSER_HEADERS['User-Agent'] }, signal: AbortSignal.timeout(12_000) }
+  )
+  if (!res.ok) throw new Error(`Google News RSS responded ${res.status}`)
+  const xml = await res.text()
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)]
+  if (items.length === 0) throw new Error('Google News RSS returned no items')
+  const results: WebSearchResult[] = []
+  for (const item of items) {
+    if (results.length >= num) break
+    const block = item[1]
+    const rawTitle = xmlClean(/<title>([\s\S]*?)<\/title>/.exec(block)?.[1] ?? '')
+    const url = xmlClean(/<link>([\s\S]*?)<\/link>/.exec(block)?.[1] ?? '')
+    if (!rawTitle || !/^https?:\/\//.test(url)) continue
+    // Google News titles are "Headline - Publisher"
+    const dash = rawTitle.lastIndexOf(' - ')
+    const title = dash > 10 ? rawTitle.slice(0, dash) : rawTitle
+    const publisher = dash > 10 ? rawTitle.slice(dash + 3) : ''
+    const sourceUrl = /<source[^>]*url="([^"]+)"/.exec(block)?.[1] ?? ''
+    let host = ''
+    try {
+      host = sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, '') : 'news.google.com'
+    } catch {
+      host = 'news.google.com'
+    }
+    const date = /<pubDate>([^<]+)<\/pubDate>/.exec(block)?.[1]
+    results.push({
+      title,
+      url,
+      snippet: publisher ? `${publisher}${date ? ' · ' + new Date(date).toISOString().slice(0, 10) : ''}` : '',
+      host_name: host,
+      rank: results.length + 1,
+      date: date ? new Date(date).toISOString().slice(0, 10) : undefined,
+      favicon: sourceUrl ? faviconFor(sourceUrl) : faviconFor(url),
+    })
+  }
+  if (results.length === 0) throw new Error('Google News RSS: no parseable results')
+  return results
+}
+
 /**
- * FREE WEB SEARCH CHAIN (parallel racing): {Gemini(Google) | Brave | DDG} → Wikipedia.
+ * FREE WEB SEARCH CHAIN (parallel racing):
+ * {Gemini(Google) | Brave | DDG | BingNews RSS | GoogleNews RSS} → Wikipedia.
  *
- * The three general engines fire IN PARALLEL (allSettled) and the best
- * available answer is picked by priority — Gemini grounding (Google index,
- * API-grade) → Brave → DuckDuckGo. Parallelism keeps worst-case latency at
- * ~max(engine) instead of the sum, so a blocked engine no longer stalls
- * the user for 30-45s. Wikipedia remains the always-up encyclopedic
- * safety net. The chosen engine id is returned for observability.
+ * Five engines fire IN PARALLEL (allSettled) and the best available answer
+ * is picked by priority — Gemini grounding (Google index, API-grade) →
+ * Brave → DuckDuckGo → Bing News RSS → Google News RSS. The RSS engines
+ * are keyless AND work from datacenter IPs, so on days when the Gemini key
+ * is quota-limited and the scrapers are blocked (the exact production
+ * failure mode), NEXUS still returns real, fresh results instead of only
+ * Wikipedia. Wikipedia remains the encyclopedic safety net.
  */
 let lastSearchEngine = 'none'
 let lastSearchErrors: string[] = []
@@ -515,42 +637,40 @@ export async function freeWebSearch(
   if (!trimmed) return []
   lastSearchErrors = []
 
-  // 0. Parallel race: Gemini grounding + Brave scrape + DDG scrape
+  // 0. Parallel race across all general engines
   const settled = await Promise.allSettled([
     geminiGroundSearch(trimmed, num),
     braveSearch(trimmed, num),
     duckDuckGoSearch(trimmed, num),
+    bingNewsSearch(trimmed, num),
+    googleNewsSearch(trimmed, num),
   ])
-  const [geminiRes, braveRes, ddgRes] = settled
 
-  // Capture per-engine outcomes unconditionally (observability)
+  const names = ['gemini', 'brave', 'ddg', 'bing-news', 'google-news']
+  const priorities: Array<{ engine: string; value: WebSearchResult[] }> = []
   lastSearchErrors = settled.map((r, i) =>
-    `${['gemini', 'brave', 'ddg'][i]}: ${r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)).slice(0, 140) : r.value.length > 0 ? `ok (${r.value.length})` : 'no results'}`
+    `${names[i]}: ${r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)).slice(0, 140) : r.value.length > 0 ? `ok (${r.value.length})` : 'no results'}`
   )
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value.length > 0) {
+      priorities.push({ engine: names[i], value: r.value })
+    }
+  })
+  priorities.sort((a, b) => names.indexOf(a.engine) - names.indexOf(b.engine))
 
   // Snippet enrichment: Gemini grounding returns titles + URLs but no
-  // excerpts. Brave/DDG (already fetched in parallel) often have snippets
-  // for the same URLs — join them so the UI never shows an empty card.
-  const snippetByPath = new Map<string, string>()
-  for (const res of [braveRes, ddgRes]) {
-    if (res.status === 'fulfilled') {
-      for (const r of res.value) {
-        if (r.snippet && !snippetByPath.has(r.url)) snippetByPath.set(r.url, r.snippet)
-      }
+  // excerpts — join snippets from the other engines where URLs overlap.
+  const snippetByURL = new Map<string, string>()
+  for (const p of priorities) {
+    for (const r of p.value) {
+      if (r.snippet && !snippetByURL.has(r.url)) snippetByURL.set(r.url, r.snippet)
     }
   }
 
-  if (geminiRes.status === 'fulfilled' && geminiRes.value.length > 0) {
-    lastSearchEngine = 'gemini-google'
-    return geminiRes.value.map((r) => ({ ...r, snippet: r.snippet || snippetByPath.get(r.url) || '' }))
-  }
-  if (braveRes.status === 'fulfilled' && braveRes.value.length > 0) {
-    lastSearchEngine = 'brave'
-    return braveRes.value
-  }
-  if (ddgRes.status === 'fulfilled' && ddgRes.value.length > 0) {
-    lastSearchEngine = 'duckduckgo'
-    return ddgRes.value
+  if (priorities.length > 0) {
+    const best = priorities[0]
+    lastSearchEngine = best.engine
+    return best.value.map((r) => ({ ...r, snippet: r.snippet || snippetByURL.get(r.url) || '' }))
   }
 
   const errors = lastSearchErrors
