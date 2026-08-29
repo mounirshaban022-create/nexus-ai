@@ -498,8 +498,13 @@ export async function geminiGroundSearch(query: string, num = 8): Promise<WebSea
  * safety net. The chosen engine id is returned for observability.
  */
 let lastSearchEngine = 'none'
+let lastSearchErrors: string[] = []
 export function lastSearchEngineUsed(): string {
   return lastSearchEngine
+}
+/** Truncated per-engine failure reasons (safe: engine names + HTTP codes). */
+export function lastSearchEngineErrors(): string[] {
+  return lastSearchErrors
 }
 
 export async function freeWebSearch(
@@ -508,6 +513,7 @@ export async function freeWebSearch(
 ): Promise<WebSearchResult[]> {
   const trimmed = query.trim()
   if (!trimmed) return []
+  lastSearchErrors = []
 
   // 0. Parallel race: Gemini grounding + Brave scrape + DDG scrape
   const settled = await Promise.allSettled([
@@ -516,6 +522,11 @@ export async function freeWebSearch(
     duckDuckGoSearch(trimmed, num),
   ])
   const [geminiRes, braveRes, ddgRes] = settled
+
+  // Capture per-engine outcomes unconditionally (observability)
+  lastSearchErrors = settled.map((r, i) =>
+    `${['gemini', 'brave', 'ddg'][i]}: ${r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)).slice(0, 140) : r.value.length > 0 ? `ok (${r.value.length})` : 'no results'}`
+  )
 
   // Snippet enrichment: Gemini grounding returns titles + URLs but no
   // excerpts. Brave/DDG (already fetched in parallel) often have snippets
@@ -542,9 +553,7 @@ export async function freeWebSearch(
     return ddgRes.value
   }
 
-  const errors = settled.map((r, i) =>
-    `${['gemini', 'brave', 'ddg'][i]}: ${r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : 'no results'}`
-  )
+  const errors = lastSearchErrors
 
   // 1. Wikipedia (encyclopedic only, but always up)
   try {

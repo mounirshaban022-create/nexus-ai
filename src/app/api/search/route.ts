@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { smartChat } from '@/lib/smart-chat'
-import { freeWebSearch, lastSearchEngineUsed } from '@/lib/web-access'
+import { freeWebSearch, lastSearchEngineUsed, lastSearchEngineErrors } from '@/lib/web-access'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 interface SearchItem {
@@ -97,7 +97,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ results: mapped, summary, engine: lastSearchEngineUsed() })
+    return NextResponse.json({
+      results: mapped,
+      summary,
+      engine: lastSearchEngineUsed(),
+      engineErrors: lastSearchEngineErrors(),
+    })
   } catch (error) {
     console.error('[api/search] POST error:', error)
     const message =
