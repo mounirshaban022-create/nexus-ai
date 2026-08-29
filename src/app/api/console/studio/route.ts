@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireConsole } from '@/lib/console/auth'
 import { audit } from '@/lib/console/guard'
-import { premiumImageEngines, geminiImage } from '@/lib/premium-image'
+import { premiumImageCascade, premiumImageEngines } from '@/lib/premium-image'
 import { hfConfigured, xaiConfigured, geminiConfigured } from '@/lib/console/engines'
 
 export const runtime = 'nodejs'
@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
       chat: CHAT_CHAIN.map(c => ({ id: c.id, name: c.name, available: c.available() })),
       image: [
         { id: 'gemini', name: 'Google Gemini Image', available: premiumImageEngines().gemini },
+        { id: 'grok', name: 'xAI Grok (aurora)', available: premiumImageEngines().xai },
         { id: 'hf-flux', name: 'FLUX.1 (Hugging Face)', available: premiumImageEngines().huggingface },
         { id: 'pollinations', name: 'Pollinations FLUX (free)', available: true },
       ],
@@ -140,41 +141,36 @@ export async function POST(req: NextRequest) {
 
     if (test === 'image') {
       if (!prompt) return NextResponse.json({ error: 'prompt is required' }, { status: 400 })
-      const attempts: { engine: string; error: string }[] = []
-      const enginesInfo = premiumImageEngines()
-      if (enginesInfo.gemini) {
-        try {
-          const buf = await geminiImage(prompt, '1024x1024')
-          const created = await db.generatedImage.create({
-            data: {
-              prompt, size: '1024x1024', provider: 'gemini',
-              url: '', data: buf.toString('base64'), userId: null,
-            },
-          })
-          await db.generatedImage.update({ where: { id: created.id }, data: { url: `/api/console/generations/file/images/${created.id}` } }).catch(() => {})
-          await audit('studio.image_test', { target: 'gemini', detail: prompt.slice(0, 80) })
-          return NextResponse.json({ ok: true, engine: 'gemini', fileUrl: `/api/console/generations/file/images/${created.id}`, attempts })
-        } catch (err) {
-          attempts.push({ engine: 'gemini', error: err instanceof Error ? err.message : String(err) })
-        }
-      }
-      // Delegate the full cascade (HF → Pollinations → OpenRouter) to the app's own image API logic.
       try {
-        const { hfImage } = await import('@/lib/premium-image')
-        if (enginesInfo.huggingface) {
-          const buf = await hfImage(prompt, '1024x1024')
-          const created = await db.generatedImage.create({
-            data: { prompt, size: '1024x1024', provider: 'hf-flux', url: '', data: buf.toString('base64'), userId: null },
-          })
-          await db.generatedImage.update({ where: { id: created.id }, data: { url: `/api/console/generations/file/images/${created.id}` } }).catch(() => {})
-          await audit('studio.image_test', { target: 'hf-flux', detail: prompt.slice(0, 80) })
-          return NextResponse.json({ ok: true, engine: 'hf-flux', fileUrl: `/api/console/generations/file/images/${created.id}`, attempts })
-        }
-        attempts.push({ engine: 'hf-flux', error: 'HF_TOKEN not configured' })
+        const { buffer, engine } = await premiumImageCascade(prompt, '1024x1024')
+        const created = await db.generatedImage.create({
+          data: { prompt, size: '1024x1024', provider: engine, url: '', data: buffer.toString('base64'), userId: null },
+        })
+        await db.generatedImage.update({ where: { id: created.id }, data: { url: `/api/console/generations/file/images/${created.id}` } }).catch(() => {})
+        await audit('studio.image_test', { target: engine, detail: prompt.slice(0, 80) })
+        return NextResponse.json({ ok: true, engine, fileUrl: `/api/console/generations/file/images/${created.id}` })
       } catch (err) {
-        attempts.push({ engine: 'hf-flux', error: err instanceof Error ? err.message : String(err) })
+        const attempts = (err as Error & { attempts?: { engine: string; error: string }[] }).attempts ?? [
+          { engine: 'cascade', error: err instanceof Error ? err.message : String(err) },
+        ]
+        // Even the premium engines failed — fall through to the app's own
+        // free Pollinations path so the console still demonstrates the pipeline.
+        try {
+          const res = await fetch(new URL('/api/image', req.url), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') ?? '' },
+            body: JSON.stringify({ prompt, size: '1024x1024', provider: 'free' }),
+          })
+          if (res.ok) {
+            const j = (await res.json()) as { record?: { id?: string }, id?: string }
+            const id = j.record?.id ?? j.id
+            if (id) {
+              return NextResponse.json({ ok: true, engine: 'pollinations-fallback', fileUrl: `/api/console/generations/file/images/${id}`, attempts })
+            }
+          }
+        } catch { /* fallthrough */ }
+        return NextResponse.json({ error: 'Image engines unavailable', attempts }, { status: 502 })
       }
-      return NextResponse.json({ error: 'Premium image engines unavailable', attempts }, { status: 502 })
     }
 
     if (test === 'video') {

@@ -5,7 +5,7 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
-import { geminiImage, hfImage, premiumImageEngines } from '@/lib/premium-image'
+import { premiumImageCascade } from '@/lib/premium-image'
 import { openrouterConfigured, openrouterGenerateImage } from '@/lib/openrouter'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { getVerifiedSession, getCurrentUser } from '@/lib/auth'
@@ -24,11 +24,11 @@ const IMAGES_DIR = IS_VERCEL
 /**
  * IMAGE GENERATION — premium-first pipeline (Vercel-native, no Z.ai):
  *
- *   1. Google Gemini (gemini-2.5-flash-image → 2.0 preview fallback) —
- *      flagship quality, key already provisioned in the deployment.
- *   2. Hugging Face FLUX.1-dev → schnell — flagship open diffusion.
- *   3. Pollinations FLUX (FREE, open, no API key) — universal fallback.
- *   4. OpenRouter — optional last resort with a user key.
+ *   1-3. Premium cascade (see premium-image.ts): Google Gemini →
+ *        xAI Grok (aurora) → Hugging Face FLUX.1 — every engine with a
+ *        provisioned deployment key is attempted in order.
+ *   4. Pollinations FLUX (FREE, open, no API key) — universal fallback.
+ *   5. OpenRouter — optional last resort with a user key.
  *
  * Every engine failure cascades to the next; the response records which
  * engine actually produced the bytes.
@@ -82,27 +82,17 @@ export async function POST(req: NextRequest) {
     let buffer: Buffer | null = null
     let usedEngine = 'pollinations'
 
-    /* ---- 1. PREMIUM engine — Google Gemini (deployment-provisioned key) ---- */
-    if (premiumImageEngines().gemini) {
-      try {
-        buffer = await geminiImage(trimmedPrompt, chosenSize)
-        usedEngine = 'gemini'
-      } catch (geminiErr) {
-        console.warn('[api/image] Gemini image gen failed:', geminiErr instanceof Error ? geminiErr.message : geminiErr)
-      }
+    /* ---- 1-3. PREMIUM cascade — Gemini → Grok → HF FLUX (deployment keys) ---- */
+    try {
+      const result = await premiumImageCascade(trimmedPrompt, chosenSize)
+      buffer = result.buffer
+      usedEngine = result.engine
+    } catch (cascadeErr) {
+      const attempts = (cascadeErr as Error & { attempts?: { engine: string; error: string }[] }).attempts
+      console.warn('[api/image] premium cascade failed:', JSON.stringify(attempts ?? cascadeErr))
     }
 
-    /* ---- 2. PREMIUM engine — Hugging Face FLUX ---- */
-    if (!buffer && premiumImageEngines().huggingface) {
-      try {
-        buffer = await hfImage(trimmedPrompt, chosenSize)
-        usedEngine = 'hf-flux'
-      } catch (hfErr) {
-        console.warn('[api/image] HF FLUX failed:', hfErr instanceof Error ? hfErr.message : hfErr)
-      }
-    }
-
-    /* ---- 3. FREE engine — Pollinations FLUX (no key, works on Vercel) ---- */
+    /* ---- 4. FREE engine — Pollinations FLUX (no key, works on Vercel) ---- */
     if (!buffer) {
       try {
         buffer = await pollinationsImage(trimmedPrompt, chosenSize)
