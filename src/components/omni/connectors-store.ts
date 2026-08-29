@@ -72,7 +72,7 @@ export const useConnectorsStore = create<ConnectorsState>()(
     {
       name: 'nexus-connectors-v2',
       version: 2,
-      migrate: (state) => ({ ...state, enabled: [...DEFAULT_ENABLED] }),
+      migrate: (state) => ({ ...(state as Record<string, unknown>), enabled: [...DEFAULT_ENABLED] }),
     }
   )
 )

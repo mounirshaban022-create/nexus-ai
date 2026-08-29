@@ -28,6 +28,8 @@ export interface AgencyAgent {
   description: string
   emoji: string
   vibe: string
+  /** Brand color (hex) — optional; callers supply a fallback. */
+  color?: string
 }
 
 export interface AgencyCatalog {

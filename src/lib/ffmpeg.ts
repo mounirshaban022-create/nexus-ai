@@ -36,7 +36,7 @@ let ffmpegPathCache: string | null | undefined
 let ffprobePathCache: string | null | undefined
 
 export async function ffmpegPath(): Promise<string> {
-  if (ffmpegPathCache !== undefined) return ffmpegPathCache
+  if (ffmpegPathCache != null) return ffmpegPathCache
   let fromPkg: string | undefined
   try {
     fromPkg = (await import('ffmpeg-static')).default as string | undefined
@@ -49,7 +49,7 @@ export async function ffmpegPath(): Promise<string> {
 }
 
 export async function ffprobePath(): Promise<string> {
-  if (ffprobePathCache !== undefined) return ffprobePathCache
+  if (ffprobePathCache != null) return ffprobePathCache
   let fromPkg: string | undefined
   try {
     const mod = (await import('ffprobe-static')) as { path?: string }

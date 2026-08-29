@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { smartChat } from '@/lib/smart-chat'
 import { freeWebSearch } from '@/lib/web-access'
-import { getVerifiedSession } from '@/lib/auth'
+import { requireVerifiedSession, getVerifiedSession } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 /**
@@ -272,6 +272,10 @@ async function generateFollowups(
 /* ------------------------------------------------------------------ */
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   // Rate limit (10 req/min per client)
   const limit = rateLimit(`answer:${clientKey(req)}`, 10, 60_000)
   if (!limit.ok) {

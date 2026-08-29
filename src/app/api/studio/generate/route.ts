@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
@@ -70,6 +71,10 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`studio:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {

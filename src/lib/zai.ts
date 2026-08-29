@@ -82,61 +82,14 @@ function configFromEnv(): ZaiConfig | null {
 async function loadZaiSdk(): Promise<ZaiSdk | null> {
   // ── Z.AI PERMANENTLY DISABLED (owner directive) ─────────────────────
   // The owner mandates: "Don't use Z.ai AI at all — it doesn't work on
-  // Vercel." Rather than touching the 10+ guarded call sites (risky),
-  // this single choke point now always returns null, so every guarded
+  // Vercel." This single choke point always returns null, so every guarded
   // branch (zaiConfigured() === false) skips Z.ai instantly and the
   // premium engine chain (Gemini / HF / OpenRouter / Pollinations) takes
-  // over. All exports are kept so static imports still resolve.
+  // over. All exports are kept so static imports still resolve. The old
+  // SDK-loading code was removed (recoverable from git history).
   globalForZAI.zaiInitFailed = true
   globalForZAI.zaiInitError = 'Z.ai permanently disabled by owner directive — premium engines handle all AI workloads'
   return null
-
-  /* eslint-disable no-unreachable -- retained for history/revert */
-  if (globalForZAI.zai) return globalForZAI.zai
-  if (globalForZAI.zaiInitFailed) return null
-  try {
-    const mod = (await import('z-ai-web-dev-sdk')) as {
-      default?: {
-        create: () => Promise<ZaiSdk>
-        new: (config: ZaiConfig) => ZaiSdk
-      }
-      create?: () => Promise<ZaiSdk>
-    }
-    const factory = mod.default ?? (mod as unknown as { create: () => Promise<ZaiSdk> })
-
-    // Try 1: file-based config (works in the sandbox — /etc/.z-ai-config).
-    try {
-      globalForZAI.zai = await factory.create()
-      return globalForZAI.zai
-    } catch {
-      /* file not found — fall through to env config */
-    }
-
-    // Try 2: env vars (works on Vercel when ZAI_BASE_URL / ZAI_API_KEY
-    // are set). No hardcoded fallback — missing env vars disable Z.ai.
-    const config = configFromEnv()
-    if (!config) {
-      globalForZAI.zaiInitFailed = true
-      globalForZAI.zaiInitError =
-        'no .z-ai-config file and no ZAI_BASE_URL / ZAI_API_KEY env vars'
-      console.warn(
-        '[zai] SDK unavailable — no config file or env vars. Z.ai engine disabled.'
-      )
-      return null
-    }
-    const ZaiClass = (mod.default ?? mod) as unknown as new (config: ZaiConfig) => ZaiSdk
-    globalForZAI.zai = new ZaiClass(config)
-    return globalForZAI.zai
-  } catch (err) {
-    globalForZAI.zaiInitFailed = true
-    globalForZAI.zaiInitError =
-      err instanceof Error ? err.message : String(err)
-    console.warn(
-      '[zai] SDK unavailable — Z.ai engine disabled:',
-      globalForZAI.zaiInitError
-    )
-    return null
-  }
 }
 
 /** True when the Z.ai SDK successfully loaded AND is usable. The

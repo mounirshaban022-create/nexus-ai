@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
-import { getZAI } from '@/lib/zai'
 import { hfAsr, hfConfigured } from '@/lib/hf-ai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
@@ -12,6 +12,10 @@ const requestSchema = z.object({
 export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`asr:${clientKey(req)}`, 30, 60_000)
     if (!limit.ok) {
@@ -56,25 +60,41 @@ export async function POST(req: NextRequest) {
           engine: 'hf-whisper',
         })
       } catch (hfErr) {
-        console.warn('[api/asr] HF Whisper failed, trying Z.ai ASR:', hfErr instanceof Error ? hfErr.message : hfErr)
+        console.warn('[api/asr] HF Whisper failed, trying Groq Whisper:', hfErr instanceof Error ? hfErr.message : hfErr)
       }
     }
 
-    // Fallback — the platform's Z.ai ASR (sandbox/dev environments).
-    const zai = await getZAI()
-    const response = await zai.audio.asr.create({
-      file_base64: base64Audio,
-    })
-
-    const transcript = response.text?.trim()
-    if (!transcript) {
-      return NextResponse.json({
-        transcript: '',
-        note: 'No speech detected in this audio.',
-      })
+    // Fallback 1 — Groq Whisper-large-v3 (OpenAI-compatible, fast + cheap).
+    if (process.env.GROQ_API_KEY?.trim()) {
+      try {
+        const bytes = Buffer.from(base64Audio, 'base64')
+        const form = new FormData()
+        form.append('file', new Blob([new Uint8Array(bytes)], { type: 'audio/webm' }), 'audio.webm')
+        form.append('model', 'whisper-large-v3')
+        if (parsed.data.language) form.append('language', parsed.data.language)
+        const gres = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY!.trim()}` },
+          body: form,
+          signal: AbortSignal.timeout(55_000),
+        })
+        if (gres.ok) {
+          const gdata = (await gres.json()) as { text?: string }
+          const gtext = gdata.text?.trim() ?? ''
+          if (gtext) return NextResponse.json({ transcript: gtext, engine: 'groq-whisper' })
+          return NextResponse.json({ transcript: '', note: 'No speech detected in this audio.', engine: 'groq-whisper' })
+        }
+        console.warn('[api/asr] Groq Whisper HTTP', gres.status, (await gres.text()).slice(0, 160))
+      } catch (gErr) {
+        console.warn('[api/asr] Groq Whisper failed:', gErr instanceof Error ? gErr.message : gErr)
+      }
     }
 
-    return NextResponse.json({ transcript })
+    // All engines exhausted — honest engine failure (NOT silence).
+    return NextResponse.json(
+      { error: 'Speech recognition is temporarily unavailable. Please try again shortly.' },
+      { status: 503 }
+    )
   } catch (error) {
     console.error('[api/asr] POST error:', error)
     const message =

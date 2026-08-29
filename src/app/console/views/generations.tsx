@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Images, Film, FileText, ExternalLink, CircleAlert } from 'lucide-react'
 import { api, timeAgo } from '../console-types'
 
@@ -33,18 +33,23 @@ export function GenerationsView({ refreshKey }: { refreshKey: number }) {
   const [total, setTotal] = useState(0)
   const [error, setError] = useState('')
 
-  const load = useCallback(async () => {
-    setError('')
-    try {
-      const r = await api<{ items: Item[]; total: number }>(`/generations?type=${tab}&limit=48`)
-      setItems(r.items)
-      setTotal(r.total)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Load failed')
-    }
-  }, [tab])
-
-  useEffect(() => { load() }, [load, refreshKey])
+  useEffect(() => {
+    // Async fetch inside the effect (no synchronous setState — the initial
+    // error clear happens on the result path, avoiding cascading renders).
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await api<{ items: Item[]; total: number }>(`/generations?type=${tab}&limit=48`)
+        if (cancelled) return
+        setItems(r.items)
+        setTotal(r.total)
+        setError('')
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Load failed')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [tab, refreshKey])
 
   return (
     <div className="space-y-4">
@@ -71,7 +76,6 @@ export function GenerationsView({ refreshKey }: { refreshKey: number }) {
             <div key={it.id} className="group overflow-hidden rounded-xl border border-slate-800 bg-slate-900/50 transition hover:border-emerald-500/30">
               <div className="aspect-square bg-slate-800">
                 {/* Real bytes from the console file endpoint (auth-gated). */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={it.fileUrl}
                   alt={it.prompt ?? 'generated'}

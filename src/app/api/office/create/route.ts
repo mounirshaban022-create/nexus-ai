@@ -5,7 +5,7 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { db } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
+import { requireVerifiedSession, getCurrentUser } from '@/lib/auth'
 import { ensurePerUserColumns } from '@/lib/schema-guard'
 
 export const maxDuration = 120
@@ -117,6 +117,10 @@ const MIME_TYPES: Record<string, string> = {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`office-create:${clientKey(req)}`, 15, 60_000)
     if (!limit.ok) {
@@ -443,8 +447,8 @@ export async function POST(req: NextRequest) {
           // Top accent bar
           { rect: { x: 0, y: 0, w: 10, h: 0.09, fill: { color: theme.accent } } },
           // Decorative circle cluster (right)
-          { oval: { x: 8.7, y: 0.5, w: 1.7, h: 1.7, fill: { color: theme.primary }, line: { color: theme.accent, width: 0.75 } } },
-          { oval: { x: 9.35, y: 1.25, w: 0.85, h: 0.85, fill: { color: theme.accent } } },
+          { rect: { x: 8.85, y: 0.62, w: 1.4, h: 1.4, fill: { color: theme.primary }, line: { color: theme.accent, width: 0.75 } } },
+          { rect: { x: 9.35, y: 1.25, w: 0.85, h: 0.85, fill: { color: theme.accent } } },
           // Bottom brand footer
           { rect: { x: 0, y: 5.16, w: 10, h: 0.24, fill: { color: theme.primary } } },
           { text: { text: 'NEXUS AI  ·  ' + title.slice(0, 60), options: { x: 0.5, y: 5.13, w: 7, h: 0.3, fontSize: 9, color: theme.surfaceAlt, align: 'left' } } },
@@ -459,8 +463,8 @@ export async function POST(req: NextRequest) {
           { rect: { x: 0, y: 0, w: 0.14, h: 2.9, fill: { color: theme.primary } } },
           { rect: { x: 0, y: 2.9, w: 0.14, h: 2.73, fill: { color: theme.accent } } },
           // Corner decorative circles (subtle)
-          { oval: { x: 8.85, y: 4.35, w: 1.9, h: 1.9, fill: { color: theme.surface }, line: { color: theme.border, width: 0.5 } } },
-          { oval: { x: 9.5, y: 4.95, w: 0.75, h: 0.75, fill: { color: theme.surfaceAlt } } },
+          { rect: { x: 8.85, y: 4.35, w: 1.9, h: 1.9, fill: { color: theme.surface }, line: { color: theme.border, width: 0.5 } } },
+          { rect: { x: 9.5, y: 4.95, w: 0.75, h: 0.75, fill: { color: theme.surfaceAlt } } },
           // Bottom-right brand chip
           { rect: { x: 8.35, y: 0.32, w: 1.1, h: 0.34, fill: { color: theme.surface }, line: { color: theme.border, width: 0.5 } } },
           { text: { text: 'NEXUS', options: { x: 8.35, y: 0.32, w: 1.1, h: 0.34, fontSize: 10, bold: true, color: theme.primary, align: 'center', fontFace: 'Segoe UI' } } },
@@ -475,8 +479,8 @@ export async function POST(req: NextRequest) {
         background: { color: theme.primary },
         objects: [
           { rect: { x: 0, y: 0, w: 10, h: 0.09, fill: { color: theme.accent } } },
-          { oval: { x: -1.2, y: 3.4, w: 4.4, h: 4.4, fill: { color: theme.primaryDark } } },
-          { oval: { x: 8.2, y: -1.6, w: 3.6, h: 3.6, fill: { color: theme.accent, transparency: 55 } } },
+          { rect: { x: -1.2, y: 3.4, w: 4.4, h: 0.5, fill: { color: theme.primaryDark } } },
+          { rect: { x: 8.2, y: -1.6, w: 3.6, h: 0.5, fill: { color: theme.accent, transparency: 55 } } },
         ],
       })
 
@@ -594,7 +598,7 @@ export async function POST(req: NextRequest) {
           },
           text: row.map((c) => c.replace(/\|/g, '/')),
         }))
-        slide.addTable(tableRows, {
+        slide.addTable(tableRows as unknown as Parameters<typeof slide.addTable>[0], {
           x: 0.55, y: 1.6, w: 8.9, fontSize: 13,
           border: { pt: 0.5, color: theme.border },
           rowH: 0.42, margin: 0.08,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
-import { getVerifiedSession } from '@/lib/auth'
+import { requireVerifiedSession, getVerifiedSession } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 const requestSchema = z.object({
@@ -10,6 +10,10 @@ const requestSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`connectors-test:${clientKey(req)}`, 30, 60_000)
     if (!limit.ok) {

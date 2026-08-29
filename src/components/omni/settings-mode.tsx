@@ -178,7 +178,7 @@ export function SettingsMode() {
         </section>
       </div>
 
-      {showAuth && <AuthModal onClose={() => { setShowAuth(false); getCurrentUser().then(setUser) }} />}
+      {showAuth && <AuthModal open={showAuth} onClose={() => { setShowAuth(false); getCurrentUser().then(setUser) }} />}
       {legalPage && <LegalPage type={legalPage} onClose={() => setLegalPage(null)} language={language} />}
     </div>
   )

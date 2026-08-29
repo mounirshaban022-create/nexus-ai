@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { listAllSkills } from '@/lib/cli-skills'
@@ -17,6 +18,10 @@ const requestSchema = z.object({
  * → { ok, summary, attachment } (attachment = chat artifact payload).
  */
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   const limit = rateLimit(`skill-run:${clientKey(req)}`, 12, 60_000)
   if (!limit.ok) {
     return NextResponse.json(

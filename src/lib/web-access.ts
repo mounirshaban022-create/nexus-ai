@@ -429,59 +429,15 @@ export async function freeWebSearch(
     errors.push(`wikipedia: ${err instanceof Error ? err.message : err}`)
   }
 
-  // 4. Z.ai (works when quota is available)
-  try {
-    const { getZAI } = await import('./zai')
-    const zai = await getZAI()
-    const results = (await zai.functions.invoke('web_search', {
-      query: trimmed,
-      num,
-    })) as Array<{ url: string; name: string; snippet: string; host_name?: string; date?: string }>
-    if (Array.isArray(results) && results.length > 0) {
-      return results.map((r, i) => ({
-        title: r.name,
-        url: r.url,
-        snippet: r.snippet,
-        host_name: r.host_name ?? '',
-        rank: i + 1,
-        date: r.date,
-        favicon: faviconFor(r.url),
-      }))
-    }
-    throw new Error('empty')
-  } catch (err) {
-    errors.push(`zai: ${err instanceof Error ? err.message : err}`)
-  }
-
+  // 4. (retired) Z.ai web_search — permanently disabled by owner directive.
   console.error('[web-access] all search providers failed:', errors.join(' | '))
   throw new Error('Web search is temporarily unavailable — all providers failed.')
 }
 
 /**
- * SMART PAGE READER: direct fetch first (no quota), Z.ai page_reader as
- * fallback (handles JS-heavy pages its own service can render).
+ * SMART PAGE READER: direct fetch with alternate fetch strategies.
+ * (The retired Z.ai page_reader fallback is gone — owner directive.)
  */
 export async function readPageSmart(url: string): Promise<PageContent> {
-  try {
-    return await readPageDirect(url)
-  } catch (err) {
-    console.error('[web-access] direct read failed, trying Z.ai reader:', err instanceof Error ? err.message : err)
-  }
-  // Z.ai fallback
-  const { getZAI } = await import('./zai')
-  const zai = await getZAI()
-  const parsed = assertPublicUrl(url)
-  const result = (await zai.functions.invoke('page_reader', { url: parsed.toString() })) as {
-    data?: { title?: string; url?: string; html?: string; publishedTime?: string }
-  }
-  const data = result?.data ?? {}
-  const text = htmlToReadableText(data.html ?? '')
-  if (!text) throw new Error('Could not extract content from that page.')
-  return {
-    title: data.title ?? parsed.hostname,
-    url: data.url ?? parsed.toString(),
-    html: data.html ?? '',
-    text: text.slice(0, 60_000),
-    publishedTime: data.publishedTime,
-  }
+  return readPageDirect(url)
 }

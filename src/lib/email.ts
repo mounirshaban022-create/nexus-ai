@@ -254,7 +254,8 @@ export async function listEmails(
   try {
     const lock = await client.getMailboxLock(folder)
     try {
-      const exists = client.mailbox?.exists ?? 0
+      const mailbox = client.mailbox
+      const exists = (mailbox && typeof mailbox === 'object' ? mailbox.exists : 0) ?? 0
       if (exists === 0) return { folder, total: 0, emails: [] }
 
       const start = Math.max(1, exists - limit + 1)
@@ -307,13 +308,13 @@ export async function searchEmails(
     try {
       let uids: number[] = []
       try {
-        uids = await client.search({ subject: query })
+        uids = (await client.search({ subject: query })) || []
       } catch {
         uids = []
       }
       let fromUids: number[] = []
       try {
-        fromUids = await client.search({ from: query })
+        fromUids = (await client.search({ from: query })) || []
       } catch {
         fromUids = []
       }
@@ -412,7 +413,8 @@ export async function organizeEmail(
       const lock = await client.getMailboxLock(folder)
       try {
         await client.messageFlagsAdd(range, ['\\Deleted'], { uid: true })
-        await client.expunge()
+        // imapflow's bundled types omit expunge() — it exists at runtime.
+        await (client as unknown as { expunge: () => Promise<void> }).expunge()
         applied = uidList.length
       } finally {
         lock.release()
@@ -501,7 +503,10 @@ export async function sendEmail(
   })
   return {
     messageId: info.messageId,
-    previewUrl: nodemailer.getTestMessageUrl(info) ?? null,
+    previewUrl: (() => {
+      const preview = nodemailer.getTestMessageUrl(info)
+      return typeof preview === 'string' && preview ? preview : null
+    })(),
   }
 }
 

@@ -59,7 +59,7 @@ The sandbox uses SQLite; Vercel needs a real Postgres. Supabase gives you one fr
    - **Option A — manual SQL paste (works anywhere):** Supabase Dashboard → SQL Editor → New Query → paste the entire contents of [`supabase-schema.sql`](./supabase-schema.sql) → Run.
    - **Option B — automated endpoint (recommended, no copy-paste):** Add `ADMIN_MIGRATION_TOKEN` (any random 32+ char string) to Vercel env vars + redeploy. Then visit:
      ```
-     https://<your-vercel-domain>.vercel.app/api/admin/migrate?token=<ADMIN_MIGRATION_TOKEN>
+     curl -H "Authorization: Bearer <ADMIN_MIGRATION_TOKEN>" "https://<your-vercel-domain>.vercel.app/api/admin/migrate"
      ```
      The Vercel runtime reads `supabase-schema.sql` from the repo + runs every statement against the connected `DATABASE_URL`. Returns a JSON report: `{ ok: true, executedCount: N, tablesAfter: [...], missingTables: [] }`. Safe to re-run (the SQL uses `DROP ... CASCADE` first).
      - Why this exists: the sandbox and many CI environments can't reach Supabase directly (the pooler rejects the tenant; the direct host's DNS doesn't always resolve). The Vercel runtime CAN reach Supabase, so we proxy the migration through it.
@@ -117,7 +117,7 @@ After adding all vars, click **Deploy**. First build takes ~2-3 min.
 The first deploy runs `prisma generate` (via the `postinstall` hook). Creating the actual tables is NOT automatic. After the first successful deploy:
 
 1. **Provision the schema — pick ONE:**
-   - **Recommended: the automated endpoint.** Visit `https://<your-vercel-domain>.vercel.app/api/admin/migrate?token=<ADMIN_MIGRATION_TOKEN>` in your browser. The Vercel runtime reads `supabase-schema.sql` from the repo and runs every statement against the connected `DATABASE_URL`. Returns JSON `{ ok: true, executedCount: 60, tablesAfter: [...13 tables...], missingTables: [] }`. Safe to re-run.
+   - **Recommended: the automated endpoint.** Run: `curl -H "Authorization: Bearer <ADMIN_MIGRATION_TOKEN>" "https://<your-vercel-domain>.vercel.app/api/admin/migrate"`. The Vercel runtime reads `supabase-schema.sql` from the repo and runs every statement against the connected `DATABASE_URL`. Returns JSON `{ ok: true, executedCount: 60, tablesAfter: [...13 tables...], missingTables: [] }`. Safe to re-run.
    - **Or: run the SQL manually** in Supabase Dashboard → SQL Editor → paste [`supabase-schema.sql`](./supabase-schema.sql) → Run.
    - **Or: run `prisma db push` locally** with the Supabase `DATABASE_URL` (requires the direct connection — the pooler rejects this project as a tenant):
      ```bash
@@ -197,7 +197,7 @@ bun run db:push  # apply schema changes to local SQLite
 | Symptom | Fix |
 |---------|-----|
 | `prisma.chatSession.create()` → `FATAL: tenant/user postgres.<ref> not found` | The Supavisor pooler doesn't recognize the project. Switch `DATABASE_URL` to the **direct connection**: `postgresql://postgres:<PASSWORD>@db.<ref>.supabase.co:5432/postgres` (note: user is just `postgres`, no `.<ref>`, no `?pgbouncer=true`). See DEPLOYMENT.md §2. |
-| Auth (sign up / sign in) fails on Vercel | The `User` table is missing from Supabase. **Easiest fix:** visit `https://<your-vercel-domain>.vercel.app/api/admin/migrate?token=<ADMIN_MIGRATION_TOKEN>` to provision all 13 tables from the Vercel runtime. **Or:** run [`supabase-schema.sql`](./supabase-schema.sql) in Supabase SQL Editor. |
+| Auth (sign up / sign in) fails on Vercel | The `User` table is missing from Supabase. **Easiest fix:** run `curl -H "Authorization: Bearer <ADMIN_MIGRATION_TOKEN>" "https://<your-vercel-domain>.vercel.app/api/admin/migrate"` to provision all 13 tables from the Vercel runtime. **Or:** run [`supabase-schema.sql`](./supabase-schema.sql) in Supabase SQL Editor. |
 | Build fails on Prisma | Ensure `DATABASE_URL` is set in Vercel AND starts with `postgres`. The `build` script auto-switches the provider. |
 | Chat returns "All AI engines are busy" | `OPENROUTER_API_KEY` not set or invalid. Check Vercel env vars. |
 | Email connect "failed" with correct creds | You're on an old deploy. The `getZAI` export fix is in commit `9f61998`. Redeploy. |

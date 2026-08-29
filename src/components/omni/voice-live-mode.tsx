@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { Mic, Phone, Settings2, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
-import { startAsrMode, stopAsrMode } from './voice-asr-fallback'
+import { startAsrMode, stopAsrMode, type AsrTurn } from './voice-asr-fallback'
 import { kokoroSpeak } from './kokoro-voice'
 
 /**
@@ -229,7 +229,9 @@ export function VoiceLiveMode() {
         ttsVoice,
         historyRef,
         setStateSafe,
-        setTurns,
+        // The ASR fallback writes id-bearing turns into the same state
+        // (Turn.id is additive at runtime) — cast to the engine's setter.
+        setTurns: setTurns as unknown as import('react').Dispatch<import('react').SetStateAction<AsrTurn[]>>,
         setInterim,
         setError,
       })

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getZAI, zaiConfigured } from '@/lib/zai'
@@ -99,6 +100,10 @@ function wavHeader(dataLength: number, sampleRate = 24000): Buffer {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`voice-turn:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {

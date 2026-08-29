@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
-import { getZAI, zaiConfigured } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { DEFAULT_VOICE, edgeFallbackFor, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
 
@@ -87,6 +87,10 @@ async function edgeTts(text: string, voice: string, speed: number): Promise<Buff
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   // Parsed echo for the last-resort fail-soft path in the catch block.
   let parsedData: { text: string; voice: string; speed: number } | null = null
   try {
@@ -139,13 +143,15 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    /* ---------- Provider: NEXUS voices (bundled SDK) ---------- */
-    // FREE-FIRST HARDENING: when the Z.ai engine is unavailable (Vercel,
-    // gateway outage), transparently swap the premium voice for its FREE
-    // Microsoft neural equivalent — speech NEVER fails with a 500.
-    if (!(await zaiConfigured())) {
+    /* ---------- Provider: NEXUS voices → free neural equivalents ----------
+     * Z.ai is permanently disabled (owner directive). Premium voice ids are
+     * transparently mapped to their FREE Microsoft neural equivalents, so
+     * speech NEVER fails with a 500. */
+    {
       const freeVoice = edgeFallbackFor(effectiveVoice)
-      console.warn(`[api/tts] Z.ai unavailable — using free Edge voice ${freeVoice}`)
+      if (freeVoice !== effectiveVoice) {
+        console.warn(`[api/tts] premium voice ${effectiveVoice} → free Edge voice ${freeVoice}`)
+      }
       const buffers = await Promise.all(chunks.map((c) => edgeTts(c, freeVoice, speed)))
       const merged = Buffer.concat(buffers)
       return new NextResponse(new Uint8Array(merged), {
@@ -157,37 +163,6 @@ export async function POST(req: NextRequest) {
         },
       })
     }
-
-    const zai = await getZAI()
-    // Bug G: synthesize every chunk in parallel (was sequential for-loop).
-    const audioBuffers = await Promise.all(
-      chunks.map(async (chunk) => {
-        const response = await zai.audio.tts.create({
-          input: chunk,
-          voice: effectiveVoice,
-          speed,
-          response_format: 'wav',
-          stream: false,
-        })
-        const arrayBuffer = await response.arrayBuffer()
-        return Buffer.from(new Uint8Array(arrayBuffer))
-      })
-    )
-
-    // Merge: strip the 44-byte WAV header from every chunk,
-    // then rebuild a single valid WAV header for the concatenated PCM data.
-    const pcmParts = audioBuffers.map((buf) => buf.subarray(44))
-    const pcmLength = pcmParts.reduce((sum, part) => sum + part.length, 0)
-    const merged = Buffer.concat([wavHeader(pcmLength), ...pcmParts])
-
-    return new NextResponse(new Uint8Array(merged), {
-      status: 200,
-      headers: {
-        'Content-Type': 'audio/wav',
-        'Content-Length': merged.length.toString(),
-        'Cache-Control': 'no-cache',
-      },
-    })
   } catch (error) {
     // Last-resort fail-soft: if ANYTHING above blew up, synthesize with a
     // free Edge voice so the caller still gets audio instead of a 500.

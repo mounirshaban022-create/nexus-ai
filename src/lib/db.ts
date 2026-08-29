@@ -26,7 +26,9 @@ if (
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: ['query'],
+    // Production: errors only — per-query logging is noisy and can leak
+    // data into serverless logs (audit finding).
+    log: process.env.NODE_ENV === 'production' ? ['error'] : ['query'],
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db

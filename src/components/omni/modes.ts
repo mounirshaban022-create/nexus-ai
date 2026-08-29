@@ -380,7 +380,7 @@ export interface ConnectorParamMeta {
 export interface ConnectorMeta {
   id: string
   name: string
-  category: 'web' | 'knowledge' | 'developer' | 'utility'
+  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance' | 'work'
   description: string
   params: ConnectorParamMeta[]
   sampleArgs: Record<string, unknown>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
-import { getZAI } from '@/lib/zai'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
@@ -356,6 +356,10 @@ function repairCommonLlmMistakes(input: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`office-plan:${clientKey(req)}`, 15, 60_000)
     if (!limit.ok) {

@@ -117,7 +117,6 @@ export function StudioView({ refreshKey }: { refreshKey: number }) {
           </button>
           {imgResult && (
             <div className="mt-3 overflow-hidden rounded-lg border border-slate-700/60">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imgResult} alt="AI test result" className="max-h-56 w-full object-cover" />
             </div>
           )}

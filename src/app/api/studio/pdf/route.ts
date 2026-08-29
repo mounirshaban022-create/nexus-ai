@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
@@ -182,6 +183,10 @@ function buildStirlingRequest(op: string, file: Buffer, file2: Buffer | null, pa
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`studio-pdf:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {

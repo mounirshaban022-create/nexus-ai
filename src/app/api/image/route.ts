@@ -9,7 +9,7 @@ import { premiumImageCascade } from '@/lib/premium-image'
 import { pollinationsImage } from '@/lib/pollinations'
 import { openrouterConfigured, openrouterGenerateImage } from '@/lib/openrouter'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-import { getVerifiedSession, getCurrentUser } from '@/lib/auth'
+import { requireVerifiedSession, getVerifiedSession, getCurrentUser } from '@/lib/auth'
 
 const requestSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -39,6 +39,10 @@ const IMAGES_DIR = IS_VERCEL
  */
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`image:${clientKey(req)}`, 8, 60_000)
     if (!limit.ok) {

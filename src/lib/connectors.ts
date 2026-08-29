@@ -2,8 +2,9 @@ import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
-import { getZAI } from './zai'
 import { freeWebSearch, readPageSmart, wikipediaSearch } from './web-access'
+import { premiumImageCascade } from './premium-image'
+import { assertPublicUrl } from './safe-url'
 import { getPrimaryAccount, listEmails, searchEmails, readEmail, sendEmail } from './email'
 
 /* ------------------------------------------------------------------ */
@@ -128,7 +129,7 @@ export interface ConnectorParam {
 export interface ConnectorDefinition {
   id: string
   name: string
-  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance'
+  category: 'web' | 'knowledge' | 'developer' | 'utility' | 'email' | 'finance' | 'work'
   description: string // human-facing
   /** LLM-facing: what it does + when to use it */
   llmDescription: string
@@ -463,11 +464,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
       const prompt = String(args.prompt).slice(0, 2000)
       const requested = args.size ? String(args.size) : '1024x1024'
       const size = ['1024x1024', '1344x768', '768x1344'].includes(requested) ? requested : '1024x1024'
-      const zai = await getZAI()
-      const response = await zai.images.generations.create({ prompt, size })
-      const base64 = response.data?.[0]?.base64
-      if (!base64) throw new Error('Image generation returned no data')
-      const buffer = Buffer.from(base64, 'base64')
+      const cascade = await premiumImageCascade(prompt, size)
+      const buffer = cascade.buffer
       const filename = `${randomUUID()}.png`
       await mkdir(IMAGES_DIR, { recursive: true })
       await writeFile(path.join(IMAGES_DIR, filename), buffer)

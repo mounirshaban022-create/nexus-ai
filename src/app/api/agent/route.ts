@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { smartChat } from '@/lib/smart-chat'
@@ -128,6 +129,10 @@ function stripToolCall(text: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   // Rate limit: agent runs are expensive
   const limit = rateLimit(`agent:${clientKey(req)}`, 12, 60_000)
   if (!limit.ok) {

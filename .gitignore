@@ -74,3 +74,18 @@ tool-results
 /agent-ctx/*.png
 *.jar
 /jdk*/
+
+# AUDIT HARDENING: never commit local secrets, cookies, or dev screenshots
+scripts/.console-pw
+*.cookies.txt
+p3_ui_cookies.txt
+/p3_*.png
+/final-*.png
+/prod-*.png
+/light-*.png
+/mobile-*.png
+/current-*.png
+/test-*.png
+/test-*.ts
+/voice-overlay-fixed.png
+smoke-audit.db*

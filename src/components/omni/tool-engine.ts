@@ -466,7 +466,7 @@ export function useToolEngine(
       setToolError(null)
       setPendingTool(id)
       setPendingFile(null)
-      const def = TOOLS[id]
+      const def = id ? TOOLS[id] : undefined
       if (def?.needsFile) {
         pickFile(def.fileAccept || '*')
       }

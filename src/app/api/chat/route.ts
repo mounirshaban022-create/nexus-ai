@@ -831,12 +831,18 @@ async function executeChatTool(
   userId: string | null = null
 ): Promise<{ result: unknown; attachment?: Record<string, unknown> }> {
   const origin = appOrigin(req)
+  // GUEST LOCKDOWN (owner directive): every tool costs money/compute or
+  // touches account data — guest chat is TEXT-ONLY. Tool calls thrown here
+  // surface to the model, which tells the user to sign in.
+  if (!userId) {
+    throw new Error('Sign in to use tools and capabilities — guest chat is text-only.')
+  }
   if (toolId === 'generate_image') {
     const prompt = String(args.prompt ?? '').slice(0, 2000)
     if (!prompt) throw new Error('prompt required')
     const res = await fetch(`${origin}/api/image`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({ prompt, size: '1024x1024' }),
     })
     const data = await res.json()
@@ -871,7 +877,7 @@ async function executeChatTool(
     if (!operations.length) throw new Error('operations required (JSON array)')
     const res = await fetch(`${origin}/api/image/edit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({
         image: activeImage.dataUrl,
         operations,
@@ -933,7 +939,7 @@ async function executeChatTool(
       const markdown = blocksToMarkdown(blocks)
       const res = await fetch(`${origin}/api/studio/export`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
         body: JSON.stringify({ format: 'pdf', title, markdown }),
       })
       const data = await res.json()
@@ -977,7 +983,7 @@ async function executeChatTool(
 
     const res = await fetch(`${origin}/api/office/create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({
         format: ['docx', 'xlsx', 'pptx'].includes(format) ? format : 'docx',
         title,
@@ -1045,7 +1051,7 @@ async function executeChatTool(
     // Step 2: build the real .docx (same pipeline as Studio export)
     const res = await fetch(`${origin}/api/studio/export`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({ format: 'docx', title: newTitle, markdown: cleaned }),
     })
     const data = await res.json()
@@ -1091,7 +1097,7 @@ async function executeChatTool(
 
     const res = await fetch(`${origin}/api/studio/pdf`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({ operation, file: activeDoc.dataUrl, params }),
     })
     const data = await res.json()
@@ -1207,7 +1213,7 @@ async function executeChatTool(
     if (!code) throw new Error('code required')
     const res = await fetch(`${origin}/api/code/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({
         language: ['javascript', 'typescript', 'python'].includes(language) ? language : 'javascript',
         code,
@@ -1247,7 +1253,7 @@ async function executeChatTool(
     const style = String(args.style ?? 'cinematic')
     const res = await fetch(`${origin}/api/video/create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({
         prompt,
         scenes: ['2', '3', '4', '5', '6'].includes(scenes) ? scenes : '4',
@@ -1613,6 +1619,23 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // GUEST LOCKDOWN (owner directive): guests get a small TEXT-ONLY daily
+    // allowance instead of full access. Signed-in users are unaffected.
+    const guestSession = await getVerifiedSession(req)
+    const isGuest = !guestSession
+    if (isGuest) {
+      const daily = rateLimit(`chat-guest-daily:${clientKey(req)}`, 15, 24 * 60 * 60_000)
+      if (!daily.ok) {
+        return NextResponse.json(
+          {
+            error: 'Guest message limit reached for today. Create a free account for the full experience.',
+            code: 'GUEST_LIMIT',
+          },
+          { status: 429, headers: { 'Retry-After': String(daily.retryAfterSeconds) } }
+        )
+      }
+    }
+
     const parsed = requestSchema.safeParse(await req.json().catch(() => null))
     if (!parsed.success) {
       return NextResponse.json({ error: 'Message is required (max 8000 chars).' }, { status: 400 })
@@ -1643,35 +1666,31 @@ export async function POST(req: NextRequest) {
     let activeDoc: ActiveDoc | null = null
     let activeImage: ActiveImage | null = null
     let attachmentContextMessage = ''
+    if (attachment && isGuest) {
+      // GUEST LOCKDOWN: parsing documents/images costs real compute + AI.
+      return NextResponse.json(
+        { error: 'Sign in to attach files and images.', code: 'AUTH_REQUIRED' },
+        { status: 401 }
+      )
+    }
     if (attachment) {
       const ext = attachment.filename.split('.').pop()?.toLowerCase() ?? ''
 
-      /* ---------- IMAGE attachments: describe via Z.ai vision ----------
+      /* ---------- IMAGE attachments: describe via the vision cascade ----
        * Images previously fell into the document parser and failed with
-       * "could not be parsed" — now they are analyzed by the vision model
-       * and the description is injected so the AI can discuss the image,
-       * and remembered as activeImage so edit_image can edit the pixels. */
+       * "could not be parsed" — now they are analyzed by the vision engine
+       * chain (Gemini → OpenRouter → Groq) and the description is injected
+       * so the AI can discuss the image, and remembered as activeImage so
+       * edit_image can edit the pixels. */
       if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) {
         activeImage = { filename: attachment.filename, dataUrl: attachment.dataUrl }
         try {
-          const zai = await getZAI()
-          const response = await zai.chat.completions.createVision({
-            model: 'glm-4.6v',
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'text',
-                    text: 'Describe this image in detail for a conversation context: what it shows, key text/objects/colors, and anything noteworthy. Be factual and concise (max 150 words).',
-                  },
-                  { type: 'image_url', image_url: { url: attachment.dataUrl } },
-                ],
-              },
-            ],
-            thinking: { type: 'disabled' },
-          })
-          const description = response.choices[0]?.message?.content ?? ''
+          const { analyzeImage } = await import('@/lib/vision')
+          const described = await analyzeImage(
+            attachment.dataUrl,
+            'Describe this image in detail for a conversation context: what it shows, key text/objects/colors, and anything noteworthy. Be factual and concise (max 150 words).'
+          )
+          const description = described.text
           if (description.trim()) {
             activeImage.description = description.slice(0, 500)
             attachmentContextMessage =
@@ -1713,7 +1732,7 @@ export async function POST(req: NextRequest) {
         const origin = appOrigin(req)
         const res = await fetch(`${origin}/api/documents`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
           body: JSON.stringify({ file: parseDataUrl, filename: parseFilename, format: fmt }),
         })
         const data = await res.json()

@@ -7,9 +7,10 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { smartChat } from '@/lib/smart-chat'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
-import { getCurrentUser } from '@/lib/auth'
+import { requireVerifiedSession, getCurrentUser } from '@/lib/auth'
 import { ensurePerUserColumns } from '@/lib/schema-guard'
 import { extractPdfText } from '@/lib/pdf-text'
+import type { Paragraph } from 'docx'
 
 export const maxDuration = 120
 
@@ -85,6 +86,10 @@ function extractSections(text: string): Array<{ heading: string; content: string
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`doc-upload:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {
@@ -326,6 +331,10 @@ export async function GET(req: NextRequest) {
 
 // PUT: edit the document and export a new version
 export async function PUT(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`doc-edit:${clientKey(req)}`, 15, 60_000)
     if (!limit.ok) {

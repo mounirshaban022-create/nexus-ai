@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
@@ -87,6 +88,10 @@ function inlineRuns(text: string): Array<{ text: string; bold?: boolean; italics
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`studio-export:${clientKey(req)}`, 15, 60_000)
     if (!limit.ok) {
@@ -212,26 +217,26 @@ ${body}
             doc.moveDown(0.5)
             break
           case 'h3':
-            doc.fontSize(12.5).fillColor(0x44, 0x40, 0x3c).font('Helvetica-Bold').text(clean)
+            doc.fontSize(12.5).fillColor('#44403c').font('Helvetica-Bold').text(clean)
             doc.moveDown(0.4)
             break
           case 'bullet':
-            doc.fontSize(10.5).fillColor(0x1c, 0x19, 0x17).font('Helvetica').text(`•  ${clean}`, { indent: 18 })
+            doc.fontSize(10.5).fillColor('#1c1917').font('Helvetica').text(`•  ${clean}`, { indent: 18 })
             break
           case 'numbered':
-            doc.fontSize(10.5).fillColor(0x1c, 0x19, 0x17).font('Helvetica').text(`1. ${clean}`, { indent: 18 })
+            doc.fontSize(10.5).fillColor('#1c1917').font('Helvetica').text(`1. ${clean}`, { indent: 18 })
             break
           case 'quote':
-            doc.fontSize(10.5).fillColor(0x57, 0x53, 0x4e).font('Helvetica-Oblique').text(clean, { indent: 24 })
+            doc.fontSize(10.5).fillColor('#57534e').font('Helvetica-Oblique').text(clean, { indent: 24 })
             doc.moveDown(0.3)
             break
           case 'hr':
             doc.moveDown(0.4)
-            doc.moveTo(64, doc.y).lineTo(531, doc.y).lineWidth(0.75).strokeColor(0xd6, 0xd3, 0xd1).stroke()
+            doc.moveTo(64, doc.y).lineTo(531, doc.y).lineWidth(0.75).strokeColor('#d6d3d1').stroke()
             doc.moveDown(0.6)
             break
           default:
-            doc.fontSize(10.5).fillColor(0x1c, 0x19, 0x17).font('Helvetica').text(clean, { lineGap: 3 })
+            doc.fontSize(10.5).fillColor('#1c1917').font('Helvetica').text(clean, { lineGap: 3 })
             doc.moveDown(0.55)
         }
         // Page-break safety
@@ -258,7 +263,11 @@ ${body}
       ]
 
     for (const line of lines) {
-      const runs = inlineRuns(line.text).map(
+      // Keep the raw inline runs so special cases (quotes) can restyle text
+      // without reading properties off TextRun instances (docx types don't
+      // expose .text on them).
+      const rawRuns = inlineRuns(line.text)
+      const runs = rawRuns.map(
         (r) => new TextRun({ text: r.text, bold: r.bold, italics: r.italics, font: r.code ? 'Consolas' : undefined })
       )
       switch (line.kind) {
@@ -280,7 +289,7 @@ ${body}
             new Paragraph({
               indent: { left: 480 },
               border: { left: { style: 'single', size: 6, color: 'D97706', space: 12 } },
-              children: runs.map((r) => new TextRun({ text: r.text, italics: true, color: '555555' })),
+              children: rawRuns.map((r) => new TextRun({ text: r.text, italics: true, color: '555555' })),
             })
           )
           break

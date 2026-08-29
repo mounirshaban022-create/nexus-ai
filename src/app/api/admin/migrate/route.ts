@@ -66,15 +66,16 @@ function tokenMatches(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b)
 }
 
-/** Extract the admin token: `Authorization: Bearer <token>` header first,
- *  `?token=` query param as backward-compatible fallback. */
-function extractToken(req: NextRequest, url: URL): string {
+/** Extract the admin token: `Authorization: Bearer <token>` header.
+ *  (The old `?token=` query fallback was removed — URLs get logged in
+ *  access logs and proxies, which would leak the secret.) */
+function extractToken(req: NextRequest): string {
   const authHeader = req.headers.get('authorization') ?? ''
   if (authHeader.toLowerCase().startsWith('bearer ')) {
     const bearer = authHeader.slice(7).trim()
     if (bearer) return bearer
   }
-  return url.searchParams.get('token') ?? ''
+  return ''
 }
 
 /** Strip line comments + split a SQL file into individual statements. */
@@ -135,7 +136,7 @@ function getClient(overrideUrl?: string): { client: PrismaClient; isOverride: bo
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
-  const token = extractToken(req, url)
+  const token = extractToken(req)
   const expectedAdmin = process.env.ADMIN_MIGRATION_TOKEN ?? ''
   const expectedServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
   const isProd = process.env.NODE_ENV === 'production'

@@ -34,7 +34,8 @@ const nextConfig: NextConfig = {
   },
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    // Type errors MUST fail the build (audit finding: silent type breakage).
+    ignoreBuildErrors: false,
   },
   reactStrictMode: false,
 };

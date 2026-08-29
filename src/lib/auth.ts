@@ -159,6 +159,28 @@ export async function getCurrentUser(req: NextRequest) {
 }
 
 /**
+ * GUEST LOCKDOWN guard — signed-in features only.
+ *
+ * Guests (anonymous visitors) may browse the landing page, sign up/in,
+ * and hold a small text-only chat. Everything that costs money or compute
+ * (AI engines, image/video/document generation, code sandbox, CLI tools,
+ * WhatsApp/email sends, web tools) requires a real account.
+ *
+ * Usage at the top of a route handler:
+ *   const denied = await requireVerifiedSession(req)
+ *   if (denied) return denied
+ * Returns null when the caller is signed in (and the user row exists).
+ */
+export async function requireVerifiedSession(req: NextRequest): Promise<NextResponse | null> {
+  const session = await getVerifiedSession(req)
+  if (session) return null
+  return NextResponse.json(
+    { error: 'Sign in to use this feature.', code: 'AUTH_REQUIRED' },
+    { status: 401 }
+  )
+}
+
+/**
  * Session-cookie attributes that work everywhere the app is reachable.
  *
  * The sandbox preview panel embeds the app in a third-party iframe. Browsers

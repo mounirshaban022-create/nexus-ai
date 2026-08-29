@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { smartChat } from '@/lib/smart-chat'
 import { freeWebSearch } from '@/lib/web-access'
@@ -20,6 +21,10 @@ const requestSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`search:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {

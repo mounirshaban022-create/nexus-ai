@@ -11,7 +11,7 @@ import { agnesConfigured, agnesCreateVideo } from '@/lib/agnes-video'
 import { ffmpegPath, ffprobePath, execFileAsync } from '@/lib/ffmpeg'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
-import { getCurrentUser } from '@/lib/auth'
+import { requireVerifiedSession, getCurrentUser } from '@/lib/auth'
 
 export const maxDuration = 300
 
@@ -67,6 +67,10 @@ async function audioDuration(file: string): Promise<number> {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`video-create:${clientKey(req)}`, 5, 300_000)
     if (!limit.ok) {
@@ -289,9 +293,9 @@ export async function POST(req: NextRequest) {
         for (let i = 0; i < scenes.length; i++) {
           job.progress = 72 + Math.round((i / scenes.length) * 22)
           job.message = `Rendering scene ${i + 1} of ${scenes.length}…`
-          const dur = Math.max(narrations[i].dur + 0.6, 3.2)
+          const dur = Math.max(narrations[i]?.dur ?? 3, 3.2)
           const out = path.join(workDir, `clip${i}.mp4`)
-          const caption = scenes[i].caption ? scenes[i].caption.slice(0, 40) : ''
+          const caption = scenes[i]?.caption?.slice(0, 40) ?? ''
           const inputPng = await burnCaption(i, caption)
           // Alternate zoom direction for visual variety
           const zoomIn = i % 2 === 0

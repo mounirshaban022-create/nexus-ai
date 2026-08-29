@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
@@ -63,6 +64,10 @@ const hexToRgb = (hex: string) => {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`image-edit:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {

@@ -99,24 +99,36 @@ export async function POST(req: NextRequest) {
   // bytes Meta sent (req.json() would re-serialize and break the hash).
   const rawBody = await req.text()
 
-  // Signature verification: when WHATSAPP_APP_SECRET is set, Meta's
-  // X-Hub-Signature-256 header must equal sha256=HMAC(rawBody, secret).
+  // Signature verification: Meta's X-Hub-Signature-256 header must equal
+  // sha256=HMAC(rawBody, WHATSAPP_APP_SECRET). FAIL-CLOSED: without the
+  // app secret the webhook is DISABLED — unsigned events are rejected
+  // (they would let anyone spoof inbound messages and trigger paid AI
+  // auto-replies). Set WHATSAPP_APP_SECRET in env vars (Meta App
+  // Dashboard → Settings → Basic → App secret) to enable the webhook.
   const appSecret = process.env.WHATSAPP_APP_SECRET
-  if (appSecret) {
-    const signature = req.headers.get('x-hub-signature-256') ?? ''
-    const expected =
-      'sha256=' + createHmac('sha256', appSecret).update(rawBody, 'utf8').digest('hex')
-    const a = Buffer.from(signature, 'utf8')
-    const b = Buffer.from(expected, 'utf8')
-    if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      console.warn('[whatsapp-webhook] invalid X-Hub-Signature-256 — rejected')
-      return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
+  if (!appSecret) {
+    if (!warnedNoSignature) {
+      warnedNoSignature = true
+      console.warn(
+        '[whatsapp-webhook] WHATSAPP_APP_SECRET is not set — webhook is DISABLED (fail-closed). Add the Meta App secret in env vars to enable it.'
+      )
     }
-  } else if (!warnedNoSignature) {
-    warnedNoSignature = true
-    console.warn(
-      '[whatsapp-webhook] WHATSAPP_APP_SECRET is not set — accepting webhooks WITHOUT signature verification. Set it in env vars to enable Meta signature validation.'
+    return NextResponse.json(
+      {
+        error:
+          'WhatsApp webhook is disabled: WHATSAPP_APP_SECRET is not configured. Add the Meta App secret in env vars to enable signed webhook processing.',
+      },
+      { status: 503 }
     )
+  }
+  const signature = req.headers.get('x-hub-signature-256') ?? ''
+  const expected =
+    'sha256=' + createHmac('sha256', appSecret).update(rawBody, 'utf8').digest('hex')
+  const a = Buffer.from(signature, 'utf8')
+  const b = Buffer.from(expected, 'utf8')
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    console.warn('[whatsapp-webhook] invalid X-Hub-Signature-256 — rejected')
+    return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
   }
 
   let payload: WaWebhookPayload

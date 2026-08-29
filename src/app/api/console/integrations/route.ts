@@ -84,7 +84,7 @@ async function probeGitHub(token: string): Promise<Record<string, unknown>> {
         sha: String(c.sha ?? '').slice(0, 7),
         message: (c.commit as Record<string, string>)?.message?.split('\n')[0] ?? '',
         author: (c.commit as Record<string, { name?: string }>)?.author?.name ?? '',
-        date: String(((c.commit as Record<string, { author?: { date?: string } }>)?.author?.date) ?? ''),
+        date: String(((c.commit as { author?: { date?: string } } | undefined)?.author?.date) ?? ''),
       })),
     }
   } catch (err) {

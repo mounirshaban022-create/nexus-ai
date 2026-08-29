@@ -7,7 +7,7 @@
 
 import { arrayBufferToBase64 } from './audio-utils'
 
-interface AsrTurn {
+export interface AsrTurn {
   id: string
   user: string
   reply: string

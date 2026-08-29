@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { extractPdfText } from '@/lib/pdf-text'
@@ -19,6 +20,10 @@ function base64ToBuffer(b64: string): Buffer {
 }
 
 export async function POST(req: NextRequest) {
+  // GUEST LOCKDOWN (owner directive): this capability requires an account.
+  const denied = await requireVerifiedSession(req)
+  if (denied) return denied
+
   try {
     const limit = rateLimit(`office-read:${clientKey(req)}`, 20, 60_000)
     if (!limit.ok) {
