@@ -434,7 +434,7 @@ export async function geminiGroundSearch(query: string, num = 8): Promise<WebSea
             tools: [{ google_search: {} }],
             generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
           }),
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(15_000),
         }
       )
       if (!res.ok) {
@@ -488,11 +488,20 @@ export async function geminiGroundSearch(query: string, num = 8): Promise<WebSea
 }
 
 /**
- * FREE WEB SEARCH CHAIN: Gemini(Google) → Brave → DuckDuckGo → Wikipedia.
- * Each provider has an independent rate-limit budget. Gemini grounding is
- * tried FIRST: it's a real API (immune to datacenter-IP blocks that break
- * the Brave/DDG scrapers on Vercel) and returns Google-index quality.
+ * FREE WEB SEARCH CHAIN (parallel racing): {Gemini(Google) | Brave | DDG} → Wikipedia.
+ *
+ * The three general engines fire IN PARALLEL (allSettled) and the best
+ * available answer is picked by priority — Gemini grounding (Google index,
+ * API-grade) → Brave → DuckDuckGo. Parallelism keeps worst-case latency at
+ * ~max(engine) instead of the sum, so a blocked engine no longer stalls
+ * the user for 30-45s. Wikipedia remains the always-up encyclopedic
+ * safety net. The chosen engine id is returned for observability.
  */
+let lastSearchEngine = 'none'
+export function lastSearchEngineUsed(): string {
+  return lastSearchEngine
+}
+
 export async function freeWebSearch(
   query: string,
   num = 8
@@ -500,37 +509,56 @@ export async function freeWebSearch(
   const trimmed = query.trim()
   if (!trimmed) return []
 
-  const errors: string[] = []
+  // 0. Parallel race: Gemini grounding + Brave scrape + DDG scrape
+  const settled = await Promise.allSettled([
+    geminiGroundSearch(trimmed, num),
+    braveSearch(trimmed, num),
+    duckDuckGoSearch(trimmed, num),
+  ])
+  const [geminiRes, braveRes, ddgRes] = settled
 
-  // 0. Gemini + Google Search grounding (API-grade quality, IP-proof)
-  try {
-    return await geminiGroundSearch(trimmed, num)
-  } catch (err) {
-    errors.push(`gemini: ${err instanceof Error ? err.message : err}`)
+  // Snippet enrichment: Gemini grounding returns titles + URLs but no
+  // excerpts. Brave/DDG (already fetched in parallel) often have snippets
+  // for the same URLs — join them so the UI never shows an empty card.
+  const snippetByPath = new Map<string, string>()
+  for (const res of [braveRes, ddgRes]) {
+    if (res.status === 'fulfilled') {
+      for (const r of res.value) {
+        if (r.snippet && !snippetByPath.has(r.url)) snippetByPath.set(r.url, r.snippet)
+      }
+    }
   }
 
-  // 1. Brave (best general coverage — verified live)
-  try {
-    return await braveSearch(trimmed, num)
-  } catch (err) {
-    errors.push(`brave: ${err instanceof Error ? err.message : err}`)
+  if (geminiRes.status === 'fulfilled' && geminiRes.value.length > 0) {
+    lastSearchEngine = 'gemini-google'
+    return geminiRes.value.map((r) => ({ ...r, snippet: r.snippet || snippetByPath.get(r.url) || '' }))
+  }
+  if (braveRes.status === 'fulfilled' && braveRes.value.length > 0) {
+    lastSearchEngine = 'brave'
+    return braveRes.value
+  }
+  if (ddgRes.status === 'fulfilled' && ddgRes.value.length > 0) {
+    lastSearchEngine = 'duckduckgo'
+    return ddgRes.value
   }
 
-  // 2. DuckDuckGo HTML (blocked on some IPs — cheap to try)
-  try {
-    return await duckDuckGoSearch(trimmed, num)
-  } catch (err) {
-    errors.push(`ddg: ${err instanceof Error ? err.message : err}`)
-  }
+  const errors = settled.map((r, i) =>
+    `${['gemini', 'brave', 'ddg'][i]}: ${r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : 'no results'}`
+  )
 
-  // 3. Wikipedia (encyclopedic only, but always up)
+  // 1. Wikipedia (encyclopedic only, but always up)
   try {
-    return await wikipediaSearch(trimmed, num)
+    const wiki = await wikipediaSearch(trimmed, num)
+    if (wiki.length > 0) {
+      lastSearchEngine = 'wikipedia'
+      return wiki
+    }
+    errors.push('wikipedia: no results')
   } catch (err) {
     errors.push(`wikipedia: ${err instanceof Error ? err.message : err}`)
   }
 
-  // 4. (retired) Z.ai web_search — permanently disabled by owner directive.
+  // 2. (retired) Z.ai web_search — permanently disabled by owner directive.
   console.error('[web-access] all search providers failed:', errors.join(' | '))
   throw new Error('Web search is temporarily unavailable — all providers failed.')
 }
