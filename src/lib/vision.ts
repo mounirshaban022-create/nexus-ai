@@ -46,49 +46,59 @@ function geminiEngine(): VisionEngine {
       // NOTE: gemini-2.0/1.5 are RETIRED, and gemini-2.5-flash is 404 for
       // NEW API keys (the production key is new) — that is why "vision
       // doesn't work". 3.6-flash first; 2.5 stays as a legacy fallback.
-      // thinkingBudget 0 keeps 2.5 descriptions at ~1s.
+      // thinkingBudget 0 is a 2.5-family knob — never sent to 3.x models.
       const models = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite']
-      let lastError = 'no model answered'
+      const errors: string[] = []
       for (const model of models) {
-        try {
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    parts: [
-                      { text: question },
-                      { inline_data: { mime_type: mimeType, data: base64 } },
-                    ],
+        let lastError: string | null = null
+        // Two attempts per model — Google's "Unable to process input image"
+        // is often transient (its own message says "Please retry").
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [
+                    {
+                      parts: [
+                        { text: question },
+                        { inline_data: { mime_type: mimeType, data: base64 } },
+                      ],
+                    },
+                  ],
+                  generationConfig: {
+                    maxOutputTokens: 1024,
+                    temperature: 0.4,
+                    ...(model.startsWith('gemini-2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
                   },
-                ],
-                generationConfig: {
-                  maxOutputTokens: 1024,
-                  temperature: 0.4,
-                  ...(model.startsWith('gemini-2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-                },
-              }),
-              signal: AbortSignal.timeout(45_000),
+                }),
+                signal: AbortSignal.timeout(45_000),
+              }
+            )
+            if (!res.ok) {
+              const errText = (await res.text()).slice(0, 160)
+              lastError = `${model}: HTTP ${res.status} ${errText}`
+              if (attempt === 0 && res.status === 400) continue // one retry
+              break // move to the next model
             }
-          )
-          if (!res.ok) {
-            lastError = `${model}: HTTP ${res.status} ${(await res.text()).slice(0, 160)}`
-            continue
+            const data = (await res.json()) as {
+              candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+            }
+            const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
+            if (text.trim()) return text.trim()
+            lastError = `${model}: empty response`
+            break
+          } catch (err) {
+            lastError = `${model}: ${err instanceof Error ? err.message : String(err)}`
+            break
           }
-          const data = (await res.json()) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-          }
-          const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
-          if (text.trim()) return text.trim()
-          lastError = `${model}: empty response`
-        } catch (err) {
-          lastError = `${model}: ${err instanceof Error ? err.message : String(err)}`
         }
+        if (lastError) errors.push(lastError)
       }
-      throw new Error(lastError)
+      throw new Error(errors.join(' | ') || 'no model answered')
     },
   }
 }
@@ -102,11 +112,11 @@ function openRouterEngine(): VisionEngine {
     run: async (base64, mimeType, question) => {
       const key = process.env.OPENROUTER_API_KEY!.trim()
       const baseUrl = process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1'
-      // Vision-capable candidates: current Gemini flash first, free Qwen-VL
-      // fallback. (llama-3.2-11b-vision was retired → dead 404 weight.)
+      // Vision-capable candidates: the PAID qwen2.5-vl slug (the :free one
+      // was retired — 404 "use this slug instead") then Gemini via router.
       const models = [
+        'qwen/qwen2.5-vl-72b-instruct',
         'google/gemini-2.5-flash',
-        'qwen/qwen2.5-vl-72b-instruct:free',
       ]
       let lastError = 'no model answered'
       for (const model of models) {
@@ -161,29 +171,49 @@ function groqEngine(): VisionEngine {
     configured: () => Boolean(process.env.GROQ_API_KEY?.trim()),
     run: async (base64, mimeType, question) => {
       const key = process.env.GROQ_API_KEY!.trim()
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-          max_tokens: 1024,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: question },
-                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+      // llama-4-scout was deprecated/404 for many keys (Aug 2026) — maverick
+      // is the surviving Llama-4 multimodal; scout stays as a fallback.
+      const models = [
+        'meta-llama/llama-4-maverick-17b-128e-instruct',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+      ]
+      let lastError = 'no model answered'
+      for (const model of models) {
+        try {
+          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model,
+              max_tokens: 1024,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: question },
+                    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+                  ],
+                },
               ],
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(45_000),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 160)}`)
-      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
-      const text = data.choices?.[0]?.message?.content ?? ''
-      if (!text.trim()) throw new Error('empty response')
-      return text.trim()
+            }),
+            signal: AbortSignal.timeout(45_000),
+          })
+          if (!res.ok) {
+            lastError = `${model}: HTTP ${res.status} ${(await res.text()).slice(0, 160)}`
+            continue
+          }
+          const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
+          const text = data.choices?.[0]?.message?.content ?? ''
+          if (!text.trim()) {
+            lastError = `${model}: empty response`
+            continue
+          }
+          return text.trim()
+        } catch (err) {
+          lastError = `${model}: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      throw new Error(lastError)
     },
   }
 }
