@@ -38,6 +38,23 @@ export function groqModelsForTask(task?: string): string[] {
   }
 }
 
+/**
+ * REASONING CONTROL — Groq's gpt-oss-120b reasons by default ('medium'),
+ * which adds seconds of hidden thought before the first token on simple
+ * chats. llama-* models have no reasoning knob (sending the param would
+ * 400) → only ever set it for gpt-oss models.
+ */
+export function groqReasoningEffort(model: string, task?: string): string | undefined {
+  if (!model.startsWith('openai/gpt-oss')) return undefined
+  switch (task) {
+    case 'reasoning':
+    case 'code':
+      return 'medium'
+    default:
+      return 'low'
+  }
+}
+
 interface GroqSseChunk {
   choices?: Array<{
     delta?: { content?: string | null; reasoning?: string | null }
@@ -76,6 +93,9 @@ export async function groqStreamChatCompletion(
           stream: true,
           temperature: opts.temperature ?? 0.7,
           max_tokens: opts.maxTokens ?? 4000,
+          ...(groqReasoningEffort(model, opts.task)
+            ? { reasoning_effort: groqReasoningEffort(model, opts.task) }
+            : {}),
         }),
       })
       if (!res.ok || !res.body) {
@@ -149,6 +169,9 @@ export async function groqChatCompletion(
           messages,
           temperature: opts.temperature ?? 0.7,
           max_tokens: opts.maxTokens ?? 4000,
+          ...(groqReasoningEffort(model, opts.task)
+            ? { reasoning_effort: groqReasoningEffort(model, opts.task) }
+            : {}),
         }),
       })
       const data = (await res.json().catch(() => ({}))) as GroqSseChunk

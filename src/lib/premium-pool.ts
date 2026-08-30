@@ -476,15 +476,28 @@ function poolState(): PoolState {
 
 const BENCH_AFTER_FAILS = 3
 const BENCH_MS = 5 * 60_000
+/** Credential / quota / billing failures can't recover in 5 min — bench hard. */
+const BENCH_MS_HARD = 30 * 60_000
 
-function markPoolFailure(id: PremiumProviderId): void {
+/** True for errors that mean "this account can't serve at all right now":
+ *  bad key (401), no credits (402), forbidden / region (403), quota (429). */
+function isHardCredentialError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return /\b(401|402|403|429)\b|invalid username or password|unauthori[sz]ed|forbidden|quota|credit|billing|api key/i.test(
+    msg
+  )
+}
+
+function markPoolFailure(id: PremiumProviderId, err?: unknown): void {
   const st = poolState()
   const fails = (st.fails[id] ?? 0) + 1
   st.fails[id] = fails
-  if (fails >= BENCH_AFTER_FAILS) {
-    st.benchedUntil[id] = Date.now() + BENCH_MS
+  const hard = err !== undefined && isHardCredentialError(err)
+  if (fails >= BENCH_AFTER_FAILS || (hard && fails >= 1)) {
+    const ms = hard ? BENCH_MS_HARD : BENCH_MS
+    st.benchedUntil[id] = Date.now() + ms
     console.warn(
-      `[premium-pool] ${id} benched for ${BENCH_MS / 1000}s after ${fails} consecutive failures`
+      `[premium-pool] ${id} benched for ${ms / 1000}s after ${fails} consecutive failures${hard ? ' (credential/quota — hard bench)' : ''}`
     )
   }
 }
@@ -628,10 +641,10 @@ export async function premiumStreamChat(
       if (firstDelta) {
         // Visible text was already emitted → NEVER retry (would
         // duplicate on screen). Propagate so the caller keeps partial.
-        markPoolFailure(entry.id)
+        markPoolFailure(entry.id, err)
         throw err
       }
-      markPoolFailure(entry.id)
+      markPoolFailure(entry.id, err)
       lastError = err
       // Hard provider errors (bad key, quota, 5xx) → next provider.
       continue
@@ -676,7 +689,7 @@ export async function premiumChatCompletion(
       markPoolFailure(entry.id)
       lastError = new Error(`Empty response from ${entry.id}`)
     } catch (err) {
-      markPoolFailure(entry.id)
+      markPoolFailure(entry.id, err)
       lastError = err
       continue
     }

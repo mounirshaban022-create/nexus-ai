@@ -31,7 +31,7 @@ import { useI18n } from '@/lib/i18n'
 import { usePreferences } from '@/lib/preferences'
 import type { AgentAssignEvent, ChatMessageView, ChatStreamEvent, SkillRunEvent } from './shared'
 import { BrandMark, DIVISION_MAP, agentOrNexus, useActiveChatSession } from './shared'
-import { AgentAvatar, AttachmentList, HandoffPill, SkillRunCard, ToolCard, type ToolCardInfo } from './chat-parts'
+import { AgentAvatar, AttachmentList, HandoffPill, ImageRunCard, SearchRunCard, SkillRunCard, ToolCard, type ToolCardInfo } from './chat-parts'
 import { PersonalityRail } from './personality-rail'
 
 export interface NexusChatProps {
@@ -973,6 +973,23 @@ export function NexusChat(props: NexusChatProps) {
                   message: m.toolMessage,
                   args: m.toolArgs,
                   data: m.toolData,
+                }
+                // Live-run showpieces: web search gets the animated radar
+                // stepper, image work gets the aurora canvas — everything
+                // else keeps the polished running pill / done chip.
+                if (info.status === 'running' && (info.tool === 'web_search' || info.tool === 'read_page')) {
+                  return (
+                    <div key={m.id} className="flex ps-11">
+                      <SearchRunCard info={info} />
+                    </div>
+                  )
+                }
+                if (info.status === 'running' && (info.tool === 'generate_image' || info.tool === 'edit_image')) {
+                  return (
+                    <div key={m.id} className="flex ps-11">
+                      <ImageRunCard info={info} />
+                    </div>
+                  )
                 }
                 return (
                   <div key={m.id} className="flex ps-11">

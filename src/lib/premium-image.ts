@@ -22,6 +22,9 @@
 /* ------------------------------------------------------------------ */
 
 const GEMINI_ENDPOINTS = [
+  // Nano Banana 2 (3.1 generation) FIRST — best free quality; the 2.5 and
+  // 2.0 endpoints stay as fallbacks for legacy keys and quota spillover.
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent',
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent',
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent',
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent',

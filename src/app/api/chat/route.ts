@@ -29,6 +29,7 @@ import { CONNECTOR_MAP, validateConnectorArgs } from '@/lib/connectors'
 import { streamAnonymousFallbackChat, streamExternalChatCompletion } from '@/lib/ai-providers'
 import { zaiStreamChat, zaiOnCooldown, zaiConfigured, getZAI } from '@/lib/zai'
 import { premiumStreamChat } from '@/lib/premium-pool'
+import { geminiStreamChatCompletion, geminiChatConfigured } from '@/lib/gemini-chat'
 import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listAllSkills } from '@/lib/cli-skills'
@@ -392,6 +393,9 @@ function buildSystemPrompt(
     '11. SKILLS & EXTERNAL APPS (VERY IMPORTANT): the moment the user wants to control, connect to, or use an EXTERNAL application — notes apps (Obsidian, Joplin), design tools (Blender, GIMP, Inkscape, Krita), office (LibreOffice), automation (n8n), Zoom, mailchimp, media (Audacity, Shotcut, OBS), browsers, or ANY other app — you MUST call use_skill FIRST: TOOL_CALL with skill="search" and the app name, then load the manual (use_skill with the skill name), then FOLLOW it: install the CLI via run_command as `python3 -m pip install <pkg>` (NEVER bare `pip install` — it fails on this system), then run the CLI commands and report real output. Never claim an app is impossible before trying use_skill. For managing the user\'s INBOX from chat (check emails, find messages, organize, mark read, move, delete, star), use email_list / email_search / email_read / email_organize / email_folders directly. For browsing websites with clicks, use browser_action.',
     '12. CURRENT INFORMATION: any question about news, prices, scores, weather, "latest", "today", or anything time-sensitive REQUIRES web_search — never answer from memory alone.',
     '13. CODING & REAL PRODUCTS: when the user asks for a website, web app, landing page, tool, game, script or any CODE — put the COMPLETE, RUNNABLE source directly in your chat reply as a markdown code block (a full single-file HTML page with inline CSS/JS for websites and apps, or a complete file/component). Do NOT call create_document or any tool for code — code belongs IN THE CHAT so the user can read, copy and run it. Never truncate: include every line. Prefer modern, polished output (responsive layout, hover states, sensible colors). End with one short "How to run" line. Never say "implement this yourself" — build it fully.',
+    '14. CONTINUITY & MEMORY — you ALWAYS see the full conversation above: resolve "it / that / they / what I said" from the history instead of asking the user to repeat. NEVER claim you have no memory of earlier messages. Use the durable memories (when provided) naturally — referencing a stored fact once is helpful, reciting it back verbatim is not.',
+    '15. UNDERSTANDING FIRST: answer exactly what was asked. If the request is ambiguous, pick the most reasonable interpretation, answer it fully, then offer the alternative in ONE short closing line — never interrogate the user with multiple clarifying questions before helping.',
+    '16. VISION: when an image is attached you receive BOTH the real image AND a vision-model description — discuss the ACTUAL visual content precisely (objects, text, colors, layout). If asked "what is this / what do you see", answer from the image. If the user wants it CHANGED (crop, brighten, style, remove/add things…), call edit_image; only call generate_image for something new from scratch.',
     '',
     // The persona comes LAST and is framed as voice/tone so it can never
     // outweigh the tool protocol above (see SKILLS FIX note).
@@ -2078,11 +2082,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build message history (needed for routing context + LLM messages)
-    const history = await db.chatMessage.findMany({
+    // Build message history (needed for routing context + LLM messages).
+    // Take the LAST 40 rows (desc fetch + reverse) — unbounded finds on
+    // long sessions only wasted memory and latency: everything above
+    // MAX_HISTORY was sliced away right after anyway.
+    const historyRows = await db.chatMessage.findMany({
       where: { sessionId: session.id },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
+      take: 40,
     })
+    const history = historyRows.reverse()
 
     const routingHistory = history
       .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -2338,9 +2347,14 @@ export async function POST(req: NextRequest) {
             })
           }
 
-          // LLM conversation: system + history + tool exchanges
+          // LLM conversation: system + history + tool exchanges.
+          // NOTE: the system prompt MUST be role 'system'. It used to be
+          // sent as a leading ASSISTANT message — models then believed they
+          // had already SAID all of it, which degraded instruction
+          // following ("dumb answers") and could break turn alternation on
+          // stricter engines, silently failing over to weaker ones.
           const llmMessages: Array<{ role: string; content: string }> = [
-            { role: 'assistant', content: systemPrompt },
+            { role: 'system', content: systemPrompt },
             ...history.slice(-MAX_HISTORY).map((m) => ({ role: m.role, content: m.content })),
           ]
           // Include the new user message (history was fetched before insert)
@@ -2429,7 +2443,7 @@ export async function POST(req: NextRequest) {
             try {
               const thinking = (await smartChat([
                 {
-                  role: 'assistant',
+                  role: 'system',
                   content:
                     'You are the reasoning engine of NEXUS AI. Given a question, produce a SHORT internal analysis (max 80 words, telegraphic) covering: what the user needs, which tools to use (if any), and the answer structure. Output ONLY the analysis.',
                 },
@@ -2566,6 +2580,51 @@ export async function POST(req: NextRequest) {
                   console.warn(
                     '[api/chat] Z.ai engine failed, falling back:',
                     zaiErr instanceof Error ? zaiErr.message : zaiErr
+                  )
+                }
+              }
+            }
+
+            // 0c) NATIVE VISION — when the user attached an image, stream
+            //     the reply from Gemini's MULTIMODAL endpoint first, so the
+            //     model sees the ACTUAL pixels (ChatGPT-grade vision) and
+            //     not only a text description of them. Any failure falls
+            //     through to the standard pool, which still has the
+            //     vision-model description injected as context.
+            if (!didStream && activeImage && geminiChatConfigured() && step === 0) {
+              try {
+                const visionMessages: Array<{ role: string; content: unknown }> = [
+                  { role: 'system', content: systemPrompt },
+                  ...history.slice(-MAX_HISTORY).map((m) => ({ role: m.role, content: m.content })),
+                ]
+                if (attachmentContextMessage) {
+                  visionMessages.push({ role: 'user', content: attachmentContextMessage })
+                }
+                visionMessages.push({
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'text',
+                      text: effectiveMessage || 'Look at this image and respond naturally in the conversation.',
+                    },
+                    { type: 'image_url', image_url: { url: activeImage.dataUrl } },
+                  ],
+                })
+                content = await geminiStreamChatCompletion(
+                  visionMessages as Parameters<typeof geminiStreamChatCompletion>[0],
+                  emitDelta,
+                  { maxTokens: 4000, timeoutMs: 90_000, task: llmTask }
+                ).then((r) => r.content)
+                didStream = true
+                console.log('[api/chat] served by native vision (gemini multimodal)')
+              } catch (visErr) {
+                if (streamedSoFar.trim()) {
+                  content = streamedSoFar
+                  didStream = true
+                } else {
+                  console.warn(
+                    '[api/chat] native vision failed, falling back to pool:',
+                    visErr instanceof Error ? visErr.message : visErr
                   )
                 }
               }

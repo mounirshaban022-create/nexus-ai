@@ -16,13 +16,14 @@ import {
   Clapperboard,
   Download,
   FileText,
-  Link2,
   Loader2,
   Play,
   RefreshCcw,
+  Search,
   Sparkles,
   Terminal,
   Volume2,
+  Wand2,
   X,
 } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
@@ -213,22 +214,149 @@ export interface ToolCardInfo {
   data?: string | null
 }
 
+/* ------------------------------------------------------------------ */
+/* Live-run state — elapsed-seconds ticker shared by the run cards      */
+/* ------------------------------------------------------------------ */
+
+function useElapsedSeconds(active: boolean): number {
+  const [sec, setSec] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const t0 = Date.now()
+    setSec(0)
+    const id = setInterval(() => setSec(Math.floor((Date.now() - t0) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [active])
+  return sec
+}
+
+/* ------------------------------------------------------------------ */
+/* SearchRunCard — Perplexity/ChatGPT-style animated search state       */
+/* Radar icon + staged shimmer headline + query chip + wave equalizer   */
+/* ------------------------------------------------------------------ */
+
+const SEARCH_STAGES = [
+  'Searching the web',
+  'Scanning results',
+  'Reading the sources',
+  'Connecting the dots',
+]
+
+export function SearchRunCard({ info }: { info: ToolCardInfo }) {
+  const elapsed = useElapsedSeconds(true)
+  const a = info.args ?? {}
+  const query = str(a.query) || str(a.url) || str(a.q)
+  const reading = info.tool === 'read_page'
+  const stage = reading
+    ? Math.min(Math.floor(elapsed / 6), 1) === 0
+      ? 'Reading the page'
+      : 'Extracting the facts'
+    : SEARCH_STAGES[Math.min(Math.floor(elapsed / 4), SEARCH_STAGES.length - 1)]
+  return (
+    <div
+      className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-muted/40 p-3"
+      role="status"
+      aria-label={stage}
+    >
+      {/* soft brand sweep */}
+      <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />
+      <div className="relative flex items-center gap-2.5">
+        <span className="nx-radar relative grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#ff5a5f]/10 text-[#ff5a5f]">
+          <Search className="h-4 w-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p key={stage} className="nx-rise nx-status-shimmer text-xs font-medium text-foreground">
+            {stage}
+          </p>
+          {query ? (
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">“{query}”</p>
+          ) : info.message ? (
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{info.message}</p>
+          ) : null}
+        </div>
+        <span className="nx-wave shrink-0" aria-hidden>
+          <i />
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="w-7 shrink-0 text-end text-[10px] tabular-nums text-muted-foreground/70">
+          {elapsed}s
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* ImageRunCard — animated aurora canvas while an image is being made   */
+/* ------------------------------------------------------------------ */
+
+const IMAGE_STAGES = [
+  'Reading your prompt',
+  'Composing the scene',
+  'Painting the details',
+  'Final touches',
+]
+
+export function ImageRunCard({ info }: { info: ToolCardInfo }) {
+  const elapsed = useElapsedSeconds(true)
+  const a = info.args ?? {}
+  const prompt = str(a.prompt) || str(a.instruction) || str(a.description)
+  const editing = info.tool === 'edit_image'
+  const stage = editing
+    ? 'Editing your image'
+    : IMAGE_STAGES[Math.min(Math.floor(elapsed / 5), IMAGE_STAGES.length - 1)]
+  return (
+    <div className="w-full max-w-sm" role="status" aria-label={stage}>
+      <div className="nx-img-canvas relative aspect-square w-full overflow-hidden rounded-2xl border border-border bg-muted/40">
+        {/* drifting aurora blobs */}
+        <span className="nx-aurora absolute inset-[-35%]" aria-hidden />
+        {/* sheen sweep */}
+        <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />
+        <div className="absolute inset-0 grid place-items-center">
+          <div className="flex flex-col items-center gap-3">
+            <span className="nx-ring-pulse relative grid h-14 w-14 place-items-center rounded-full bg-background/55 backdrop-blur-sm">
+              {editing ? (
+                <Wand2 className="h-6 w-6 text-[#ff5a5f]" aria-hidden />
+              ) : (
+                <Sparkles className="h-6 w-6 text-[#ff5a5f]" aria-hidden />
+              )}
+            </span>
+            <p key={stage} className="nx-rise px-6 text-center text-xs font-medium text-foreground/90">
+              {stage}
+            </p>
+          </div>
+        </div>
+        {/* corner progress */}
+        <span className="absolute bottom-2 end-2 rounded-full bg-background/55 px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground backdrop-blur-sm">
+          {elapsed}s
+        </span>
+      </div>
+      {prompt ? (
+        <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/80">“{prompt}”</p>
+      ) : null}
+    </div>
+  )
+}
+
 export function ToolCard({ info }: { info: ToolCardInfo }) {
   const [open, setOpen] = useState(false)
   const label = toolLabel(info.tool)
 
-  /* Running: compact pill with spinner + elapsed hint. */
+  /* Running: polished pill — brand sweep + shimmering label + live hint. */
   if (info.status === 'running') {
     return (
       <div
-        className="flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
+        className="relative flex items-center gap-2 overflow-hidden rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
         role="status"
         aria-label={label}
       >
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#ff5a5f]" aria-hidden />
-        <span className="shrink-0">{label}</span>
+        <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />
+        <Loader2 className="relative h-3.5 w-3.5 shrink-0 animate-spin text-[#ff5a5f]" aria-hidden />
+        <span className="nx-status-shimmer relative shrink-0 text-foreground/90">{label}</span>
         {info.message ? (
-          <span className="min-w-0 max-w-[240px] truncate text-muted-foreground/80 sm:max-w-xs">{info.message}</span>
+          <span className="relative min-w-0 max-w-[240px] truncate text-muted-foreground/80 sm:max-w-xs">{info.message}</span>
         ) : null}
       </div>
     )
@@ -277,11 +405,29 @@ export function ToolCard({ info }: { info: ToolCardInfo }) {
 
 const VIDEO_STATUS_LABEL: Record<string, string> = {
   planning: 'Planning scenes',
+  images: 'Painting scene art',
+  narration: 'Recording narration',
   rendering: 'Rendering scenes',
   assembling: 'Assembling video',
   encoding: 'Encoding video',
   done: 'Done',
   error: 'Failed',
+}
+
+/** Cinematic pipeline tracker shown while the video renders. */
+const VIDEO_STAGES: Array<{ id: string; label: string }> = [
+  { id: 'planning', label: 'Plan' },
+  { id: 'images', label: 'Art' },
+  { id: 'narration', label: 'Voice' },
+  { id: 'rendering', label: 'Render' },
+  { id: 'encoding', label: 'Encode' },
+]
+
+function videoStageIndex(status: string): number {
+  const aliases: Record<string, string> = { assembling: 'rendering' }
+  const s = aliases[status] ?? status
+  const idx = VIDEO_STAGES.findIndex((st) => st.id === s)
+  return idx === -1 ? 0 : idx
 }
 
 function VideoJobCard({
@@ -380,21 +526,53 @@ function VideoJobCard({
   }
 
   const pct = Math.min(100, Math.max(3, state.progress))
+  const activeStage = videoStageIndex(state.status)
   return (
-    <div className="w-full max-w-sm rounded-xl border border-border bg-muted/50 p-3" role="status">
+    <div className="w-full max-w-sm rounded-2xl border border-border bg-muted/50 p-3" role="status">
       <div className="flex items-center gap-2.5">
-        <span className="nx-gradient-surface grid h-9 w-9 shrink-0 place-items-center rounded-lg">
+        <span className="nx-gradient-surface nx-radar relative grid h-9 w-9 shrink-0 place-items-center rounded-lg">
           <Clapperboard className="h-4 w-4" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-foreground">{title || 'Generating video'}</p>
-          <p className="truncate text-[11px] text-muted-foreground/80">
+          <p className="nx-status-shimmer truncate text-[11px] text-muted-foreground/80">
             {state.message || VIDEO_STATUS_LABEL[state.status] || 'Working…'}
           </p>
         </div>
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/80">{Math.round(pct)}%</span>
       </div>
-      <div className="nx-progress-track mt-2.5" aria-hidden>
+      {/* Pipeline tracker — Plan → Art → Voice → Render → Encode */}
+      <div className="mt-2.5 flex items-center gap-1" aria-hidden>
+        {VIDEO_STAGES.map((st, i) => {
+          const doneState = i < activeStage
+          const active = i === activeStage
+          return (
+            <div key={st.id} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+              <span
+                className={`h-1 w-full rounded-full transition-colors duration-500 ${
+                  doneState
+                    ? 'bg-emerald-500/70'
+                    : active
+                      ? 'nx-stage-glow bg-[#ff5a5f]'
+                      : 'bg-border'
+                }`}
+              />
+              <span
+                className={`truncate text-[9px] leading-none ${
+                  doneState
+                    ? 'text-emerald-400/80'
+                    : active
+                      ? 'font-medium text-[#ff8a8d]'
+                      : 'text-muted-foreground/50'
+                }`}
+              >
+                {st.label}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="nx-progress-track mt-2" aria-hidden>
         <div className="nx-progress-fill" style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -659,7 +837,7 @@ function AttachmentCard({ item }: { item: unknown }) {
   if (!a) return null
   const type = str(a.type)
 
-  /* Image — generated art, browser screenshots, … */
+  /* Image — generated art, browser screenshots, … (soft fade-in reveal). */
   if (type === 'image') {
     const url = str(a.url)
     if (!url) return null
@@ -671,7 +849,7 @@ function AttachmentCard({ item }: { item: unknown }) {
           src={url}
           alt={title || 'Generated image'}
           loading="lazy"
-          className="w-full rounded-xl border border-border"
+          className="nx-img-reveal w-full rounded-xl border border-border"
         />
         {title ? <figcaption className="mt-1.5 truncate text-[11px] text-muted-foreground/80">{title}</figcaption> : null}
       </figure>
@@ -770,8 +948,13 @@ function AttachmentCard({ item }: { item: unknown }) {
     const results = Array.isArray(a.results) ? a.results : []
     if (results.length === 0) return null
     return (
-      <div className="w-full max-w-md rounded-xl border border-border bg-muted/50 p-3">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Sources</p>
+      <div className="w-full max-w-md rounded-2xl border border-border bg-muted/40 p-3">
+        <p className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
+          Sources
+          <span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] normal-case tabular-nums">
+            {results.length}
+          </span>
+        </p>
         <ul className="mt-2 space-y-1.5">
           {results.slice(0, 5).map((raw, i) => {
             const r = asRecord(raw)
@@ -779,14 +962,16 @@ function AttachmentCard({ item }: { item: unknown }) {
             const url = str(r.url)
             const title = str(r.title) || url
             return (
-              <li key={i} className="flex min-w-0 items-start gap-1.5 text-xs">
-                <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/80" aria-hidden />
+              <li key={i} className="nx-rise flex min-w-0 items-start gap-2 text-xs" style={{ animationDelay: `${i * 60}ms` }}>
+                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-[9px] font-semibold tabular-nums text-muted-foreground" aria-hidden>
+                  {i + 1}
+                </span>
                 {url ? (
                   <a
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="min-w-0 flex-1 truncate text-muted-foreground transition hover:text-foreground"
+                    className="min-w-0 flex-1 truncate text-muted-foreground transition hover:text-foreground hover:underline"
                   >
                     {title}
                   </a>

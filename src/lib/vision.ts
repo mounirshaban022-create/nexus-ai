@@ -3,7 +3,7 @@
 /*                                                                    */
 /* Replaces the retired Z.ai createVision path (owner directive: Z.ai  */
 /* is permanently disabled). Tries, in order:                          */
-/*   1. Gemini (GEMINI_API_KEY)     — gemini-2.0-flash, fast + cheap   */
+/*   1. Gemini (GEMINI_API_KEY)     — gemini-3.6-flash, fast + cheap   */
 /*   2. OpenRouter (OPENROUTER_API_KEY) — vision-capable models        */
 /*   3. Groq (GROQ_API_KEY)         — llama-4-scout multimodal         */
 /*                                                                    */
@@ -43,7 +43,11 @@ function geminiEngine(): VisionEngine {
     configured: () => Boolean(process.env.GEMINI_API_KEY?.trim()),
     run: async (base64, mimeType, question) => {
       const key = process.env.GEMINI_API_KEY!.trim()
-      const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash']
+      // NOTE: gemini-2.0/1.5 are RETIRED, and gemini-2.5-flash is 404 for
+      // NEW API keys (the production key is new) — that is why "vision
+      // doesn't work". 3.6-flash first; 2.5 stays as a legacy fallback.
+      // thinkingBudget 0 keeps 2.5 descriptions at ~1s.
+      const models = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite']
       let lastError = 'no model answered'
       for (const model of models) {
         try {
@@ -61,7 +65,11 @@ function geminiEngine(): VisionEngine {
                     ],
                   },
                 ],
-                generationConfig: { maxOutputTokens: 1024, temperature: 0.4 },
+                generationConfig: {
+                  maxOutputTokens: 1024,
+                  temperature: 0.4,
+                  ...(model.startsWith('gemini-2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+                },
               }),
               signal: AbortSignal.timeout(45_000),
             }
@@ -94,10 +102,10 @@ function openRouterEngine(): VisionEngine {
     run: async (base64, mimeType, question) => {
       const key = process.env.OPENROUTER_API_KEY!.trim()
       const baseUrl = process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1'
-      // Vision-capable candidates: paid Gemini first, free Qwen-VL fallback.
+      // Vision-capable candidates: current Gemini flash first, free Qwen-VL
+      // fallback. (llama-3.2-11b-vision was retired → dead 404 weight.)
       const models = [
-        'google/gemini-2.0-flash-001',
-        'meta-llama/llama-3.2-11b-vision-instruct',
+        'google/gemini-2.5-flash',
         'qwen/qwen2.5-vl-72b-instruct:free',
       ]
       let lastError = 'no model answered'

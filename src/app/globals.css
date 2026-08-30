@@ -879,7 +879,195 @@ html[dir="rtl"] .nx-rail {
   height: 100%;
   border-radius: 999px;
   background: var(--nx-grad);
-  transition: width 0.6s ease;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+/* Moving stripes inside the progress fill — the bar visibly "works". */
+.nx-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.16) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0.16) 75%,
+    transparent 75%
+  );
+  background-size: 14px 14px;
+  animation: nx-stripes 0.9s linear infinite;
+}
+@keyframes nx-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 14px 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* LIVE-RUN SHOWPIECES — search / image / video generation states.      */
+/* Brand-safe: the rose gradient + token borders, valid in light+dark.  */
+/* ------------------------------------------------------------------ */
+
+/* Horizontal sheen that glides across a running card. */
+@keyframes nx-sweep {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(230%);
+  }
+}
+.nx-sweep {
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    rgba(255, 90, 95, 0.08) 45%,
+    rgba(255, 138, 141, 0.16) 50%,
+    rgba(255, 90, 95, 0.08) 55%,
+    transparent 75%
+  );
+  animation: nx-sweep 2.4s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Radar ring — pulsing halo behind an active icon. */
+.nx-radar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: nx-radar 1.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes nx-radar {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 90, 95, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(255, 90, 95, 0);
+  }
+}
+
+/* Ring pulse for the image canvas centerpiece. */
+.nx-ring-pulse {
+  animation: nx-ring-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes nx-ring-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 90, 95, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 16px rgba(255, 90, 95, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 90, 95, 0);
+  }
+}
+
+/* Equalizer wave — four dancing bars that say "live". */
+.nx-wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2.5px;
+  height: 14px;
+}
+.nx-wave i {
+  width: 3px;
+  height: 6px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #ff8a8d, #ff5a5f);
+  animation: nx-eq 1s ease-in-out infinite;
+}
+.nx-wave i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.nx-wave i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.nx-wave i:nth-child(4) {
+  animation-delay: 0.45s;
+}
+@keyframes nx-eq {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
+}
+
+/* Aurora canvas — drifting color blobs behind the image-generation state. */
+.nx-aurora {
+  background:
+    radial-gradient(38% 38% at 30% 35%, rgba(255, 90, 95, 0.35), transparent 70%),
+    radial-gradient(34% 34% at 70% 30%, rgba(147, 112, 255, 0.3), transparent 70%),
+    radial-gradient(40% 40% at 55% 75%, rgba(56, 189, 248, 0.28), transparent 70%),
+    radial-gradient(30% 30% at 25% 75%, rgba(255, 190, 80, 0.25), transparent 70%);
+  filter: blur(30px);
+  animation: nx-aurora 9s linear infinite;
+}
+@keyframes nx-aurora {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.18);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+/* Video pipeline: the active stage segment glows. */
+.nx-stage-glow {
+  animation: nx-stage 1.4s ease-in-out infinite;
+}
+@keyframes nx-stage {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Generated image reveal — soft rise + fade the moment art lands. */
+.nx-img-reveal {
+  opacity: 0;
+  animation: nx-img-in 0.55s cubic-bezier(0.21, 1.02, 0.73, 1) 0.05s forwards;
+}
+@keyframes nx-img-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Light-mode softening: sweep/aurora tinted for pale backgrounds. */
+html:not(.dark) .nx-sweep {
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    rgba(255, 90, 95, 0.06) 45%,
+    rgba(255, 90, 95, 0.13) 50%,
+    rgba(255, 90, 95, 0.06) 55%,
+    transparent 75%
+  );
+}
+html:not(.dark) .nx-aurora {
+  opacity: 0.75;
 }
 
 /* Hide scrollbars on horizontal rails */

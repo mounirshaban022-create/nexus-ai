@@ -248,8 +248,9 @@ export interface SessionItem {
 /* ------------------------------------------------------------------ */
 
 export const TOOL_META: Record<string, { label: string }> = {
-  generate_image: { label: 'Creating image' },
-  generate_video: { label: 'Producing video' },
+  generate_image: { label: 'Creating your image' },
+  edit_image: { label: 'Editing your image' },
+  generate_video: { label: 'Creating your video' },
   create_document: { label: 'Building document' },
   create_spreadsheet: { label: 'Building spreadsheet' },
   edit_document: { label: 'Editing document' },
@@ -257,7 +258,7 @@ export const TOOL_META: Record<string, { label: string }> = {
   run_code: { label: 'Running code' },
   run_command: { label: 'Running command' },
   web_search: { label: 'Searching the web' },
-  read_page: { label: 'Reading page' },
+  read_page: { label: 'Reading the page' },
   browser_action: { label: 'Driving browser' },
   send_email: { label: 'Sending email' },
   send_whatsapp: { label: 'Sending WhatsApp' },
