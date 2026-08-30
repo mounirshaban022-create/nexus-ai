@@ -299,15 +299,18 @@ export function NexusChat(props: NexusChatProps) {
   /* ---------- SMOOTH WORD-BY-WORD REVEAL (the "alive" feel) ----------
    * EVERY piece of assistant text - fast token streams, chunky
    * multi-word deltas, or ONE giant burst from a non-streaming
-   * provider - is fed into a paced reveal queue. A 30ms tick
-   * releases a few characters at a time with automatic catch-up
-   * when the backlog grows, so the UI ALWAYS renders word-by-word:
-   * the AI feels instant and never slams a wall of text.
+   * provider - is fed into a paced reveal queue.
    *
-   *   pace = 2 chars + backlog/40 per 30ms tick (capped at 80)
-   *   - slow streams  -> steady word-by-word typing (~1s buffer)
+   * GLITCH FIX: chunks now END ON WORD BOUNDARIES (never mid-word),
+   * so the markdown renderer stops re-flowing half-finished words
+   * (the visible "glitchy text" complaint), and the pace adapts to
+   * the backlog with a HIGHER catch-up ceiling - long answers no
+   * longer lag seconds behind the model.
+   *
+   *   pace = 6 chars + backlog/22 per 30ms tick (capped at 220)
+   *   - slow streams  -> steady word-by-word typing
    *   - fast streams  -> backlog grows -> pace grows -> never lags
-   *   - one-shot text -> drained in <= ~1.2s at 2x pace
+   *   - one-shot text -> drained in <= ~1s
    */
   const ensureRevealLoop = useCallback(() => {
     if (revealTimerRef.current) return
@@ -323,9 +326,17 @@ export function NexusChat(props: NexusChatProps) {
         }
         return
       }
-      let pace = 2 + Math.ceil(st.backlog.length / 40)
-      if (st.ended) pace *= 2 // stream over -> finish briskly
-      const chunk = st.backlog.slice(0, Math.min(80, pace))
+      let pace = 6 + Math.ceil(st.backlog.length / 22)
+      if (st.ended) pace = Math.max(pace * 2, 120) // stream over -> finish briskly
+      let take = Math.min(220, pace)
+      // NEVER cut mid-word: extend the cut to the end of the current word
+      // (unless we're at the tail of the backlog, then take it all).
+      if (take < st.backlog.length) {
+        const rest = st.backlog.slice(take)
+        const spaceIdx = rest.search(/\s/)
+        if (spaceIdx > -1 && spaceIdx <= 14) take += spaceIdx + 1
+      }
+      const chunk = st.backlog.slice(0, take)
       st.backlog = st.backlog.slice(chunk.length)
       appendToMessage(st.id, chunk)
     }, 30)

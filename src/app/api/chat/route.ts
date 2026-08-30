@@ -33,6 +33,7 @@ import { consumeSSEWithPeek } from '@/lib/llm-stream'
 import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction } from '@/lib/email'
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listAllSkills } from '@/lib/cli-skills'
 import { runSkillAction, resolveSkillAction } from '@/lib/skill-actions'
+import { CLOUD_SKILLS } from '@/lib/skill-map'
 
 /** Resolves the app's own origin — works on localhost, Vercel previews,
  *  and production (falls back to localhost for direct dev calls).
@@ -147,9 +148,9 @@ const CHAT_TOOL_DEFS: Array<{
   {
     id: 'edit_image',
     description:
-      'PROFESSIONALLY EDIT the user\'s attached photo (real image processing, pixel-perfect): crop, resize, rotate, flip, grayscale, sepia, invert, blur, sharpen, brightness, saturation, hue, contrast, tint, vignette, watermark text, format conversion, compression. Use whenever the user attaches an image and wants it CHANGED (not regenerated) — e.g. "make this black and white", "crop to the left half", "brighten it", "add a watermark", "sharpen this".',
+      "EDIT the user's attached image TWO ways. (1) AI GENERATIVE EDIT — natural language, for anything creative: 'remove the background', 'replace the sky with sunset', 'make it look like a painting', 'add a red sports car', 'remove the person on the left' — pass `instruction` (and NO operations). (2) PIXEL-PERFECT ops — crop, resize, rotate, flip, grayscale, sepia, invert, blur, sharpen, brightness, saturation, hue, contrast, tint, vignette, watermark text, format conversion — pass an `operations` array. Use this whenever the user attaches an image and wants it CHANGED rather than regenerated from scratch.",
     params:
-      'operations (required: JSON array of one or more operations, applied in order, each like {op: "crop", ...}) — available ops: {op:"resize", width, height}, {op:"crop", left, top, width, height}, {op:"rotate", angle: 90|180|270}, {op:"flipH"}, {op:"flipV"}, {op:"grayscale"}, {op:"sepia"}, {op:"negate"}, {op:"blur", sigma: 0-30}, {op:"sharpen"}, {op:"brightness", value: 0-3}, {op:"saturation", value: 0-3}, {op:"hue", degrees: 0-360}, {op:"contrast", value: -1 to 1}, {op:"tint", color: "#rrggbb"}, {op:"vignette"}, {op:"watermark", text, fontSize: 48, color: "#ffffff", opacity: 0-1, position: "center|bottom-right|bottom-left|top-right|top-left"}, {op:"format", type: "jpeg|png|webp", quality: 1-100}',
+      'instruction (optional string: AI generative edit described in natural language — use for removals, restyling, relighting, object changes) OR operations (optional JSON array, applied in order, each like {op: "crop", ...}) — available ops: {op:"resize", width, height}, {op:"crop", left, top, width, height}, {op:"rotate", angle: 90|180|270}, {op:"flipH"}, {op:"flipV"}, {op:"grayscale"}, {op:"sepia"}, {op:"negate"}, {op:"blur", sigma: 0-30}, {op:"sharpen"}, {op:"brightness", value: 0-3}, {op:"saturation", value: 0-3}, {op:"hue", degrees: 0-360}, {op:"contrast", value: -1 to 1}, {op:"tint", color: "#rrggbb"}, {op:"vignette"}, {op:"watermark", text, fontSize: 48, color: "#ffffff", opacity: 0-1, position: "center|bottom-right|bottom-left|top-right|top-left"}, {op:"format", type: "jpeg|png|webp", quality: 1-100}. Provide instruction OR operations (or both — AI edit runs first, ops after).',
   },
   {
     id: 'run_code',
@@ -200,9 +201,9 @@ const CHAT_TOOL_DEFS: Array<{
   {
     id: 'use_skill',
     description:
-      "CLI-Anything AGENT SKILLS — your connection to 79 real external apps: browser automation, Blender, GIMP, LibreOffice, Obsidian, Joplin, n8n workflows, Zoom, mailchimp, Exa search, Calibre, Zotero, drawio, music/video tools and more. ALWAYS call this FIRST when the user wants to control/connect/use an external app. skill='search' + query finds one; skill=<name> loads its full manual; then you MUST act on it with run_command (install the CLI if needed, run its commands, report real output).",
+      "PLATFORM + CLI-Anything AGENT SKILLS. 7 instant platform skills (no setup, run in one call): nexus-weather (live weather), nexus-translate (translate text), nexus-chart (charts from data), nexus-qr (QR codes), nexus-passguard (secure passwords), nexus-research (deep research reports), nexus-narrator (text-to-speech). PLUS 79 real app skills (Blender, GIMP, Obsidian, LibreOffice, n8n, Zoom, browser automation…): skill='search' + query finds one; skill=<name> loads its manual, then act with run_command. ALWAYS call use_skill FIRST when the user wants an external app or a platform capability.",
     params:
-      "skill (required: a skill name like 'browser' or 'obsidian', OR 'list' for the catalog, OR 'search'), query (optional: when skill='search'), install (optional: set true to also run the skill's pip install command now)",
+      "skill (required: a platform name like 'nexus-weather', an app skill name like 'browser' or 'obsidian', OR 'list' for the catalog, OR 'search'), query (optional: when skill='search' — for platform skills put the user's task here), install (optional: set true to also run the skill's pip install command now)",
   },
   {
     id: 'email_organize',
@@ -355,6 +356,9 @@ function buildSystemPrompt(
     chatTools,
     'Data connectors (fetch live info):',
     connectorList || '(none)',
+    'PLATFORM SKILLS (one-shot, already set up — call use_skill and the result arrives directly):',
+    '- nexus-weather (weather anywhere) · nexus-translate (translate text) · nexus-chart (charts/graphs from data) · nexus-qr (QR codes) · nexus-passguard (secure passwords) · nexus-research (deep multi-source research reports) · nexus-narrator (text-to-speech audio).',
+    'When the user\'s request clearly matches one of these, call use_skill with that exact name — no install steps needed, the platform executes it and returns the artifact.',
     '',
     'HOW TO USE TOOLS:',
     'When a tool would help (user wants an image, document, code execution, live data, or search), respond with EXACTLY one line:',
@@ -366,6 +370,12 @@ function buildSystemPrompt(
     '3. When done (or no tool needed), give your final answer in clean Markdown. Never write "TOOL_CALL" in a final answer.',
     '4. When you created something (image/document/code), reference it naturally: "Here\'s the image:" / "I\'ve prepared the document — download it below:" and include the exact URL from the result.',
     '5. NEVER introduce yourself, your experience, or your methodology unless explicitly asked. Your first sentence must directly address the user\'s request. No self-introductions, no restating the question.',
+    '5b. LENGTH MATCHES THE QUESTION — this matters:',
+    '   - Greeting / yes-no / simple factual question → answer in 1-3 sentences. FULL STOP.',
+    '   - Normal question → 1-2 short paragraphs. Expand ONLY if the user asked for depth, a list, or the task genuinely needs it.',
+    '   - Never pad answers with filler conclusions ("In conclusion…", "I hope this helps"), preambles, or restating the question.',
+    '   - Long is not smarter. A tight, correct answer beats a bloated lecture every time.',
+    '   - If the user asks a follow-up correction ("shorter", "why?", "what about X"), adapt instantly instead of repeating the same structure.',
     '6. TONE — BE A REAL PERSON, NOT A CORPORATE ASSISTANT:',
     '   - Use contractions naturally: "I\'ll", "you\'re", "we can", "let\'s", "here\'s".',
     '   - Vary sentence length. Mix short punchy lines with longer ones. Don\'t write in uniform 15-word sentences.',
@@ -579,13 +589,32 @@ function parseArtifactPatches(text: string): Array<{
   return patches
 }
 
+/**
+ * Strip tool directives from a FINAL visible answer.
+ *
+ * LINE-BASED (was: everything from the first "TOOL_CALL" token to the end
+ * of the message). The old `$`-anchored regex destroyed the whole answer
+ * whenever a model wrote prose that merely MENTIONED "TOOL_CALL" — the
+ * user saw a truncated reply and no tool ran ("skills don't work").
+ * Now only well-formed directive LINES are removed:
+ *   - fenced blocks containing a directive
+ *   - `TOOL_CALL: {...}` / `ARTIFACT_PATCH: {...}` single lines
+ *   - a trailing bare `TOOL_CALL` / `ARTIFACT_PATCH` token with nothing after
+ * Prose that merely references the token survives.
+ */
 function stripToolCall(text: string): string {
-  return text
-    .replace(/```(?:json)?\s*TOOL_CALL[\s\S]*?```\s*/g, '')
-    .replace(/TOOL_CALL\s*[:=][\s\S]*$/g, '')
-    .replace(/```(?:json)?\s*ARTIFACT_PATCH[\s\S]*?```\s*/g, '')
-    .replace(/ARTIFACT_PATCH\s*[:=][\s\S]*$/g, '')
-    .trim()
+  let out = text
+    .replace(/```(?:json)?\s*[^`]*?(?:TOOL_CALL|ARTIFACT_PATCH)[^`]*?```\s*/g, '')
+    // A complete directive line: token + colon + anything on that line
+    // (the balanced-JSON payload may span lines — allow multi-line braces).
+    .replace(/^\s*(?:TOOL_CALL|ARTIFACT_PATCH)\s*[:=]\s*(\{[\s\S]*?\})?\s*$/gm, '')
+    // A directive that ran to the end of the message with no JSON at all.
+    .replace(/(^|\n)\s*(?:TOOL_CALL|ARTIFACT_PATCH)\s*[:=]\s*[^\n{]*$/g, '')
+    // Bare trailing token (model got cut off mid-directive).
+    .replace(/(^|\n)\s*(?:TOOL_CALL|ARTIFACT_PATCH)\s*$/g, '')
+  // Collapse the whitespace left by removed lines (keep paragraph breaks).
+  out = out.replace(/\n{3,}/g, '\n\n').trim()
+  return out
 }
 
 /**
@@ -639,30 +668,66 @@ interface ActiveImage {
 
 /* ------------------------------------------------------------------ */
 /* SKILL DIRECTIVE — deterministic pre-scan for explicit skill runs.   */
-/* Matches the Skills-view hand-off (Use the "X" skill to help me: …)  */
-/* and direct slash syntax (/skill X …). Runs the skill's REAL cloud   */
-/* action and streams a dedicated animated card + artifact.            */
+/* Matches the Skills-view hand-off (Use the "X" skill to help me: …), */
+/* direct slash syntax (/skill X …), and NATURAL phrasing              */
+/* ("use the blender skill to make a fox" — previously only matched    */
+/* with "to help me:"/"for"/"and" connectors, so the common phrasing   */
+/* silently fell through to the LLM and skills "didn't activate").     */
+/* Runs the skill's REAL cloud action and streams a dedicated card.    */
 /* ------------------------------------------------------------------ */
 function parseSkillDirective(message: string): { skill: string; task: string } | null {
   // /skill blender make a fox  |  /skill blender: make a fox
-  const slash = message.match(/^\s*\/skill\s+[""']?([\w.-]+)[""']?\s*:?\s+(.+)$/i)
-  if (slash) return { skill: slash[1], task: slash[2] }
-  // Use the "cli-anything-blender" skill to help me: make a fox
+  const slash = message.match(/^\s*\/skill\s+[""']?([\w.-]+)[""']?\s*:?\s*(.*)$/i)
+  if (slash) return { skill: slash[1], task: slash[2] ?? '' }
+  // Use the "blender" skill to help me: make a fox | to make a fox |
+  // for making a fox | and make a fox — or with NO connector at all:
+  // "use the blender skill to make a fox" / "use the weather skill".
   const quoted = message.match(
-    /^\s*use\s+(?:the\s+)?[""']?([\w.-]+)[""']?\s+skill\s+(?:to\s+help\s+me\s*:?\s*|for\s+|and\s+)(.+)$/i
+    /^\s*use\s+(?:the\s+)?[""']?([\w][\w .-]{0,60}?)[""']?\s+skill\s*(?:to\s+help\s+me\s*:?\s*|for\s+|and\s+|to\s+|:\s*)?(.*)$/i
   )
-  if (quoted) return { skill: quoted[1], task: quoted[2] }
+  if (quoted) return { skill: quoted[1].trim(), task: (quoted[2] ?? '').trim() }
+  // "<name> skill: <task>"  |  "ask the <name> skill to <task>"
+  const colon = message.match(/^\s*(?:ask\s+)?(?:the\s+)?[""']?([\w.-]+)[""']?\s+skill\s*:\s*(.+)$/i)
+  if (colon) return { skill: colon[1], task: colon[2] }
   return null
+}
+
+/** Friendly aliases → canonical skill names (people say "weather skill"). */
+const SKILL_NAME_ALIASES: Record<string, string> = {
+  weather: 'nexus-weather',
+  translate: 'nexus-translate',
+  translation: 'nexus-translate',
+  translator: 'nexus-translate',
+  chart: 'nexus-chart',
+  charts: 'nexus-chart',
+  graph: 'nexus-chart',
+  qr: 'nexus-qr',
+  'qr-code': 'nexus-qr',
+  qrcode: 'nexus-qr',
+  password: 'nexus-passguard',
+  passwords: 'nexus-passguard',
+  passguard: 'nexus-passguard',
+  research: 'nexus-research',
+  narrator: 'nexus-narrator',
+  tts: 'nexus-narrator',
+  voice: 'nexus-narrator',
 }
 
 /** Resolve a directive skill name against the catalog (full or short form). */
 async function matchSkillFromCatalog(skill: string) {
   const catalog = await listAllSkills()
-  const short = skill.replace(/^cli-anything-/, '')
+  const wanted = skill.trim().toLowerCase()
+  const short = wanted.replace(/^cli-anything-/, '')
+  const aliased = SKILL_NAME_ALIASES[short] ?? short
   return (
-    catalog.find((s) => s.name === skill) ??
-    catalog.find((s) => s.name === `cli-anything-${short}`) ??
-    catalog.find((s) => s.name.replace(/^cli-anything-/, '') === short) ??
+    catalog.find((s) => s.name.toLowerCase() === wanted) ??
+    catalog.find((s) => s.name.toLowerCase() === `cli-anything-${short}`) ??
+    catalog.find((s) => s.name.replace(/^cli-anything-/, '').toLowerCase() === short) ??
+    catalog.find((s) => s.name.toLowerCase() === aliased) ??
+    // Fuzzy: unique substring match on name/displayName (e.g. "obsidian
+    // skill" when the registry name is cli-anything-obsidian).
+    catalog.find((s) => s.name.toLowerCase().includes(short) && short.length >= 4) ??
+    catalog.find((s) => s.displayName.toLowerCase().includes(short) && short.length >= 4) ??
     null
   )
 }
@@ -854,8 +919,8 @@ async function executeChatTool(
   }
 
   if (toolId === 'edit_image') {
-    // PROFESSIONAL PHOTO EDITING — real pixel operations (sharp) on the
-    // user's attached image. The model passes an ordered operations list.
+    // PHOTO EDITING — AI generative edit (natural language) and/or real
+    // pixel operations (sharp) on the user's attached image.
     if (!activeImage) {
       throw new Error(
         'No image is attached in this conversation. Ask the user to attach a photo (paperclip button) first.'
@@ -874,13 +939,17 @@ async function executeChatTool(
         throw new Error('operations must be a JSON array like [{"op":"grayscale"}]')
       }
     }
-    if (!operations.length) throw new Error('operations required (JSON array)')
+    const instruction = String(args.instruction ?? '').trim()
+    if (!operations.length && !instruction) {
+      throw new Error('provide `instruction` (AI edit) or `operations` (pixel ops)')
+    }
     const res = await fetch(`${origin}/api/image/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
       body: JSON.stringify({
         image: activeImage.dataUrl,
-        operations,
+        ...(operations.length ? { operations } : {}),
+        ...(instruction ? { instruction } : {}),
         filename: activeImage.filename,
       }),
     })
@@ -891,7 +960,10 @@ async function executeChatTool(
       result: {
         imageUrl: data.image.url,
         applied,
-        note: 'Photo edited — show the result inline and describe what changed.',
+        aiEdited: Boolean(data.image.aiEdited),
+        note: data.image.aiEdited
+          ? 'AI edited the image generatively — show the result inline and describe what changed.'
+          : 'Photo edited — show the result inline and describe what changed.',
       },
       attachment: {
         type: 'image',
@@ -1480,9 +1552,43 @@ async function executeChatTool(
           query: queryArg,
           matches: found.map((s) => `${s.name}: ${s.description.slice(0, 140)}`),
           note: found.length
-            ? 'Call use_skill with a name above to load its manual.'
+            ? 'Call use_skill with a name above to load its manual. Names starting with nexus- run instantly — just call use_skill with that name and the task.'
             : 'No matching skill — call use_skill with skill="list" for the full catalog.',
         },
+      }
+    }
+
+    // PLATFORM CLOUD SKILLS — one-shot REAL execution, no manual/install
+    // dance. Previously a model calling use_skill with "nexus-weather" (or
+    // any alias) got "Unknown skill" — a guaranteed wasted step that made
+    // skills feel broken. Now the platform executes immediately and the
+    // artifact comes straight back.
+    const wanted = skillArg.toLowerCase().replace(/^nexus-/, '')
+    const cloudMatch = CLOUD_SKILLS.find(
+      (s) => s.name.toLowerCase() === wanted || s.name.toLowerCase() === `nexus-${wanted}`
+    )
+    if (cloudMatch) {
+      const task =
+        queryArg ||
+        String(args.task ?? '').trim() ||
+        String(args.prompt ?? args.text ?? args.input ?? '').trim()
+      const run = await runSkillAction(req, cloudMatch.name, cloudMatch.category, task, cloudMatch.displayName)
+      return {
+        result: run.ok
+          ? {
+              skill: cloudMatch.name,
+              status: 'done',
+              summary: run.summary,
+              artifactUrl: (run.attachment as { url?: string } | null | undefined)?.url ?? null,
+              note: 'The platform skill executed successfully. Reference the artifact/result above naturally — do NOT re-run it.',
+            }
+          : {
+              skill: cloudMatch.name,
+              status: 'error',
+              error: run.error ?? 'The skill run failed.',
+              note: 'Tell the user the skill hit a snag and offer to help directly.',
+            },
+        attachment: run.attachment ?? undefined,
       }
     }
 
@@ -1500,9 +1606,11 @@ async function executeChatTool(
       // The CLI entry point lands in the venv bin dir which is already on
       // run_command's PATH — immediately usable by the next tool step.
       const pkg = safeInstall.replace(/^pip3?\s+install\s+/i, '').trim()
+      // NOTE: no trailing `| tail -8` here — the spawn below already pipes
+      // through tail (the double-pipe was dead weight).
       const fullCmd = pkg
-        ? `python3 -m pip install --quiet ${pkg} 2>&1 | tail -8`
-        : `python3 -m pip install --quiet ${safeInstall} 2>&1 | tail -8`
+        ? `python3 -m pip install --quiet ${pkg}`
+        : `python3 -m pip install --quiet ${safeInstall}`
       try {
         const { spawn } = await import('child_process')
         const { mkdir } = await import('fs/promises')
@@ -1519,7 +1627,10 @@ async function executeChatTool(
           let out = ''
           child.stdout?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
           child.stderr?.on('data', (d: Buffer) => { if (out.length < 4000) out += d.toString() })
-          const timer = setTimeout(() => child.kill('SIGKILL'), 150_000)
+          // 100s — MUST stay under the route's 120s maxDuration, or Vercel
+          // kills the whole function mid-install (150s used to do exactly
+          // that, making installs fail on production).
+          const timer = setTimeout(() => child.kill('SIGKILL'), 100_000)
           child.on('error', (err) => { clearTimeout(timer); resolve({ stdout: out + err.message, stderr: '', code: null }) })
           child.on('close', (code) => { clearTimeout(timer); resolve({ stdout: out, stderr: '', code }) })
         })
@@ -2097,7 +2208,14 @@ export async function POST(req: NextRequest) {
                   actionLabel: actionMeta.label,
                 })
                 const saved = await db.chatMessage.create({
-                  data: { sessionId: session!.id, role: 'assistant', content: result.summary },
+                  data: {
+                    sessionId: session!.id,
+                    role: 'assistant',
+                    content: result.summary,
+                    // Persist the artifact so it survives session resume
+                    // (previously skill outputs vanished after reload).
+                    attachments: result.attachment ? JSON.stringify([result.attachment]) : null,
+                  },
                 })
                 send({
                   type: 'assistant',
@@ -2291,16 +2409,18 @@ export async function POST(req: NextRequest) {
           // SKILL INTENT HINT — deterministic nudge when the user explicitly
           // asks for a skill or names an external app, so even weak free-tier
           // models reach for use_skill instead of answering from memory
-          // (this was the "skills don't work" failure mode).
+          // (this was the "skills don't work" failure mode). The whitelist
+          // now covers the platform cloud skills AND the most common app
+          // names from the CLI-Anything catalog.
           if (
-            /\bskills?\b|\bconnect (?:to|my)\b|\bintegrat|\bblender\b|\bgimp\b|\bobsidian\b|\bjoplin\b|\blibreoffice\b|\bn8n\b|\bzoom\b|\bmailchimp\b|\bcalibre\b|\bzotero\b|\bdrawio\b|\binkscape\b|\bkrita\b|\baudacity\b|\bshotcut\b|\bgodot\b|\bpm2\b|\bollama\b|\bnotion\b|\bqgis\b|\bffmpeg\b|\bcomfyui\b|\bmusescore\b/i.test(
+            /\bskills?\b|\bconnect (?:to|my)\b|\bintegrat|\buse_skill\b|\bnexus[- ](?:weather|translate|chart|qr|passguard|research|narrator)\b|\bblender\b|\bgimp\b|\bobsidian\b|\bjoplin\b|\blibreoffice\b|\bn8n\b|\bzoom\b|\bmailchimp\b|\bcalibre\b|\bzotero\b|\bdrawio\b|\binkscape\b|\bkrita\b|\baudacity\b|\bshotcut\b|\bgodot\b|\bpm2\b|\bollama\b|\bnotion\b|\bqgis\b|\bffmpeg\b|\bcomfyui\b|\bmusescore\b|\bphotoshop\b|\bexcel\b|\bword\b|\bpowerpoint\b|\bcanva\b|\bfigma\b|\bspotify\b|\bdiscord\b|\bslack\b|\bgithub\b|\bvscode\b|\bvisual studio code\b|\bterminal\b|\bgmail\b|\boutlook\b|\bautocad\b|\bsketchup\b|\bunity\b|\bunreal\b|\bwhatsapp\b|\btelegram\b|\bskype\b|\btrello\b|\basana\b|\bairtable\b|\bsalesforce\b|\bhubspot\b|\bwordpress\b|\bshopify\b|\bwebflow\b/i.test(
               effectiveMessage
             )
           ) {
             llmMessages.push({
               role: 'user',
               content:
-                '[system directive] This message involves an external app or skill. Your FIRST action must be a TOOL_CALL to use_skill — either {"skill":"search","query":"<app name>"} or {"skill":"<exact name>"} if you know it. Only answer in prose AFTER receiving the manual or a real result.',
+                '[system directive] This message involves an external app or skill. Your FIRST action must be a TOOL_CALL to use_skill — either {"skill":"search","query":"<app name>"} or {"skill":"<exact name>"} if you know it. Platform skills (nexus-weather, nexus-translate, nexus-chart, nexus-qr, nexus-passguard, nexus-research, nexus-narrator) run instantly: call use_skill with the name and include the user\'s task as the query. Only answer in prose AFTER receiving the manual or a real result.',
             })
           }
 

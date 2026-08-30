@@ -11,6 +11,8 @@ import { openrouterConfigured, openrouterGenerateImage } from '@/lib/openrouter'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { requireVerifiedSession, getVerifiedSession, getCurrentUser } from '@/lib/auth'
 
+export const maxDuration = 120
+
 const requestSchema = z.object({
   prompt: z.string().min(1).max(2000),
   size: z.enum(['1024x1024', '768x1344', '864x1152', '1344x768', '1152x864', '1440x720', '720x1440']).optional(),
@@ -58,6 +60,7 @@ export async function POST(req: NextRequest) {
     }
 
     const chosenSize = parsed.data.size ?? '1024x1024'
+    const chosenProvider = parsed.data.provider ?? 'nexus'
     const trimmedPrompt = parsed.data.prompt.trim()
 
     const user = await getCurrentUser(req)
@@ -65,14 +68,29 @@ export async function POST(req: NextRequest) {
     let buffer: Buffer | null = null
     let usedEngine = 'pollinations'
 
+    /* ---- 0. FREE fast path — provider:'free' skips the premium cascade.
+     * The UI toggle used to be parsed but IGNORED (dead input). Now it is
+     * honored: 'free' goes straight to Pollinations FLUX (fastest, no
+     * queue), 'nexus' (default) tries premium engines first. ---- */
+    if (chosenProvider === 'free') {
+      try {
+        buffer = await pollinationsImage(trimmedPrompt, chosenSize)
+        usedEngine = 'pollinations'
+      } catch (freeErr) {
+        console.warn('[api/image] free fast path failed:', freeErr instanceof Error ? freeErr.message : freeErr)
+      }
+    }
+
     /* ---- 1-3. PREMIUM cascade — Gemini → Grok → HF FLUX (deployment keys) ---- */
-    try {
-      const result = await premiumImageCascade(trimmedPrompt, chosenSize)
-      buffer = result.buffer
-      usedEngine = result.engine
-    } catch (cascadeErr) {
-      const attempts = (cascadeErr as Error & { attempts?: { engine: string; error: string }[] }).attempts
-      console.warn('[api/image] premium cascade failed:', JSON.stringify(attempts ?? cascadeErr))
+    if (!buffer) {
+      try {
+        const result = await premiumImageCascade(trimmedPrompt, chosenSize)
+        buffer = result.buffer
+        usedEngine = result.engine
+      } catch (cascadeErr) {
+        const attempts = (cascadeErr as Error & { attempts?: { engine: string; error: string }[] }).attempts
+        console.warn('[api/image] premium cascade failed:', JSON.stringify(attempts ?? cascadeErr))
+      }
     }
 
     /* ---- 4. FREE engine — Pollinations FLUX (no key, works on Vercel) ---- */

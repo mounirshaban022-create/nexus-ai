@@ -41,6 +41,16 @@ import {
   type HfChatMessage,
   type AiTaskKind,
 } from './hf-ai'
+import {
+  geminiChatConfigured,
+  geminiStreamChatCompletion,
+  geminiChatCompletion,
+} from './gemini-chat'
+import {
+  groqChatConfigured,
+  groqStreamChatCompletion,
+  groqChatCompletion,
+} from './groq-chat'
 import { consumeSSEWithPeek } from './llm-stream'
 
 export type PremiumProviderId =
@@ -49,6 +59,8 @@ export type PremiumProviderId =
   | 'grok'
   | 'vercel-gateway'
   | 'agnes'
+  | 'gemini'
+  | 'groq'
 
 export type PoolMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
@@ -214,6 +226,25 @@ function openrouterPoolModels(task?: AiTaskKind): string[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* Quality-first task ordering                                         */
+/*                                                                     */
+/* The old blind round-robin sent chats to WHATEVER provider's turn it */
+/* was — weak free-pool models answered real questions half the time   */
+/* ("the AI is dumb and irrelevant"). Now each task maps to a priority */
+/* list with the SMARTEST engines first; rotation only swaps the top-2 */
+/* slots (quota spread among equals), everything else is strict order. */
+/* ------------------------------------------------------------------ */
+
+const TASK_PROVIDER_PRIORITY: Record<AiTaskKind, PremiumProviderId[]> = {
+  chat: ['gemini', 'groq', 'grok', 'openrouter', 'huggingface', 'agnes', 'vercel-gateway'],
+  reasoning: ['gemini', 'grok', 'openrouter', 'groq', 'huggingface', 'agnes', 'vercel-gateway'],
+  documents: ['gemini', 'groq', 'openrouter', 'grok', 'huggingface', 'agnes', 'vercel-gateway'],
+  code: ['grok', 'gemini', 'groq', 'openrouter', 'huggingface', 'agnes', 'vercel-gateway'],
+  voice: ['groq', 'gemini', 'huggingface', 'grok', 'openrouter', 'agnes', 'vercel-gateway'],
+  fast: ['groq', 'gemini', 'huggingface', 'grok', 'openrouter', 'agnes', 'vercel-gateway'],
+}
+
+/* ------------------------------------------------------------------ */
 /* Pool registry                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -304,6 +335,24 @@ const POOL_ENTRIES: PoolEntry[] = [
       hfStreamChatCompletion(messages as HfChatMessage[], onDelta, opts),
     complete: (messages, opts) =>
       hfChatCompletion(messages as HfChatMessage[], opts),
+  },
+  {
+    id: 'gemini',
+    label: 'Google Gemini',
+    configured: () => geminiChatConfigured(),
+    stream: (messages, onDelta, opts) =>
+      geminiStreamChatCompletion(messages as HfChatMessage[], onDelta, opts),
+    complete: (messages, opts) =>
+      geminiChatCompletion(messages as HfChatMessage[], opts),
+  },
+  {
+    id: 'groq',
+    label: 'Groq (Llama 3.3 70B)',
+    configured: () => groqChatConfigured(),
+    stream: (messages, onDelta, opts) =>
+      groqStreamChatCompletion(messages as HfChatMessage[], onDelta, opts),
+    complete: (messages, opts) =>
+      groqChatCompletion(messages as HfChatMessage[], opts),
   },
   {
     id: 'grok',
@@ -446,8 +495,13 @@ function markPoolSuccess(id: PremiumProviderId): void {
   st.benchedUntil[id] = 0
 }
 
-/** Healthy, configured providers in round-robin order for this request. */
-export function premiumPoolOrder(): PoolEntry[] {
+/**
+ * Healthy, configured providers for this request — QUALITY-FIRST order.
+ * Providers are sorted by the task's priority list (smartest engines
+ * first); rotation swaps only the top-2 slots so quota spreads between
+ * equals without ever leading with a weak model.
+ */
+export function premiumPoolOrder(task?: AiTaskKind): PoolEntry[] {
   const st = poolState()
   const up = POOL_ENTRIES.filter((p) => {
     if (!p.configured()) return false
@@ -456,9 +510,22 @@ export function premiumPoolOrder(): PoolEntry[] {
     return true
   })
   if (up.length === 0) return []
-  const start = ((st.rr % up.length) + up.length) % up.length
-  st.rr += 1 // next request starts one slot further → quota spreads
-  return [...up.slice(start), ...up.slice(0, start)]
+
+  const priority = TASK_PROVIDER_PRIORITY[task ?? 'chat']
+  const rank = (id: PremiumProviderId): number => {
+    const idx = priority.indexOf(id)
+    return idx === -1 ? priority.length : idx
+  }
+  const ordered = [...up].sort((a, b) => rank(a.id) - rank(b.id))
+
+  // Rotate only the top-2 (equals) — quota spread without quality loss.
+  if (ordered.length >= 2 && st.rr % 2 === 1) {
+    const tmp = ordered[0]
+    ordered[0] = ordered[1]
+    ordered[1] = tmp
+  }
+  st.rr += 1
+  return ordered
 }
 
 /** Which engines are currently configured (for the health endpoint). */
@@ -469,6 +536,8 @@ export function premiumEngineStatus(): Record<string, boolean> {
     grok: xaiConfigured(),
     vercelGateway: vercelGatewayConfigured(),
     agnes: agnesChatConfigured(),
+    gemini: geminiChatConfigured(),
+    groq: groqChatConfigured(),
   }
 }
 
@@ -501,11 +570,11 @@ export async function premiumStreamChat(
   onDelta: (delta: string) => void,
   opts: PremiumStreamOpts = {}
 ): Promise<PoolStreamResult> {
-  const order = premiumPoolOrder()
+  const order = premiumPoolOrder(opts.task)
   if (order.length === 0) {
     throw new Error('premium pool empty — no providers configured')
   }
-  const firstDeltaMs = opts.firstDeltaMs ?? 14_000
+  const firstDeltaMs = opts.firstDeltaMs ?? 9_000
   let lastError: unknown = null
 
   for (const entry of order) {
@@ -587,7 +656,7 @@ export async function premiumChatCompletion(
     timeoutMs?: number
   } = {}
 ): Promise<PoolStreamResult> {
-  const order = premiumPoolOrder()
+  const order = premiumPoolOrder(opts.task)
   if (order.length === 0) {
     throw new Error('premium pool empty — no providers configured')
   }

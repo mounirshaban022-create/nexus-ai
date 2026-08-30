@@ -27,17 +27,37 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: 'Job not found.' }, { status: 404 })
       }
       const status = row.status === 'done' ? 'done' : row.status === 'error' ? 'error' : 'rendering'
+      // Derive progress from the persisted pipeline stage (the old hard
+      // "60%" made the bar stick at 60% for minutes when a status poll
+      // landed on a different serverless instance than the renderer).
+      const stageProgress: Record<string, number> = {
+        planning: 10,
+        images: 35,
+        narration: 65,
+        rendering: 82,
+      }
+      const ageMs = Date.now() - new Date(row.createdAt).getTime()
+      const base = stageProgress[row.status] ?? 60
+      // Nudge forward with age (video jobs take ~1-4 min total) so the bar
+      // keeps moving even when only the stage row is visible.
+      const progress = status === 'done' ? 100 : status === 'error' ? 0 : Math.min(95, base + Math.min(12, Math.floor(ageMs / 30_000) * 2))
       return NextResponse.json({
         job: {
           id,
           status,
-          progress: status === 'done' ? 100 : status === 'error' ? 0 : 60,
+          progress,
           message:
             status === 'done'
               ? 'Video ready!'
               : status === 'error'
                 ? 'Video generation failed on the server.'
-                : 'Rendering your video…',
+                : row.status === 'planning'
+                  ? 'Directing your video…'
+                  : row.status === 'images'
+                    ? 'Generating scene imagery…'
+                    : row.status === 'narration'
+                      ? 'Recording AI narration…'
+                      : 'Rendering your video…',
           url: row.url ?? (status === 'done' ? `/api/video/file/${id}` : ''),
           error: status === 'error' ? row.error || 'Video generation failed on the server.' : '',
           prompt: row.prompt,

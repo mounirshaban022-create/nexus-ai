@@ -120,15 +120,19 @@ export async function searchCliSkills(query: string, limit = 10): Promise<CliSki
   return scored.slice(0, limit).map((x) => x.s)
 }
 
-/** Resolve a skill by name — accepts "browser", "cli-anything-browser". */
+/** Resolve a skill by name — accepts "browser", "cli-anything-browser",
+ *  "nexus-weather" and every first-party cloud skill. */
 async function resolveSkill(name: string): Promise<CliSkill | null> {
-  const all = await listCliSkills()
+  const all = await listAllSkills()
   const wanted = name.trim().toLowerCase()
+  const short = wanted.replace(/^(cli-anything|nexus)-/, '')
   return (
     all.find((s) => s.name.toLowerCase() === wanted) ??
-    all.find((s) => s.name.toLowerCase() === `cli-anything-${wanted}`) ??
+    all.find((s) => s.name.toLowerCase() === `cli-anything-${short}`) ??
+    all.find((s) => s.name.toLowerCase() === `nexus-${short}`) ??
+    all.find((s) => s.name.replace(/^cli-anything-/, '').toLowerCase() === short) ??
     all.find((s) => s.displayName.toLowerCase() === wanted) ??
-    all.find((s) => s.name.toLowerCase().includes(wanted)) ??
+    all.find((s) => s.name.toLowerCase().includes(short) && short.length >= 4) ??
     null
   )
 }

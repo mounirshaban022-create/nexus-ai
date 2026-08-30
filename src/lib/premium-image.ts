@@ -25,7 +25,6 @@ const GEMINI_ENDPOINTS = [
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent',
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent',
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent',
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent',
 ]
 
 const XAI_IMAGE_MODELS = ['grok-2-image-1212', 'grok-2-image']
@@ -92,7 +91,7 @@ export async function geminiImage(prompt: string, size: string): Promise<Buffer>
   })
   let lastErr: Error | null = null
   for (const endpoint of GEMINI_ENDPOINTS) {
-    const t = withTimeout(90_000)
+    const t = withTimeout(60_000)
     try {
       const res = await fetch(`${endpoint}?key=${encodeURIComponent(key)}`, {
         method: 'POST',
@@ -122,7 +121,7 @@ export async function xaiImage(prompt: string, _size: string): Promise<Buffer> {
   if (!key) throw new Error('XAI_API_KEY not configured')
   let lastErr: Error | null = null
   for (const model of XAI_IMAGE_MODELS) {
-    const t = withTimeout(90_000)
+    const t = withTimeout(60_000)
     try {
       const res = await fetch('https://api.x.ai/v1/images/generations', {
         method: 'POST',
@@ -159,17 +158,33 @@ export async function hfImage(prompt: string, size: string): Promise<Buffer> {
   const token = process.env.HF_TOKEN
   if (!token) throw new Error('HF_TOKEN not configured')
   const [w, h] = size.split('x').map(Number)
+  // Preserve the requested aspect ratio while clamping to the router's
+  // 1024px ceiling (the old min(w,1024)/min(h,1024) squashed 1440x720
+  // into a square). Scale so the LONGER side is exactly 1024.
+  let width = w || 1024
+  let height = h || 1024
+  const longSide = Math.max(width, height)
+  if (longSide > 1024) {
+    const scale = 1024 / longSide
+    width = Math.max(256, Math.round((width * scale) / 8) * 8)
+    height = Math.max(256, Math.round((height * scale) / 8) * 8)
+  }
   const qualityPrompt = `${prompt}, masterpiece, best quality, highly detailed, professional photography, cinematic lighting, sharp focus`
   let lastErr: Error | null = null
   for (const endpoint of HF_ENDPOINTS) {
-    const t = withTimeout(120_000)
+    const t = withTimeout(75_000)
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'image/png' },
         body: JSON.stringify({
           inputs: qualityPrompt,
-          parameters: { width: Math.min(w || 1024, 1024), height: Math.min(h || 1024, 1024), num_inference_steps: 28 },
+          parameters: {
+            width,
+            height,
+            num_inference_steps: 28,
+            negative_prompt: 'blurry, low quality, distorted, deformed, watermark, text, signature, jpeg artifacts, ugly, bad anatomy',
+          },
           options: { wait_for_model: true, use_cache: false },
         }),
         signal: t.signal,
@@ -194,6 +209,68 @@ export interface PremiumImageResult {
   buffer: Buffer
   engine: string
   attempts: { engine: string; error: string }[]
+}
+
+/**
+ * AI IMAGE EDITING — natural-language edit of a REAL input image
+ * (Gemini 2.5 Flash Image is natively image+text→image). This upgrades
+ * the "basic" sharp-pixel-op editor to generative editing: remove
+ * objects, change backgrounds, restyle, relight, add things — the
+ * ChatGPT/Photoshop-Generative-Fill class of edits.
+ *
+ * Returns the edited PNG buffer. Throws when Gemini is unconfigured or
+ * refuses — callers fall back to the deterministic sharp pipeline.
+ */
+export async function geminiImageEdit(
+  inputBuffer: Buffer,
+  instruction: string
+): Promise<Buffer> {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) throw new Error('GEMINI_API_KEY not configured')
+  const trimmed = instruction.trim().slice(0, 1200)
+  if (!trimmed) throw new Error('Edit instruction is empty')
+
+  const body = JSON.stringify({
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: 'image/png', data: inputBuffer.toString('base64') } },
+          {
+            text:
+              `Edit this image: ${trimmed}. ` +
+              'Keep everything the user did not ask to change exactly as it is — preserve the original composition, identity and style unless explicitly asked otherwise. Return the FULL edited image.',
+          },
+        ],
+      },
+    ],
+    generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+  })
+
+  let lastErr: Error | null = null
+  for (const endpoint of GEMINI_ENDPOINTS) {
+    const t = withTimeout(75_000)
+    try {
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: t.signal,
+      })
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        lastErr = new Error(`Gemini edit ${endpoint.split('/models/')[1]?.split(':')[0]} → ${res.status}: ${errText.slice(0, 160)}`)
+        continue
+      }
+      const json = await res.json().catch(() => null)
+      const buf = json ? extractGeminiImage(json) : null
+      if (buf && buf.length > 1000) return buf
+      lastErr = new Error('Gemini edit returned no image payload')
+    } finally {
+      t.done()
+    }
+  }
+  throw lastErr ?? new Error('Gemini image edit failed')
 }
 
 /**

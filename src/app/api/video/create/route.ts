@@ -8,6 +8,7 @@ import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { videoJobs, pruneVideoJobs, type VideoJob } from '@/lib/video-jobs'
 import { agnesConfigured, agnesCreateVideo } from '@/lib/agnes-video'
+import { veoConfigured, veoAvailable, veoGenerateClip } from '@/lib/veo-video'
 import { ffmpegPath, ffprobePath, execFileAsync } from '@/lib/ffmpeg'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
@@ -29,8 +30,12 @@ const IS_VERCEL = Boolean(process.env.VERCEL)
 const VIDEO_DIR = IS_VERCEL
   ? path.join('/tmp', 'generated-videos') // Vercel: writable /tmp (ephemeral)
   : path.join(process.cwd(), 'generated-videos')
-const W = 1024
-const H = 576
+// QUALITY UPGRADE: true 720p @ 30fps (was 1024x576 @ 25fps — sub-HD). The
+// extra pixels + framerate directly address the "video looks horrible"
+// complaint. ffmpeg encodes with crf 20 (was 23) + aac 160k stereo.
+const W = 1280
+const H = 720
+const FPS = 30
 
 const requestSchema = z.object({
   prompt: z.string().min(3).max(1000),
@@ -43,12 +48,14 @@ const requestSchema = z.object({
 
 const PLANNER_PROMPT = `You are the video director of NEXUS AI. Plan a short video for the user's request. Respond with ONLY valid JSON:
 {"title":"Video title","scenes":[{"image":"detailed image generation prompt, visual scene description","narration":"one sentence spoken aloud (max 20 words)","caption":"short on-screen text (max 6 words)"}]}
-Rules: 3-6 scenes, each scene is a distinct visual beat. Style is specified by the user. Write narrations in the SAME LANGUAGE as the request. Images: describe composition, lighting, colors — no text in images.`
+Rules: 3-6 scenes, each scene is a distinct visual beat with smooth visual continuity from the previous scene (same setting/world, progressing action). Style is specified by the user. Write narrations in the SAME LANGUAGE as the request. Image prompts: cinematic camera language (shot type, lens, lighting, color palette), describe composition precisely — no text in images.`
 
 async function edgeTtsToFile(text: string, voice: string, outPath: string) {
   const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
   const tts = new MsEdgeTTS()
-  await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+  // 96kbps (was 48kbps mono) — doubles narration clarity, half the cost of
+  // the upscale in ffmpeg bitrate that used to mask the thin source audio.
+  await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
   const { audioStream } = tts.toStream(text)
   const chunks: Buffer[] = []
   for await (const chunk of audioStream) chunks.push(chunk as Buffer)
@@ -187,12 +194,80 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ jobId: id })
     }
 
+    /* ---- GOOGLE VEO 3 path (opt-in: USE_VEO=true) ----
+     * TRUE generative video with native audio — the Sora/Veo class of
+     * output. Requires a Veo-capable Gemini key (paid tier); the cached
+     * preflight falls back to the slideshow pipeline instantly when the
+     * key lacks access. */
+    if (veoConfigured() && (await veoAvailable())) {
+      await persistStage('planning')
+      after(async () => {
+        try {
+          job.status = 'rendering'
+          job.progress = 20
+          job.message = 'Veo 3 is generating your video (real AI video with audio)…'
+          const clip = await veoGenerateClip(prompt, {
+            pollTimeoutMs: 240_000,
+            negativePrompt: 'blurry, low quality, distorted, watermark, text overlay, ugly',
+          })
+          await mkdir(VIDEO_DIR, { recursive: true })
+          await writeFile(path.join(VIDEO_DIR, `${id}.mp4`), clip)
+          job.status = 'done'
+          job.progress = 100
+          job.message = 'Video ready!'
+          job.url = `/api/video/file/${id}`
+          try {
+            await db.generatedVideo.upsert({
+              where: { jobId: id },
+              create: {
+                prompt,
+                scenes: 1,
+                voice,
+                style,
+                url: job.url,
+                jobId: id,
+                status: 'done',
+                data: clip.toString('base64'),
+                userId: user?.id ?? null,
+              },
+              update: { url: job.url, status: 'done', data: clip.toString('base64') },
+            })
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : ''
+            if (/data|column/i.test(msg)) {
+              await db.generatedVideo
+                .upsert({
+                  where: { jobId: id },
+                  create: { prompt, scenes: 1, voice, style, url: job.url, jobId: id, status: 'done', userId: user?.id ?? null },
+                  update: { url: job.url, status: 'done' },
+                })
+                .catch((e2: unknown) => console.error('[video] veo db save (no-data) failed:', e2))
+            } else {
+              console.error('[video] veo db save failed:', e)
+            }
+          }
+        } catch (err) {
+          console.error(`[video job ${id}] veo failed, falling back to slideshow:`, err)
+          // FALLBACK: run the standard slideshow pipeline rather than
+          // failing the job outright.
+          job.status = 'planning'
+          job.progress = 5
+          job.message = 'Directing your video…'
+          videoJobs.set(id, job)
+          await runSlideshowPipeline()
+        }
+      })
+      return NextResponse.json({ jobId: id })
+    }
+
     // Run the whole pipeline AFTER the response — `after()` maps to Vercel's
     // waitUntil, which keeps the serverless function alive until the render
     // finishes (a plain fire-and-forget promise is frozen/killed the moment
     // the response is sent on serverless). Falls back to a floating promise
     // when `after` is unavailable (older runtimes).
-    const pipeline = async (): Promise<void> => {
+    // Declared as a hoisted function so the Veo path above can also call it
+    // as a graceful fallback when Veo generation fails mid-flight.
+    async function runSlideshowPipeline(): Promise<void> {
       const workDir = path.join(VIDEO_DIR, id)
       try {
         await mkdir(workDir, { recursive: true })
@@ -200,10 +275,13 @@ export async function POST(req: NextRequest) {
         /* ---- 1. Plan scenes ---- */
         job.status = 'planning'
         job.progress = 10
+        // Planner quality drives EVERYTHING downstream (scene prompts,
+        // narration, captions) — route it to the smart chat models (was
+        // task:'fast', which could land on a 2.6B free model).
         const raw = await smartChat([
           { role: 'assistant', content: PLANNER_PROMPT },
           { role: 'user', content: `Video request: ${prompt}\nVisual style: ${style}\nScenes: ${sceneCount}` },
-        ], { maxTokens: 1500, task: 'fast' })
+        ], { maxTokens: 2000, task: 'chat' })
         const cleaned = raw.replace(/```(?:json)?/g, '').trim()
         const start = cleaned.indexOf('{')
         const end = cleaned.lastIndexOf('}')
@@ -219,43 +297,49 @@ export async function POST(req: NextRequest) {
         job.scenes = scenes.map((s) => ({ caption: s.caption ?? '' }))
         job.message = `Planned ${scenes.length} scenes`
 
-        /* ---- 2. Generate images (Pollinations — free) ---- */
+        /* ---- 2. Generate images (Pollinations FLUX — PARALLEL) ----
+         * The old loop rendered scenes SEQUENTIALLY (up to 90s each, so a
+         * 6-scene video could burn 9 minutes before narration even started
+         * — the "slow" complaint). Parallel generation finishes the whole
+         * batch in roughly the time of the slowest single scene. */
         job.status = 'images'
         void persistStage('images')
-        for (let i = 0; i < scenes.length; i++) {
-          job.progress = 15 + Math.round((i / scenes.length) * 45)
-          job.message = `Generating scene ${i + 1} of ${scenes.length}…`
-          const styleSuffix: Record<string, string> = {
-            cinematic: 'cinematic lighting, film still, dramatic composition',
-            vibrant: 'vibrant colors, high saturation, energetic',
-            minimal: 'minimalist, clean composition, negative space',
-            documentary: 'documentary photography, natural light, realistic',
-          }
+        const styleSuffix: Record<string, string> = {
+          cinematic: 'cinematic film still, dramatic lighting, shallow depth of field, anamorphic, movie scene',
+          vibrant: 'vibrant colors, high saturation, energetic, bold graphic composition',
+          minimal: 'minimalist, clean composition, negative space, elegant simplicity',
+          documentary: 'documentary photography, natural light, realistic, photojournalistic',
+        }
+        const sceneImageTasks = scenes.map(async (scene, i) => {
           const imgPrompt = encodeURIComponent(
-            `${scenes[i].image}, ${styleSuffix[style] ?? ''}, high quality, detailed, cinematic lighting, no text, no watermark`
+            `${scene.image}, ${styleSuffix[style] ?? ''}, ultra detailed, professional color grading, no text, no watermark`
           )
           const imgRes = await fetch(
-            `https://image.pollinations.ai/prompt/${imgPrompt}?width=${W}&height=${H}&nologo=true&seed=${Math.floor(Math.random() * 999999)}`,
-            { signal: AbortSignal.timeout(90_000) }
+            `https://image.pollinations.ai/prompt/${imgPrompt}?width=${W}&height=${H}&model=flux&enhance=true&nologo=true&seed=${Math.floor(Math.random() * 999999)}`,
+            { signal: AbortSignal.timeout(120_000) }
           )
           if (!imgRes.ok) throw new Error(`Scene image ${i + 1} failed (HTTP ${imgRes.status}).`)
           const imgBuf = Buffer.from(await imgRes.arrayBuffer())
           if (imgBuf.length < 1000) throw new Error(`Scene image ${i + 1} returned empty.`)
           await writeFile(path.join(workDir, `scene${i}.png`), imgBuf)
-        }
+          job.progress = Math.max(job.progress, 15 + Math.round(((i + 1) / scenes.length) * 45))
+          job.message = `Generated scene ${i + 1} of ${scenes.length}…`
+        })
+        await Promise.all(sceneImageTasks)
 
-        /* ---- 3. Narration (Edge neural TTS — free) ---- */
+        /* ---- 3. Narration (Edge neural TTS — PARALLEL) ---- */
         job.status = 'narration'
         job.progress = 62
         job.message = 'Recording AI narration…'
         void persistStage('narration')
-        const narrations: Array<{ file: string; dur: number }> = []
-        for (let i = 0; i < scenes.length; i++) {
-          const mp3 = path.join(workDir, `nar${i}.mp3`)
-          await edgeTtsToFile(scenes[i].narration ?? scenes[i].caption ?? '', voice, mp3)
-          const dur = await audioDuration(mp3)
-          narrations.push({ file: mp3, dur })
-        }
+        const narrations: Array<{ file: string; dur: number }> = await Promise.all(
+          scenes.map(async (scene, i) => {
+            const mp3 = path.join(workDir, `nar${i}.mp3`)
+            await edgeTtsToFile(scene.narration ?? scene.caption ?? '', voice, mp3)
+            const dur = await audioDuration(mp3)
+            return { file: mp3, dur }
+          })
+        )
 
         /* ---- 4. Render with ffmpeg (Ken Burns + sharp-burned captions) ---- */
         job.status = 'rendering'
@@ -275,10 +359,10 @@ export async function POST(req: NextRequest) {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
           const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0" y="${H - 150}" width="${W}" height="150" fill="black" opacity="0.55"/>
-  <text x="50%" y="${H - 78}" text-anchor="middle" dominant-baseline="middle"
+  <rect x="0" y="${H - 132}" width="${W}" height="132" fill="black" opacity="0.5"/>
+  <text x="50%" y="${H - 66}" text-anchor="middle" dominant-baseline="middle"
         font-family="DejaVu Sans, Verdana, sans-serif" font-weight="bold"
-        font-size="44" fill="#ffffff" stroke="#000000" stroke-width="1.4"
+        font-size="46" fill="#ffffff" stroke="#000000" stroke-width="1.4"
         paint-order="stroke">${safe}</text>
 </svg>`
           const sharp = (await import('sharp')).default
@@ -300,12 +384,12 @@ export async function POST(req: NextRequest) {
           // Alternate zoom direction for visual variety
           const zoomIn = i % 2 === 0
           const zoomExpr = zoomIn
-            ? "zoompan=z='min(zoom+0.0012,1.14)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-            : "zoompan=z='if(eq(on,1),1.14,max(zoom-0.0012,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            ? "zoompan=z='min(zoom+0.0009,1.13)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            : "zoompan=z='if(eq(on,1),1.13,max(zoom-0.0009,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
           const vf =
-            `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},` +
-            `${zoomExpr}:d=${Math.round(dur * 25)}:s=${W}x${H}:fps=25,` +
-            `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.5).toFixed(2)}:d=0.5[v]`
+            `[0:v]scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2},` +
+            `${zoomExpr}:d=${Math.round(dur * FPS)}:s=${W}x${H}:fps=${FPS},` +
+            `fade=t=in:st=0:d=0.4,fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4[v]`
 
           await execFileAsync(await ffmpegPath(), [
             '-y',
@@ -317,10 +401,10 @@ export async function POST(req: NextRequest) {
             '-map', '1:a',
             '-c:v', 'libx264',
             '-preset', 'fast',
-            '-crf', '23',
+            '-crf', '20',
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
-            '-b:a', '128k',
+            '-b:a', '160k',
             '-shortest',
             '-t', dur.toFixed(2),
             out,
@@ -436,7 +520,7 @@ export async function POST(req: NextRequest) {
     // (waitUntil). The placeholder row is awaited FIRST so a status poll
     // on ANY instance can already resolve the job from the DB.
     await persistStage('planning')
-    after(() => pipeline())
+    after(() => runSlideshowPipeline())
     return NextResponse.json({ jobId: id })
   } catch (error) {
     console.error('[api/video/create] POST error:', error)

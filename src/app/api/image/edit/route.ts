@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireVerifiedSession } from '@/lib/auth'
+import { requireVerifiedSession, getCurrentUser } from '@/lib/auth'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import sharp from 'sharp'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { db } from '@/lib/db'
+import { geminiImageEdit } from '@/lib/premium-image'
 
-export const maxDuration = 60
+export const maxDuration = 120
 export const runtime = 'nodejs'
 
 const IS_VERCEL = Boolean(process.env.VERCEL)
@@ -54,7 +56,12 @@ const opSchema = z.object({
 
 const requestSchema = z.object({
   image: z.string().min(64).max(25_000_000), // dataUrl
-  operations: z.array(opSchema).min(1).max(12),
+  operations: z.array(opSchema).max(12).optional().default([]),
+  // AI EDIT — natural-language generative instruction (Gemini 2.5 Flash
+  // Image, image+text→image): "remove the person on the left", "make it
+  // sunset", "turn this into watercolor". Optional; sharp ops still run
+  // after it when both are provided.
+  instruction: z.string().min(3).max(1200).optional(),
   filename: z.string().max(120).optional(),
 })
 
@@ -84,13 +91,43 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-    const { image, operations } = parsed.data
+    const { image, operations, instruction } = parsed.data
+    if (!operations.length && !instruction?.trim()) {
+      return NextResponse.json(
+        { error: 'Provide an AI `instruction` and/or at least one pixel `operation`.' },
+        { status: 400 }
+      )
+    }
 
     const dataUrl = image.startsWith('data:') ? image : `data:image/png;base64,${image}`
     const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
-    const inputBuffer = Buffer.from(base64, 'base64')
+    let inputBuffer: Buffer = Buffer.from(base64, 'base64')
     if (inputBuffer.length < 64) {
       return NextResponse.json({ error: 'Image is empty or invalid.' }, { status: 400 })
+    }
+
+    const applied: string[] = []
+
+    /* ---- 1. AI GENERATIVE EDIT (Gemini image+text→image) ----
+     * Real generative editing — remove/add objects, restyle, relight,
+     * change backgrounds — the class of edits sharp can never do. Runs
+     * FIRST so pixel ops apply on top of the AI result. Gracefully falls
+     * back to the sharp pipeline when Gemini is unconfigured or fails. */
+    let aiEdited = false
+    if (instruction?.trim()) {
+      try {
+        inputBuffer = await geminiImageEdit(inputBuffer, instruction)
+        aiEdited = true
+        applied.push(`ai: ${instruction.trim().slice(0, 60)}`)
+      } catch (aiErr) {
+        console.warn('[api/image/edit] AI edit unavailable, using pixel ops only:', aiErr instanceof Error ? aiErr.message : aiErr)
+        if (!operations.length) {
+          return NextResponse.json(
+            { error: 'AI editing is temporarily unavailable — try a pixel operation instead (crop, brightness, etc.).' },
+            { status: 503 }
+          )
+        }
+      }
     }
 
     let pipeline = sharp(inputBuffer, { failOn: 'none' })
@@ -99,7 +136,6 @@ export async function POST(req: NextRequest) {
     const H = meta.height ?? 0
     let outFormat = 'png'
     let outQuality = 92
-    const applied: string[] = []
     // Cumulative modulate state — sharp's modulate() needs every field set
     // (undefined saturation throws) and later calls override earlier ones,
     // so we track the running values and re-apply the full state.
@@ -235,7 +271,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Render final buffer with the chosen format.
+    // Render final buffer with the chosen format. ALWAYS PNG on disk —
+    // the file route serves `{id}.png`; a `.jpg`/`.webp` extension used
+    // to produce an IMMEDIATELY broken URL (404).
     if (outFormat === 'jpeg') {
       pipeline = pipeline.flatten({ background: '#ffffff' }).jpeg({ quality: outQuality })
     } else if (outFormat === 'webp') {
@@ -247,23 +285,41 @@ export async function POST(req: NextRequest) {
 
     // Persist + serve through the same media route as generated images.
     const id = `edit-${Date.now()}-${randomUUID().slice(0, 8)}`
-    const ext = outFormat === 'jpeg' ? 'jpg' : outFormat
-    const filename = `${id}.${ext}`
     await mkdir(FILES_DIR, { recursive: true })
-    await writeFile(path.join(FILES_DIR, filename), output.data)
+    await writeFile(path.join(FILES_DIR, `${id}.png`), output.data)
+
+    // DB row — the durable copy that survives Vercel's ephemeral /tmp.
+    // Edited images previously had NO row at all, so every share link died
+    // as soon as the lambda's /tmp was recycled.
+    try {
+      const user = await getCurrentUser(req)
+      await db.generatedImage.create({
+        data: {
+          prompt: `edit: ${(instruction ?? '').trim() || applied.join(', ')}`.slice(0, 500),
+          size: `${output.info.width}x${output.info.height}`,
+          provider: aiEdited ? 'gemini-edit' : 'sharp-edit',
+          url: `/api/image/file/${id}`,
+          data: output.data.toString('base64'),
+          userId: user?.id ?? null,
+        },
+      })
+    } catch (persistErr) {
+      console.warn('[api/image/edit] DB persist failed (serving from /tmp):', persistErr instanceof Error ? persistErr.message : persistErr)
+    }
 
     return NextResponse.json({
       ok: true,
       image: {
         id,
         url: `/api/image/file/${id}`,
-        filename,
+        filename: `${id}.png`,
         width: output.info.width,
         height: output.info.height,
         format: output.info.format,
         size: output.data.length,
         bytes: output.data.toString('base64'), // DB persistence (Vercel /tmp is ephemeral)
         operations: applied,
+        aiEdited,
       },
     })
   } catch (error) {
