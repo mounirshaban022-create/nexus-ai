@@ -247,27 +247,33 @@ export interface SessionItem {
 /* Tool presentation metadata                                          */
 /* ------------------------------------------------------------------ */
 
-export const TOOL_META: Record<string, { label: string }> = {
-  generate_image: { label: 'Creating your image' },
-  edit_image: { label: 'Editing your image' },
-  generate_video: { label: 'Creating your video' },
-  create_document: { label: 'Building document' },
-  create_spreadsheet: { label: 'Building spreadsheet' },
-  edit_document: { label: 'Editing document' },
-  pdf_operation: { label: 'Processing PDF' },
-  run_code: { label: 'Running code' },
-  run_command: { label: 'Running command' },
-  web_search: { label: 'Searching the web' },
-  read_page: { label: 'Reading the page' },
-  browser_action: { label: 'Driving browser' },
-  send_email: { label: 'Sending email' },
-  send_whatsapp: { label: 'Sending WhatsApp' },
-  use_skill: { label: 'Loading skill' },
-  email_organize: { label: 'Organizing inbox' },
-  email_folders: { label: 'Listing folders' },
-  email_list: { label: 'Checking inbox' },
-  email_search: { label: 'Searching inbox' },
-  email_read: { label: 'Reading email' },
+export const TOOL_META: Record<string, { label: string; emoji?: string; color?: string }> = {
+  generate_image: { label: 'Creating your image', emoji: '🎨', color: '#a78bfa' },
+  edit_image: { label: 'Editing your image', emoji: '🪄', color: '#f472b6' },
+  generate_video: { label: 'Creating your video', emoji: '🎬', color: '#fb923c' },
+  create_document: { label: 'Building document', emoji: '📄', color: '#60a5fa' },
+  create_spreadsheet: { label: 'Building spreadsheet', emoji: '📊', color: '#34d399' },
+  edit_document: { label: 'Editing document', emoji: '📝', color: '#60a5fa' },
+  pdf_operation: { label: 'Processing PDF', emoji: '📕', color: '#f87171' },
+  run_code: { label: 'Running code', emoji: '⚡', color: '#facc15' },
+  run_command: { label: 'Running command', emoji: '⌨️', color: '#facc15' },
+  web_search: { label: 'Searching the web', emoji: '🌐', color: '#ff5a5f' },
+  read_page: { label: 'Reading the page', emoji: '📖', color: '#38bdf8' },
+  browser_action: { label: 'Driving browser', emoji: '🧭', color: '#38bdf8' },
+  send_email: { label: 'Sending email', emoji: '✉️', color: '#60a5fa' },
+  send_whatsapp: { label: 'Sending WhatsApp', emoji: '💬', color: '#34d399' },
+  use_skill: { label: 'Loading skill', emoji: '🧩', color: '#a78bfa' },
+  email_organize: { label: 'Organizing inbox', emoji: '🗂️', color: '#60a5fa' },
+  email_folders: { label: 'Listing folders', emoji: '📁', color: '#60a5fa' },
+  email_list: { label: 'Checking inbox', emoji: '📬', color: '#60a5fa' },
+  email_search: { label: 'Searching inbox', emoji: '🔎', color: '#60a5fa' },
+  email_read: { label: 'Reading email', emoji: '📨', color: '#60a5fa' },
+}
+
+/** Emoji + accent for a tool (falls back to a neutral gear). */
+export function toolVisual(name: string): { emoji: string; color: string } {
+  const meta = TOOL_META[name]
+  return { emoji: meta?.emoji ?? '⚙️', color: meta?.color ?? '#ff5a5f' }
 }
 
 export function toolLabel(name: string): string {

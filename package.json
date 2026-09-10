@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "build": "node -e \"const fs=require('fs');if(process.env.DATABASE_URL&&process.env.DATABASE_URL.startsWith('postgres')){let s=fs.readFileSync('prisma/schema.prisma','utf8');s=s.replace('provider = \\\"sqlite\\\"','provider = \\\"postgresql\\\"');fs.writeFileSync('prisma/schema.prisma',s);}console.log('Provider:', process.env.DATABASE_URL?.startsWith('postgres') ? 'postgresql' : 'sqlite')\" && prisma generate && next build",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "start": "node -e \"const fs=require('fs');fs.cpSync('public','.next/standalone/public',{recursive:true});if(fs.existsSync('.next/static'))fs.cpSync('.next/static','.next/standalone/.next/static',{recursive:true})\" && NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
     "db:push": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",

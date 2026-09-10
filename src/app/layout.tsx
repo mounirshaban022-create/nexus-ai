@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk, IBM_Plex_Sans_Arabic } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { PwaBridge } from "@/components/nexus/pwa-bridge";
 
 // Open WebUI uses Inter — their exact choice (body font)
 const inter = Inter({
@@ -40,6 +41,13 @@ export const metadata: Metadata = {
   authors: [{ name: "NEXUS AI" }],
   icons: {
     icon: "/brand/nexus-icon.png",
+    apple: "/icons/apple-touch-icon.png",
+  },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "NEXUS",
+    statusBarStyle: "black-translucent",
   },
   openGraph: {
     title: "NEXUS — One AI. Every superpower.",
@@ -54,6 +62,8 @@ export const viewport: Viewport = {
   themeColor: "#09090b",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
+  maximumScale: 1,
 };
 
 export default function RootLayout({
@@ -97,6 +107,7 @@ export default function RootLayout({
         >
           {children}
           <Toaster />
+          <PwaBridge />
         </ThemeProvider>
       </body>
     </html>

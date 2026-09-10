@@ -62,6 +62,11 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           error: status === 'error' ? row.error || 'Video generation failed on the server.' : '',
           prompt: row.prompt,
           scenes: null,
+          // Cross-instance fallbacks can't see the renderer's in-memory
+          // thumbnails — an empty strip keeps the client shape consistent.
+          sceneThumbs: [],
+          totalScenes: row.scenes ?? null,
+          activeScene: -1,
         },
       })
     } catch {
@@ -160,6 +165,11 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       error: job.error,
       prompt: job.prompt,
       scenes: job.scenes,
+      // LIVE PREVIEW: base64 JPEG film-strip frames (empty until the art
+      // stage starts producing thumbnails).
+      sceneThumbs: job.sceneThumbs ?? [],
+      totalScenes: job.totalScenes ?? job.scenes?.length ?? null,
+      activeScene: job.activeScene ?? -1,
     },
   })
 }

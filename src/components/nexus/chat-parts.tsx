@@ -19,16 +19,14 @@ import {
   Loader2,
   Play,
   RefreshCcw,
-  Search,
   Sparkles,
   Terminal,
   Volume2,
-  Wand2,
   X,
 } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import type { AgentAssignEvent, AgentMeta, SkillRunEvent } from './shared'
-import { BrandMark, DIVISION_MAP, tint, toolLabel } from './shared'
+import { BrandMark, DIVISION_MAP, tint, toolLabel, toolVisual } from './shared'
 
 /* ------------------------------------------------------------------ */
 /* Small guarded readers                                               */
@@ -219,84 +217,214 @@ export interface ToolCardInfo {
 /* ------------------------------------------------------------------ */
 
 function useElapsedSeconds(active: boolean): number {
-  const [sec, setSec] = useState(0)
+  // Adjust-on-prop-change during render (React's endorsed pattern — keeps
+  // the lint rule happy by never calling setState inside an effect body).
+  const [state, setState] = useState({ active: false, t0: 0, sec: 0 })
+  if (active !== state.active) {
+    setState({ active, t0: Date.now(), sec: 0 })
+  }
   useEffect(() => {
     if (!active) return
-    const t0 = Date.now()
-    setSec(0)
-    const id = setInterval(() => setSec(Math.floor((Date.now() - t0) / 1000)), 1000)
+    const id = setInterval(
+      () => setState((s) => ({ ...s, sec: Math.floor((Date.now() - s.t0) / 1000) })),
+      1000
+    )
     return () => clearInterval(id)
   }, [active])
-  return sec
+  return state.sec
 }
 
 /* ------------------------------------------------------------------ */
-/* SearchRunCard — Perplexity/ChatGPT-style animated search state       */
-/* Radar icon + staged shimmer headline + query chip + wave equalizer   */
+/* SearchRunCard — ChatGPT/Perplexity-class live research panel         */
+/* Animated radar, staged step rows with spring checkmarks, live query  */
+/* chip, source domains streaming in as results land, elapsed ticker.   */
 /* ------------------------------------------------------------------ */
 
-const SEARCH_STAGES = [
-  'Searching the web',
-  'Scanning results',
-  'Reading the sources',
-  'Connecting the dots',
+const SEARCH_STEPS = [
+  { label: 'Searching the web', icon: '🌐' },
+  { label: 'Scanning the results', icon: '🧹' },
+  { label: 'Reading the sources', icon: '📖' },
+  { label: 'Connecting the dots', icon: '🧠' },
 ]
+
+/** Pull {title,url} pairs out of a tool_result payload (guarded). */
+function extractSources(data: string | null | undefined): Array<{ title: string; url: string; host: string }> {
+  if (!data) return []
+  try {
+    const parsed = JSON.parse(data) as { results?: unknown } | null
+    const results = Array.isArray(parsed?.results) ? parsed.results : []
+    return results
+      .slice(0, 6)
+      .map((r) => {
+        const rec = asRecord(r)
+        if (!rec) return null
+        const url = str(rec.url)
+        let host = ''
+        try {
+          host = new URL(url).hostname.replace(/^www\./, '')
+        } catch {
+          host = ''
+        }
+        return { title: str(rec.title) || host || url, url, host }
+      })
+      .filter((s): s is { title: string; url: string; host: string } => Boolean(s))
+  } catch {
+    return []
+  }
+}
 
 export function SearchRunCard({ info }: { info: ToolCardInfo }) {
   const elapsed = useElapsedSeconds(true)
   const a = info.args ?? {}
   const query = str(a.query) || str(a.url) || str(a.q)
   const reading = info.tool === 'read_page'
-  const stage = reading
-    ? Math.min(Math.floor(elapsed / 6), 1) === 0
-      ? 'Reading the page'
-      : 'Extracting the facts'
-    : SEARCH_STAGES[Math.min(Math.floor(elapsed / 4), SEARCH_STAGES.length - 1)]
+  const done = info.status === 'done'
+  const error = info.status === 'error'
+  const sources = extractSources(info.data)
+
+  const steps = reading
+    ? [
+        { label: 'Fetching the page', icon: '🌐' },
+        { label: 'Reading the content', icon: '📖' },
+        { label: 'Extracting the facts', icon: '✨' },
+      ]
+    : SEARCH_STEPS
+  const perStep = done ? steps.length : Math.min(steps.length - 1, Math.floor(elapsed / 4))
+  const stageLabel = done
+    ? `Found ${sources.length || 'the best'} source${sources.length === 1 ? '' : 's'}`
+    : steps[Math.min(perStep, steps.length - 1)].label
+
   return (
-    <div
-      className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-muted/40 p-3"
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+      className="relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-muted/40"
       role="status"
-      aria-label={stage}
+      aria-label={stageLabel}
     >
-      {/* soft brand sweep */}
-      <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />
-      <div className="relative flex items-center gap-2.5">
-        <span className="nx-radar relative grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#ff5a5f]/10 text-[#ff5a5f]">
-          <Search className="h-4 w-4" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p key={stage} className="nx-rise nx-status-shimmer text-xs font-medium text-foreground">
-            {stage}
-          </p>
-          {query ? (
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">“{query}”</p>
-          ) : info.message ? (
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{info.message}</p>
+      {/* brand sweep while working */}
+      {!done && !error && <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />}
+
+      <div className="relative p-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className={`nx-orbit relative grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[17px] ${
+              done ? '' : 'text-[#ff5a5f]'
+            }`}
+            style={{
+              backgroundColor: tint(done ? '#34d399' : error ? '#f87171' : '#ff5a5f', 0.12),
+            }}
+          >
+            <span aria-hidden>{done ? '✅' : error ? '⚠️' : steps[Math.min(perStep, steps.length - 1)].icon}</span>
+          </span>
+          <div className="min-w-0 flex-1">
+            <p key={stageLabel} className="nx-rise nx-status-shimmer truncate text-xs font-semibold text-foreground">
+              {stageLabel}
+            </p>
+            {query ? (
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">“{query}”</p>
+            ) : info.message ? (
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{info.message}</p>
+            ) : null}
+          </div>
+          {!done && !error ? (
+            <span className="nx-wave shrink-0" aria-hidden>
+              <i />
+              <i />
+              <i />
+              <i />
+            </span>
           ) : null}
+          <span className="w-8 shrink-0 text-end text-[10px] tabular-nums text-muted-foreground/70">
+            {elapsed}s
+          </span>
         </div>
-        <span className="nx-wave shrink-0" aria-hidden>
-          <i />
-          <i />
-          <i />
-          <i />
-        </span>
-        <span className="w-7 shrink-0 text-end text-[10px] tabular-nums text-muted-foreground/70">
-          {elapsed}s
-        </span>
+
+        {/* Step rail — ticks off like ChatGPT's research steps */}
+        <div className="mt-2.5 flex items-center gap-1" aria-hidden>
+          {steps.map((st, i) => {
+            const stepDone = done || i < perStep
+            const active = !done && i === perStep
+            return (
+              <div key={st.label} className="flex min-w-0 flex-1 flex-col gap-1">
+                <span
+                  className={`h-1 w-full rounded-full transition-colors duration-500 ${
+                    stepDone
+                      ? 'bg-emerald-500/70'
+                      : active
+                        ? 'nx-stage-glow bg-[#ff5a5f]'
+                        : 'bg-border'
+                  }`}
+                />
+                <span
+                  className={`truncate text-[9px] leading-none ${
+                    stepDone
+                      ? 'text-emerald-400/80'
+                      : active
+                        ? 'font-medium text-[#ff8a8d]'
+                        : 'text-muted-foreground/50'
+                  }`}
+                >
+                  {st.label.split(' ')[0]}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Live source chips — placeholders shimmer until results land */}
+        {sources.length > 0 ? (
+          <ul className="mt-2.5 flex flex-wrap gap-1.5">
+            {sources.map((s, i) => (
+              <li
+                key={`${s.host}-${i}`}
+                className="nx-thumb-in flex max-w-full items-center gap-1 rounded-full border border-border bg-background/60 px-2 py-0.5 text-[10px] text-muted-foreground"
+                style={{ animationDelay: `${i * 70}ms` }}
+              >
+                {/* Favicon — DuckDuckGo icon service, letter fallback */}
+                <img
+                  src={`https://icons.duckduckgo.com/ip3/${s.host}.ico`}
+                  alt=""
+                  aria-hidden
+                  width={12}
+                  height={12}
+                  className="h-3 w-3 shrink-0 rounded-sm"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'
+                  }}
+                />
+                <span className="max-w-[150px] truncate">{s.host}</span>
+              </li>
+            ))}
+          </ul>
+        ) : !done && !error ? (
+          <div className="mt-2.5 flex flex-wrap gap-1.5" aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="nx-skeleton h-[18px] rounded-full"
+                style={{ width: [86, 120, 70][i], animationDelay: `${i * 160}ms` }}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </motion.div>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* ImageRunCard — animated aurora canvas while an image is being made   */
+/* ImageRunCard — premium generation studio canvas                      */
+/* Aurora field, conic progress ring with %, stage checklist, drifting  */
+/* sparkles, prompt ticker. The card itself looks like a photo forming. */
 /* ------------------------------------------------------------------ */
 
 const IMAGE_STAGES = [
-  'Reading your prompt',
-  'Composing the scene',
-  'Painting the details',
-  'Final touches',
+  { label: 'Reading your prompt', icon: '📝' },
+  { label: 'Composing the scene', icon: '🎥' },
+  { label: 'Painting the details', icon: '🎨' },
+  { label: 'Final touches', icon: '✨' },
 ]
 
 export function ImageRunCard({ info }: { info: ToolCardInfo }) {
@@ -304,37 +432,95 @@ export function ImageRunCard({ info }: { info: ToolCardInfo }) {
   const a = info.args ?? {}
   const prompt = str(a.prompt) || str(a.instruction) || str(a.description)
   const editing = info.tool === 'edit_image'
-  const stage = editing
-    ? 'Editing your image'
-    : IMAGE_STAGES[Math.min(Math.floor(elapsed / 5), IMAGE_STAGES.length - 1)]
+  const done = info.status === 'done'
+  const error = info.status === 'error'
+
+  const stages = editing
+    ? [
+        { label: 'Analyzing your photo', icon: '🔍' },
+        { label: 'Applying the edit', icon: '🪄' },
+        { label: 'Refining the details', icon: '✨' },
+      ]
+    : IMAGE_STAGES
+  const stageIdx = done ? stages.length : Math.min(stages.length - 1, Math.floor(elapsed / 5))
+  // Percent: eased progress toward 95% while running (never lies about done).
+  const pct = done ? 100 : error ? 0 : Math.min(95, Math.round(100 * (1 - Math.exp(-elapsed / 18))))
+  const stageLabel = done
+    ? 'Image ready'
+    : error
+      ? 'Something went wrong'
+      : stages[stageIdx].label
+
   return (
-    <div className="w-full max-w-sm" role="status" aria-label={stage}>
+    <div className="w-full max-w-sm" role="status" aria-label={stageLabel}>
       <div className="nx-img-canvas relative aspect-square w-full overflow-hidden rounded-2xl border border-border bg-muted/40">
-        {/* drifting aurora blobs */}
+        {/* drifting aurora blobs + sheen sweep */}
         <span className="nx-aurora absolute inset-[-35%]" aria-hidden />
-        {/* sheen sweep */}
-        <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />
+        {!done && !error && <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />}
+        {/* film-grain vignette */}
+        <span
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'radial-gradient(120% 120% at 50% 40%, transparent 55%, rgba(0,0,0,0.28))' }}
+          aria-hidden
+        />
+        {/* drifting sparkles */}
+        {!done && !error
+          ? [
+              { top: '18%', left: '22%', delay: '0s' },
+              { top: '62%', left: '78%', delay: '0.9s' },
+              { top: '74%', left: '26%', delay: '1.7s' },
+              { top: '30%', left: '70%', delay: '2.2s' },
+            ].map((p, i) => (
+              <span
+                key={i}
+                className="nx-spark absolute text-white/80"
+                style={{ top: p.top, left: p.left, animationDelay: p.delay }}
+                aria-hidden
+              >
+                ✦
+              </span>
+            ))
+          : null}
+
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-3">
-            <span className="nx-ring-pulse relative grid h-14 w-14 place-items-center rounded-full bg-background/55 backdrop-blur-sm">
-              {editing ? (
-                <Wand2 className="h-6 w-6 text-[#ff5a5f]" aria-hidden />
-              ) : (
-                <Sparkles className="h-6 w-6 text-[#ff5a5f]" aria-hidden />
-              )}
+            {/* Conic progress ring around the glowing icon */}
+            <span
+              className="nx-ring nx-ring-pulse relative grid h-16 w-16 place-items-center rounded-full"
+              style={{ ['--nx-pct' as string]: pct, ['--nx-color' as string]: error ? '#f87171' : '#ff5a5f' }}
+            >
+              <span className="grid h-[52px] w-[52px] place-items-center rounded-full bg-background/70 backdrop-blur-sm">
+                {error ? (
+                  <X className="h-6 w-6 text-red-300" aria-hidden />
+                ) : (
+                  <span className="text-2xl" aria-hidden>{editing ? '🪄' : '🎨'}</span>
+                )}
+              </span>
             </span>
-            <p key={stage} className="nx-rise px-6 text-center text-xs font-medium text-foreground/90">
-              {stage}
+            <p key={stageLabel} className="nx-rise px-6 text-center text-xs font-semibold text-foreground/90">
+              {stageLabel}
+            </p>
+            <p className="text-[10px] tabular-nums text-muted-foreground/80">
+              {pct}%{!done && !error ? ` · ${elapsed}s` : ''}
             </p>
           </div>
         </div>
-        {/* corner progress */}
-        <span className="absolute bottom-2 end-2 rounded-full bg-background/55 px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground backdrop-blur-sm">
-          {elapsed}s
+        {/* corner stage dots */}
+        <span className="absolute start-2.5 top-2.5 flex gap-1" aria-hidden>
+          {stages.map((_, i) => (
+            <span
+              key={i}
+              className={`h-1.5 w-1.5 rounded-full transition-colors duration-500 ${
+                i < stageIdx ? 'bg-emerald-400/80' : i === stageIdx && !done ? 'bg-[#ff5a5f]' : 'bg-white/20'
+              }`}
+            />
+          ))}
         </span>
       </div>
       {prompt ? (
-        <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/80">“{prompt}”</p>
+        <div className="mt-1.5 overflow-hidden">
+          <p className="truncate text-[11px] leading-relaxed text-muted-foreground/80">“{prompt}”</p>
+        </div>
       ) : null}
     </div>
   )
@@ -343,46 +529,73 @@ export function ImageRunCard({ info }: { info: ToolCardInfo }) {
 export function ToolCard({ info }: { info: ToolCardInfo }) {
   const [open, setOpen] = useState(false)
   const label = toolLabel(info.tool)
+  const { emoji, color } = toolVisual(info.tool)
+  const elapsed = useElapsedSeconds(info.status === 'running')
+  const error = info.status === 'error'
+  const done = info.status === 'done'
 
-  /* Running: polished pill — brand sweep + shimmering label + live hint. */
+  /* Running: premium gradient-frame card — glowing tool tile, shimmering
+   * label, live hint + elapsed ticker. Distinct per tool via emoji+tint. */
   if (info.status === 'running') {
     return (
       <div
-        className="relative flex items-center gap-2 overflow-hidden rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
+        className="nx-run-frame relative flex w-full max-w-md items-center gap-2.5 overflow-hidden rounded-2xl bg-muted/40 px-3 py-2.5"
         role="status"
         aria-label={label}
       >
         <span className="nx-sweep pointer-events-none absolute inset-0" aria-hidden />
-        <Loader2 className="relative h-3.5 w-3.5 shrink-0 animate-spin text-[#ff5a5f]" aria-hidden />
-        <span className="nx-status-shimmer relative shrink-0 text-foreground/90">{label}</span>
+        <span
+          className="relative grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[15px]"
+          style={{ backgroundColor: tint(color, 0.14), border: `1px solid ${tint(color, 0.35)}` }}
+          aria-hidden
+        >
+          {emoji}
+        </span>
+        <span className="nx-status-shimmer relative shrink-0 text-xs font-semibold text-foreground/95">
+          {label}
+        </span>
         {info.message ? (
-          <span className="relative min-w-0 max-w-[240px] truncate text-muted-foreground/80 sm:max-w-xs">{info.message}</span>
+          <span className="relative min-w-0 max-w-[180px] truncate text-[11px] text-muted-foreground/80 sm:max-w-xs">
+            {info.message}
+          </span>
         ) : null}
+        <span className="relative ms-auto flex shrink-0 items-center gap-1.5">
+          <span className="nx-wave" aria-hidden>
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="w-7 text-end text-[10px] tabular-nums text-muted-foreground/70">{elapsed}s</span>
+        </span>
       </div>
     )
   }
 
-  /* Finished: done chip, expandable to the call summary. */
+  /* Finished: polished chip with the tool tile, expandable summary. */
   const lines = toolSummaryLines(info.tool, info.args, info.data)
-  const error = info.status === 'error'
   return (
     <div className="w-full max-w-md">
       <button
         type="button"
         onClick={() => lines.length > 0 && setOpen(!open)}
         aria-expanded={open}
-        className={`flex w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition ${
+        className={`flex w-full items-center gap-2 rounded-full border py-1.5 ps-1.5 pe-3 text-xs transition ${
           error
             ? 'border-red-500/25 bg-red-500/10 text-red-300'
             : 'border-border bg-muted/50 text-muted-foreground/80 hover:text-muted-foreground'
         }`}
       >
-        {error ? (
-          <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        ) : (
-          <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden />
-        )}
-        <span className="shrink-0">{error ? `${label} failed` : label}</span>
+        <span
+          className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] ${done ? 'nx-done-burst' : ''}`}
+          style={{
+            backgroundColor: error ? 'rgba(248,113,113,0.14)' : 'rgba(52,211,153,0.14)',
+          }}
+          aria-hidden
+        >
+          {error ? '⚠️' : '✓'}
+        </span>
+        <span className="truncate">{error ? `${label} failed` : label}</span>
         {lines.length > 0 ? (
           <ChevronDown
             className={`ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/80 transition-transform ${open ? 'rotate-180' : ''}`}
@@ -430,6 +643,9 @@ function videoStageIndex(status: string): number {
   return idx === -1 ? 0 : idx
 }
 
+/** Film-strip slot count before the job reports its scene total. */
+const VIDEO_SCENE_PLACEHOLDER = 4
+
 function VideoJobCard({
   jobId,
   title,
@@ -449,6 +665,8 @@ function VideoJobCard({
     message: initialMessage,
     url: '',
     error: '',
+    thumbs: [] as string[],
+    totalScenes: 0,
   })
   const missesRef = useRef(0)
   const finished = state.status === 'done' || state.status === 'error'
@@ -483,6 +701,10 @@ function VideoJobCard({
           message: str(job.message),
           url: str(job.url),
           error: str(job.error),
+          thumbs: Array.isArray(job.sceneThumbs)
+            ? (job.sceneThumbs as unknown[]).filter((t): t is string => typeof t === 'string')
+            : s.thumbs,
+          totalScenes: num(job.totalScenes, s.totalScenes),
         }))
       } catch {
         /* transient network error — keep polling */
@@ -501,9 +723,18 @@ function VideoJobCard({
           controls
           preload="metadata"
           src={state.url}
-          className="w-full rounded-xl border border-border bg-black"
+          className="nx-img-reveal w-full rounded-xl border border-border bg-black"
         />
-        <figcaption className="mt-1.5 truncate text-[11px] text-muted-foreground/80">{title || 'Generated video'}</figcaption>
+        <figcaption className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground/80">
+          <span className="truncate">{title || 'Generated video'}</span>
+          <a
+            href={state.url}
+            download
+            className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground transition hover:text-foreground"
+          >
+            <Download className="h-3 w-3" aria-hidden /> MP4
+          </a>
+        </figcaption>
       </figure>
     )
   }
@@ -527,6 +758,8 @@ function VideoJobCard({
 
   const pct = Math.min(100, Math.max(3, state.progress))
   const activeStage = videoStageIndex(state.status)
+  const thumbs = state.thumbs
+  const total = state.totalScenes || VIDEO_SCENE_PLACEHOLDER
   return (
     <div className="w-full max-w-sm rounded-2xl border border-border bg-muted/50 p-3" role="status">
       <div className="flex items-center gap-2.5">
@@ -541,6 +774,30 @@ function VideoJobCard({
         </div>
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/80">{Math.round(pct)}%</span>
       </div>
+
+      {/* LIVE FILM STRIP — scene art pops in here the moment each frame is
+       * painted by the pipeline (base64 thumbs streamed by /api/video/status). */}
+      {total > 0 ? (
+        <div className="nx-film mt-2.5 flex items-center gap-1.5 overflow-x-auto rounded-lg bg-black/25 p-1.5 nx-rail" aria-hidden>
+          {Array.from({ length: Math.max(total, thumbs.length) }).map((_, i) =>
+            thumbs[i] ? (
+              <img
+                key={i}
+                src={`data:image/jpeg;base64,${thumbs[i]}`}
+                alt=""
+                className="nx-thumb-in h-11 w-[72px] shrink-0 rounded-[5px] border border-white/10 object-cover"
+                style={{ animationDelay: `${(i % 4) * 60}ms` }}
+              />
+            ) : (
+              <span
+                key={i}
+                className="nx-skeleton h-11 w-[72px] shrink-0 rounded-[5px] border border-white/5"
+              />
+            )
+          )}
+        </div>
+      ) : null}
+
       {/* Pipeline tracker — Plan → Art → Voice → Render → Encode */}
       <div className="mt-2.5 flex items-center gap-1" aria-hidden>
         {VIDEO_STAGES.map((st, i) => {
@@ -943,41 +1200,63 @@ function AttachmentCard({ item }: { item: unknown }) {
     )
   }
 
-  /* Web search sources. */
+  /* Web search sources — premium result cards with favicons. */
   if (type === 'search') {
     const results = Array.isArray(a.results) ? a.results : []
     if (results.length === 0) return null
     return (
       <div className="w-full max-w-md rounded-2xl border border-border bg-muted/40 p-3">
         <p className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
-          Sources
+          <span aria-hidden>🌐</span> Sources
           <span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] normal-case tabular-nums">
             {results.length}
           </span>
         </p>
-        <ul className="mt-2 space-y-1.5">
-          {results.slice(0, 5).map((raw, i) => {
+        <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+          {results.slice(0, 8).map((raw, i) => {
             const r = asRecord(raw)
             if (!r) return null
             const url = str(r.url)
             const title = str(r.title) || url
+            let host = ''
+            try {
+              host = url ? new URL(url).hostname.replace(/^www\./, '') : ''
+            } catch {
+              host = ''
+            }
             return (
-              <li key={i} className="nx-rise flex min-w-0 items-start gap-2 text-xs" style={{ animationDelay: `${i * 60}ms` }}>
-                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-[9px] font-semibold tabular-nums text-muted-foreground" aria-hidden>
-                  {i + 1}
-                </span>
-                {url ? (
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="min-w-0 flex-1 truncate text-muted-foreground transition hover:text-foreground hover:underline"
-                  >
-                    {title}
-                  </a>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground/80">{title}</span>
-                )}
+              <li key={i} className="nx-rise min-w-0" style={{ animationDelay: `${i * 55}ms` }}>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex min-w-0 items-start gap-2 rounded-xl border border-transparent bg-background/40 p-2 transition hover:border-border hover:bg-background/70"
+                >
+                  <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-[9px] font-semibold tabular-nums text-muted-foreground" aria-hidden>
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs text-muted-foreground transition group-hover:text-foreground group-hover:underline">
+                      {title}
+                    </span>
+                    {host ? (
+                      <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                        <img
+                          src={`https://icons.duckduckgo.com/ip3/${host}.ico`}
+                          alt=""
+                          aria-hidden
+                          width={10}
+                          height={10}
+                          className="h-2.5 w-2.5 rounded-sm"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'
+                          }}
+                        />
+                        {host}
+                      </span>
+                    ) : null}
+                  </span>
+                </a>
               </li>
             )
           })}

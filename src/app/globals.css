@@ -1094,3 +1094,181 @@ html[lang="ar"] h1, html[lang="ar"] h2 {
 html[lang="ar"] code, html[lang="ar"] pre, html[lang="ar"] .tabular-nums {
   font-family: var(--font-mono), ui-monospace, monospace;
 }
+
+/* ================================================================== */
+/* NEXUS RUN THEATER — premium live-tool-execution visuals             */
+/* (search research panel, image studio canvas, video cinema card,     */
+/*  per-tool gradient pills). All prefixed nx-run-* / nx2-*.           */
+/* ================================================================== */
+
+/* --- Animated gradient border (running tool cards) ----------------- */
+.nx-run-frame {
+  position: relative;
+  isolation: isolate;
+}
+.nx-run-frame::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--nx-angle, 0deg),
+    rgba(255, 90, 95, 0.85),
+    rgba(147, 112, 255, 0.55),
+    rgba(56, 189, 248, 0.45),
+    rgba(255, 90, 95, 0.85)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: nx-border-spin 3.2s linear infinite;
+  z-index: 1;
+  pointer-events: none;
+}
+@property --nx-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes nx-border-spin {
+  to {
+    --nx-angle: 360deg;
+  }
+}
+
+/* --- Radar sweep with orbiting satellite dot ----------------------- */
+.nx-orbit {
+  position: relative;
+}
+.nx-orbit::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 9999px;
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  animation: nx-orbit-spin 1.15s linear infinite;
+}
+@keyframes nx-orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Conic progress ring ------------------------------------------- */
+.nx-ring {
+  background: conic-gradient(var(--nx-color, #ff5a5f) calc(var(--nx-pct, 0) * 1%), rgba(255, 255, 255, 0.09) 0);
+}
+
+/* --- Film-strip sprocket holes (video cinema card) ------------------ */
+.nx-film {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.16) 34%, transparent 36%);
+  background-size: 10px 100%;
+  background-position: top;
+}
+
+/* --- Shimmer skeleton source chips (search sources appearing) ------- */
+.nx-skeleton {
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 35%,
+    rgba(255, 255, 255, 0.12) 50%,
+    rgba(255, 255, 255, 0.04) 65%
+  );
+  background-size: 240% 100%;
+  animation: nx-skel 1.7s ease-in-out infinite;
+}
+html:not(.dark) .nx-skeleton {
+  background: linear-gradient(
+    100deg,
+    rgba(0, 0, 0, 0.05) 35%,
+    rgba(0, 0, 0, 0.12) 50%,
+    rgba(0, 0, 0, 0.05) 65%
+  );
+  background-size: 240% 100%;
+}
+@keyframes nx-skel {
+  0% {
+    background-position: 130% 0;
+  }
+  100% {
+    background-position: -30% 0;
+  }
+}
+
+/* --- Sparkle particles for the image canvas ------------------------- */
+.nx-spark {
+  animation: nx-spark-float 2.6s ease-in-out infinite;
+  opacity: 0;
+}
+@keyframes nx-spark-float {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.6);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px) scale(1.05);
+  }
+}
+
+/* --- Done burst ring (tool completion) ------------------------------- */
+.nx-done-burst {
+  animation: nx-burst 0.6s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+@keyframes nx-burst {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 9px rgba(52, 211, 153, 0);
+  }
+}
+
+/* --- Film strip thumb pop-in ----------------------------------------- */
+.nx-thumb-in {
+  opacity: 0;
+  animation: nx-thumb 0.5s cubic-bezier(0.21, 1.02, 0.73, 1) forwards;
+}
+@keyframes nx-thumb {
+  from {
+    opacity: 0;
+    transform: scale(0.86) rotate(-2deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- Marquee prompt ticker -------------------------------------------- */
+.nx-ticker {
+  animation: nx-ticker 14s linear infinite;
+}
+@keyframes nx-ticker {
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  88%,
+  100% {
+    transform: translateX(calc(-100% + 220px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-run-frame::before,
+  .nx-orbit::after,
+  .nx-skeleton,
+  .nx-spark,
+  .nx-ticker,
+  .nx-thumb-in,
+  .nx-done-burst {
+    animation: none;
+  }
+}
