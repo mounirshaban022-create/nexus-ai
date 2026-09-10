@@ -3,13 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
-
-const SYSTEM_PROMPT =
-  'You are NEXUS, the AI at the heart of the NEXUS AI super app — an assistant with ' +
-  'superpowers: chat, image generation, vision, voice, web search, page reading, and an ' +
-  'agent that connects to external tools. You are helpful, precise, and friendly. Format ' +
-  'answers in clean Markdown (headings, lists, tables, code blocks) whenever it improves ' +
-  'clarity. Be concise for simple questions and thorough for complex ones.'
+import { buildSystemPrompt } from '@/lib/chat-system-prompt'
 
 const requestSchema = z.object({ sessionId: z.string().min(1).max(64) })
 
@@ -50,11 +44,36 @@ export async function POST(req: NextRequest) {
       await db.chatMessage.delete({ where: { id: m.id } })
     }
 
-    // Rebuild history and re-run completion
+    // Rebuild history and re-run completion. Uses the SAME world-class system
+    // prompt as the main chat route (was a weak 3-line prompt sent as an
+    // "assistant" message — models then believed they had already SAID the
+    // instructions, which degraded instruction following on this path).
+    // The user's durable memories are injected too, so a regenerated reply
+    // stays consistent with everything the assistant knows about them.
     const remaining = messages.slice(0, cutoff + 1)
+    let memories: Array<{ content: string }> = []
+    if (session.userId) {
+      memories = await db.userMemory.findMany({
+        where: { userId: session.userId },
+        orderBy: { createdAt: 'desc' },
+        take: 25,
+        select: { content: true },
+      })
+    }
+    // Same always-on public connectors the main route advertises (email
+    // connectors require a connected account and are omitted here).
+    const enabledConnectors = [
+      'web_search', 'read_page', 'wikipedia', 'weather', 'crypto', 'currency',
+      'translate', 'dictionary', 'github', 'hacker_news', 'time', 'calculator',
+      'recipes', 'nasa', 'news', 'trivia', 'pokemon', 'games', 'forecast',
+      'space_news', 'air_quality', 'music',
+    ]
     const llmMessages = [
-      { role: 'assistant', content: SYSTEM_PROMPT },
-      ...remaining.slice(-24).map((m) => ({ role: m.role, content: m.content })),
+      { role: 'system', content: buildSystemPrompt(enabledConnectors) },
+      ...(memories.length
+        ? [{ role: 'system', content: `ABOUT THE USER (your memory of them — use naturally):\n${memories.map((m) => `- ${m.content}`).join('\n')}` }]
+        : []),
+      ...remaining.slice(-30).map((m) => ({ role: m.role, content: m.content })),
     ]
 
     const reply = await smartChat(llmMessages, { maxTokens: 4000, task: 'chat' })

@@ -937,7 +937,7 @@ async function streamAnonymousCompletion(
   provider: AnonymousProvider,
   messages: ExternalChatMessage[],
   onDelta: (delta: string) => void,
-  opts: { model?: string; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal } = {}
+  opts: { model?: string; maxTokens?: number; timeoutMs?: number; temperature?: number; signal?: AbortSignal } = {}
 ): Promise<string> {
   const model = opts.model ?? provider.models[0]
   const timeoutMs = opts.timeoutMs ?? 60_000
@@ -962,7 +962,7 @@ async function streamAnonymousCompletion(
       model,
       messages,
       stream: true,
-      temperature: 0.7,
+      temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? 800,
     }),
   })
@@ -994,7 +994,7 @@ async function streamAnonymousCompletion(
 export async function streamAnonymousFallbackChat(
   messages: ExternalChatMessage[],
   onDelta: (delta: string) => void,
-  opts: { maxTokens?: number; timeoutMs?: number; task?: AiTask } = {}
+  opts: { maxTokens?: number; timeoutMs?: number; task?: AiTask; temperature?: number } = {}
 ): Promise<{ content: string; providerId: string; model: string }> {
   const normalized = normalizeSystemRole(messages)
   const chain = chainOrderForTask(opts.task)
@@ -1034,7 +1034,7 @@ export async function streamAnonymousFallbackChat(
                 }
                 if (lockedIdx === i) onDelta(d) // only the winner reaches the UI
               },
-              { model, maxTokens: opts.maxTokens, timeoutMs: perRequestMs, signal: controllers[i].signal }
+              { model, maxTokens: opts.maxTokens, timeoutMs: perRequestMs, temperature: opts.temperature, signal: controllers[i].signal }
             )
             if (full.trim()) return { content: full, providerId: provider.id, model }
             // Stream completed empty — only the winner is a real result.
