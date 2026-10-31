@@ -18,7 +18,7 @@ import { usePreferences, applyPreferences } from '@/lib/preferences'
 import type { View, AppUser } from '@/components/nexus/shared'
 import { BrandMark } from '@/components/nexus/shared'
 import { NexusShell } from '@/components/nexus/shell'
-import { NexusLanding } from '@/components/nexus/landing'
+import { OfficialSite } from '@/components/site/official-site'
 import { NexusChat } from '@/components/nexus/chat'
 import { NexusAuthModal } from '@/components/nexus/auth-modal'
 import { AgentsDirectory, AgentsDirectoryPage } from '@/components/nexus/agents-directory'
@@ -176,11 +176,11 @@ export default function Page() {
     )
   }
 
-  // Signed out and not exploring as guest → marketing landing.
+  // Signed out and not exploring as guest → the official website.
   if (!user && !isGuest) {
     return (
       <>
-        <NexusLanding onJoin={() => setShowAuth(true)} onGuest={() => setIsGuest(true)} />
+        <OfficialSite onJoin={() => setShowAuth(true)} onGuest={() => setIsGuest(true)} />
         {showAuth && <NexusAuthModal open onOpenChange={handleAuthOpenChange} />}
         {/* ?voice=1 deep link works from the landing too — voice chat is a
             guest-capable flow (sessions are server-side and unauthenticated). */}

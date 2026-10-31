@@ -57,7 +57,7 @@ export function PwaBridge() {
         }
         setInstallEvent(null)
       }}
-      className="fixed bottom-20 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/90 px-4 py-2 text-xs font-medium text-foreground shadow-lg backdrop-blur transition hover:border-[#ff5a5f]/40 sm:bottom-4"
+      className="fixed bottom-20 left-4 z-40 flex items-center gap-2 rounded-full border border-border bg-background/90 px-4 py-2 text-xs font-medium text-foreground shadow-lg backdrop-blur transition hover:border-[#ff5a5f]/40 sm:bottom-4 sm:left-4"
     >
       <Download className="h-3.5 w-3.5 text-[#ff8a8d]" aria-hidden />
       Install NEXUS app
