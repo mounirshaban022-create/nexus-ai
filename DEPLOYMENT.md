@@ -6,6 +6,10 @@ Everything you need to ship NEXUS AI to Vercel: keys, database, build settings, 
 
 ## 0. What changed in this revision
 
+- **FIXED: sign-in 500 on Vercel when `AUTH_SECRET` was forgotten.** The auth layer now AUTO-PROVISIONS a cryptographically-random session secret on first boot and stores it in the database (`AppConfig` table) — every serverless instance shares it, so sign-in works immediately with zero extra configuration. Setting `AUTH_SECRET` explicitly is still recommended (see §4).
+- **FIXED: voice call on Vercel.** The phone-call experience no longer hangs on "Connecting…" on hosts without the sandbox voice service: after a 4.5s grace period it switches to **on-device voice** — the browser's built-in Web Speech API (recognition + synthesis, Chrome/Edge/Safari) with the normal `/api/chat` brain. Zero server voice infrastructure needed. Sandbox keeps the original low-latency socket pipeline.
+- **FIXED: read-aloud / TTS on Vercel.** The chat speech player and the omni speech-to-text tool now fall back to the browser's built-in voice when the server TTS/ASR engines are unavailable (keyless deployments).
+- **NEW: `/api/health` diagnostics** — reports `core.database` reachability, `core.authSecret` provisioning state and every configured AI engine (booleans only, no secrets). Open `https://<your-domain>.vercel.app/api/health` to see exactly what your deployment is missing.
 - **NEW: automated migration endpoint** at `/api/admin/migrate` — provisions the Supabase schema from the Vercel runtime (no manual SQL paste, no local psql install needed). See §2 option B.
 - **Default OpenRouter model** is now `stealth/ox-alpha` ("Ox Alpha"), the free coding/reasoning model the user requested.
 - The `supabase-schema.sql` was regenerated from `prisma/schema.prisma` — all 13 PascalCase tables including `User`.
@@ -104,6 +108,7 @@ Add EACH of these for **Production + Preview + Development** environments (or at
 | `AGNES_API_KEY` | `sk-i9TG...` | Agnes AI video generation |
 | `AGNES_BASE_URL` | `https://api.agnes.ai/v1` | Update if Agnes uses a different host |
 | `NEXUS_EMAIL_SECRET` | (any random 32-char string) | Used to AES-encrypt stored email passwords. **Must match across deploys** — if you change it later, saved email accounts must be re-connected. Generate with `openssl rand -hex 32` |
+| `AUTH_SECRET` | (any random 32+ char string) | Signs the 30-day session JWTs. **Recommended but no longer required:** if omitted, a secure random secret is auto-generated on first boot and stored in the database (`AppConfig.auth_secret`). Generate with `openssl rand -hex 32` |
 | `ADMIN_MIGRATION_TOKEN` | (any random 32+ char string) | Required to hit `/api/admin/migrate` in production (Vercel). Used to provision the Supabase schema from the Vercel runtime — no manual SQL paste needed. Generate with `openssl rand -hex 24`. Already set in your `.env.vercel.local`. |
 | `APP_URL` | `https://<your-vercel-domain>.vercel.app` | |
 | `PORT` | `3000` | |
@@ -197,7 +202,10 @@ bun run db:push  # apply schema changes to local SQLite
 | Symptom | Fix |
 |---------|-----|
 | `prisma.chatSession.create()` → `FATAL: tenant/user postgres.<ref> not found` | The Supavisor pooler doesn't recognize the project. Switch `DATABASE_URL` to the **direct connection**: `postgresql://postgres:<PASSWORD>@db.<ref>.supabase.co:5432/postgres` (note: user is just `postgres`, no `.<ref>`, no `?pgbouncer=true`). See DEPLOYMENT.md §2. |
-| Auth (sign up / sign in) fails on Vercel | The `User` table is missing from Supabase. **Easiest fix:** run `curl -H "Authorization: Bearer <ADMIN_MIGRATION_TOKEN>" "https://<your-vercel-domain>.vercel.app/api/admin/migrate"` to provision all 13 tables from the Vercel runtime. **Or:** run [`supabase-schema.sql`](./supabase-schema.sql) in Supabase SQL Editor. |
+| Auth (sign up / sign in) fails on Vercel | The `User` table is missing from Supabase. **Easiest fix:** run `curl -H "Authorization: Bearer <ADMIN_MIGRATION_TOKEN>" "https://<your-vercel-domain>.vercel.app/api/admin/migrate"` to provision all tables from the Vercel runtime. **Or:** run [`supabase-schema.sql`](./supabase-schema.sql) in Supabase SQL Editor. Check `https://<your-domain>/api/health` — `core.database` must be `true`. |
+| Sign-in 500 with "Auth secret unavailable" | `AUTH_SECRET` is unset AND the database is unreachable. Fix `DATABASE_URL` first (see the pooler/tenant row above); or set `AUTH_SECRET` explicitly in Vercel env vars. |
+| Voice call hangs on "Connecting…" | On Vercel the call auto-switches to **on-device voice** after ~5s ("On-device voice" chip appears) — use **Chrome, Edge or Safari**; Firefox doesn't ship speech recognition, so the call degrades to captions mode (typed text + spoken replies). |
+| TTS is silent / read-aloud fails on Vercel | Microsoft's free Edge-TTS 403s from cloud IPs and Z.ai is sandbox-only. The UI now falls back to the **browser's built-in synthesizer** automatically (Chrome/Edge/Safari). For high-quality server voices add `HF_TOKEN` or `GROQ_API_KEY`. |
 | Build fails on Prisma | Ensure `DATABASE_URL` is set in Vercel AND starts with `postgres`. The `build` script auto-switches the provider. |
 | Chat returns "All AI engines are busy" | `OPENROUTER_API_KEY` not set or invalid. Check Vercel env vars. |
 | Email connect "failed" with correct creds | You're on an old deploy. The `getZAI` export fix is in commit `9f61998`. Redeploy. |
@@ -207,4 +215,20 @@ bun run db:push  # apply schema changes to local SQLite
 
 ---
 
-**Repo:** <https://github.com/mounirshaban022-create/nexus-ai> · **Commit:** `9f61998` · **Author:** Mounir Shaaban
+## 11. How voice works per deployment
+
+NEXUS has a three-tier voice stack that always picks the best available engine:
+
+| Tier | Engine | Where it works | Config needed |
+|------|--------|----------------|---------------|
+| 1 | Socket voice service (VAD → Whisper ASR → LLM → neural TTS) | Sandbox only | none |
+| 2 | Server ASR/TTS over HTTP (HF Whisper / Groq / Edge-TTS) | Vercel + everywhere | `HF_TOKEN` or `GROQ_API_KEY` |
+| 3 | **On-device Web Speech API** (browser recognition + synthesis) | Vercel + everywhere, Chrome/Edge/Safari | none |
+
+- **Voice call:** tries tier 1, falls back to tier 3 automatically (watch for the green "On-device voice" chip). Typed captions always work.
+- **Mic overlay in chat:** server chain (tier 2) → browser synthesis fallback built in.
+- **Speech-to-text tool:** records to the server engines; if they're unconfigured it uses the parallel on-device transcript it captured while recording.
+
+---
+
+**Repo:** <https://github.com/mounirshaban022-create/nexus-ai> · **Author:** Mounir Shaaban

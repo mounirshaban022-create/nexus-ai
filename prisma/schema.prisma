@@ -343,6 +343,17 @@ model WhatsAppAccount {
   @@index([createdAt])
 }
 
+// Global server-side key/value store for runtime-provisioned configuration.
+// Primary use: deployments (e.g. Vercel) where the operator forgot to set
+// AUTH_SECRET — the first boot generates a cryptographically-random secret,
+// persists it here, and every serverless instance shares it via the DB.
+// NEVER expose this table through any API route.
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 // Every inbound/outbound WhatsApp message. Feeds the agent's conversation
 // memory (last N messages per customer) and the inbox UI.
 model WhatsAppMessage {

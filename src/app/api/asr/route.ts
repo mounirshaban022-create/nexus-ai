@@ -107,9 +107,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // All engines exhausted — honest engine failure (NOT silence).
+    // All engines exhausted — honest engine failure (NOT silence), with an
+    // actionable fix. On keyless deployments (Vercel free tier) Chrome,
+    // Edge and Safari users are still covered: the clients fall back to
+    // the browser's own on-device speech recognition (Web Speech API).
     return NextResponse.json(
-      { error: 'Speech recognition is temporarily unavailable. Please try again shortly.' },
+      {
+        error:
+          'No speech engine is configured on this deployment. Add HF_TOKEN or GROQ_API_KEY in your hosting settings (Vercel → Settings → Environment Variables) to enable server transcription — or use Chrome/Edge, where on-device recognition takes over automatically.',
+      },
       { status: 503 }
     )
   } catch (error) {

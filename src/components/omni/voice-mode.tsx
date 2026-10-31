@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { blobToWavBase64, formatDuration } from './audio-utils'
 import { NEXUS_VOICES, EDGE_VOICES } from '@/lib/voices'
+import { speechRecognitionSupported, startDictation, type DictationHandle } from '@/lib/browser-speech'
 import { useToast } from '@/hooks/use-toast'
 
 const VOICES = NEXUS_VOICES.map((v) => ({ value: v.id, label: v.label, hint: v.language }))
@@ -263,6 +264,16 @@ function SpeechToText() {
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  /** ON-DEVICE fallback — while recording we ALSO run the browser's own
+   *  speech recognition. If the server ASR engines are unavailable (no
+   *  HF/Groq key on this deployment), the live transcript takes over. */
+  const dictationRef = useRef<DictationHandle | null>(null)
+  const liveTextRef = useRef('')
+
+  const stopDictation = () => {
+    dictationRef.current?.stop()
+    dictationRef.current = null
+  }
 
   useEffect(() => {
     return () => {
@@ -276,6 +287,17 @@ function SpeechToText() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
+      // Parallel on-device recognition (Chrome/Edge/Safari) — a free
+      // fallback for deployments without a server ASR engine.
+      liveTextRef.current = ''
+      stopDictation()
+      if (speechRecognitionSupported()) {
+        dictationRef.current = startDictation({
+          onFinal: (t) => {
+            liveTextRef.current = `${liveTextRef.current} ${t}`.trim()
+          },
+        })
+      }
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
         ? 'audio/webm'
         : MediaRecorder.isTypeSupported('audio/mp4')
@@ -303,6 +325,7 @@ function SpeechToText() {
   }, [toast])
 
   const stopRecording = useCallback(() => {
+    stopDictation()
     mediaRecorderRef.current?.stop()
     streamRef.current?.getTracks().forEach((t) => t.stop())
     if (timerRef.current) clearInterval(timerRef.current)
@@ -323,7 +346,17 @@ function SpeechToText() {
           body: JSON.stringify({ audio: base64 }),
         })
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error || 'Transcription failed.')
+        if (!res.ok) {
+          // SERVER ASR UNAVAILABLE → use the parallel on-device transcript
+          // captured during recording (Web Speech API, Chrome/Edge/Safari).
+          const live = liveTextRef.current.trim()
+          if (live) {
+            setTranscript(live)
+            toast({ title: 'Transcribed on this device', description: 'Server speech engines were unavailable — the browser\u2019s built-in recognition produced this transcript.' })
+            return
+          }
+          throw new Error(data.error || 'Transcription failed.')
+        }
         setTranscript(data.transcript || data.note || 'No speech detected.')
       } catch (error) {
         toast({

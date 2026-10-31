@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SignJWT, jwtVerify } from 'jose'
 import bcrypt from 'bcryptjs'
+import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 
 /**
@@ -12,21 +13,107 @@ const SESSION_COOKIE = 'nexus-session'
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30 // 30 days
 const ALG = 'HS256'
 
-function getSecret(): string {
-  // In production, AUTH_SECRET MUST be set. A known dev fallback would let
-  // anyone forge JWTs signed with a publicly-known secret. Fail fast.
-  if (process.env.NODE_ENV === 'production') {
-    const secret = process.env.AUTH_SECRET
-    if (!secret || secret.trim() === '') {
-      throw new Error('AUTH_SECRET environment variable is required in production')
-    }
-    return secret
-  }
-  return process.env.AUTH_SECRET || 'nexus-dev-secret-change-me'
+/**
+ * Session-signing secret resolution order:
+ *
+ *   1. AUTH_SECRET environment variable (the operator-managed secret —
+ *      always preferred, dev AND production).
+ *   2. AUTO-PROVISIONED secret stored in the AppConfig DB table.
+ *      WHY: on managed deployments (Vercel) NODE_ENV=production and a
+ *      missing AUTH_SECRET used to make getSecret() THROW — which 500'd
+ *      every auth route, so nobody could sign in at all (the #1
+ *      "sign-in doesn't work on Vercel" report). The secret must simply
+ *      be stable and unknown to outsiders: a cryptographically-random
+ *      value generated on first boot and shared by every serverless
+ *      instance through the database satisfies that. Sign-in already
+ *      requires a working database, so wherever sign-in CAN work, this
+ *      secret CAN exist.
+ *   3. Only when the DB is ALSO unreachable do we throw — with an
+ *      actionable message. We never fall back to a publicly-known
+ *      constant (that would let anyone forge session JWTs).
+ *
+ * authSecretSource() reports which path was taken ('env' | 'db' |
+ * 'missing') for /api/health — without ever exposing the secret itself.
+ */
+const AUTH_SECRET_DB_KEY = 'auth_secret'
+
+const globalForAuthSecret = globalThis as unknown as {
+  __nexusAuthSecret?: string
+  __nexusAuthSecretSource?: 'env' | 'db'
 }
 
-function getSecretKey(): Uint8Array {
-  return new TextEncoder().encode(getSecret())
+export type AuthSecretSource = 'env' | 'db' | 'missing'
+
+export function authSecretSource(): AuthSecretSource {
+  if (process.env.AUTH_SECRET?.trim()) return 'env'
+  return globalForAuthSecret.__nexusAuthSecretSource ?? 'missing'
+}
+
+/**
+ * Warms the secret resolution (provisioning the DB-stored secret when
+ * needed) WITHOUT exposing it — used by /api/health so the reported
+ * authSecret state reflects reality instead of "not touched yet".
+ */
+export async function ensureAuthSecretProvisioned(): Promise<void> {
+  try {
+    await loadSecret()
+  } catch {
+    /* health reporting only — the real error surfaces on sign-in */
+  }
+}
+
+async function loadSecret(): Promise<string> {
+  // 1. Explicit environment secret wins everywhere.
+  const envSecret = process.env.AUTH_SECRET
+  if (envSecret && envSecret.trim() !== '') {
+    return envSecret
+  }
+
+  // 2. Auto-provisioned DB secret (cached per process after first read).
+  if (globalForAuthSecret.__nexusAuthSecret) {
+    return globalForAuthSecret.__nexusAuthSecret
+  }
+
+  try {
+    const existing = await db.appConfig.findUnique({ where: { key: AUTH_SECRET_DB_KEY } })
+    if (existing?.value) {
+      globalForAuthSecret.__nexusAuthSecret = existing.value
+      globalForAuthSecret.__nexusAuthSecretSource = 'db'
+      console.warn(
+        '[auth] AUTH_SECRET not set in environment — using the auto-provisioned secret stored in the database. Set AUTH_SECRET in your deployment settings to manage it explicitly.'
+      )
+      return existing.value
+    }
+
+    // First boot: generate a 384-bit random secret. The upsert keeps the
+    // create race-safe when several serverless instances cold-start at once
+    // (first write wins; everyone re-reads the winner afterwards).
+    const generated = randomBytes(48).toString('hex')
+    await db.appConfig.upsert({
+      where: { key: AUTH_SECRET_DB_KEY },
+      update: {},
+      create: { key: AUTH_SECRET_DB_KEY, value: generated },
+    })
+    const row = await db.appConfig.findUnique({ where: { key: AUTH_SECRET_DB_KEY } })
+    const secret = row?.value ?? generated
+    globalForAuthSecret.__nexusAuthSecret = secret
+    globalForAuthSecret.__nexusAuthSecretSource = 'db'
+    console.warn(
+      '[auth] AUTH_SECRET was missing — generated a secure random secret and stored it in the database (AppConfig.auth_secret). Sessions survive across serverless instances. For explicit control set AUTH_SECRET in your deployment settings.'
+    )
+    return secret
+  } catch {
+    // 3. No env secret AND the database is unreachable — nothing safe to
+    // sign with. Fail loudly with instructions instead of a silent,
+    // forgeable fallback.
+    throw new Error(
+      'Auth secret unavailable: AUTH_SECRET is not set and the database could not be reached to auto-provision one. Set AUTH_SECRET (or fix DATABASE_URL) in your deployment settings.'
+    )
+  }
+}
+
+async function getSecretKey(): Promise<Uint8Array> {
+  return new TextEncoder().encode(await loadSecret())
 }
 
 /** Hash a plaintext password using bcrypt with 10 rounds. */
@@ -47,13 +134,13 @@ export async function signToken(payload: { userId: string }): Promise<string> {
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .setSubject(payload.userId)
-    .sign(getSecretKey())
+    .sign(await getSecretKey())
 }
 
 /** Verify a JWT session token and return the user id, or null if invalid/expired. */
 export async function verifyToken(token: string): Promise<{ userId: string } | null> {
   try {
-    const { payload } = await jwtVerify(token, getSecretKey(), {
+    const { payload } = await jwtVerify(token, await getSecretKey(), {
       algorithms: [ALG],
     })
     const userId = payload.sub || (payload as { userId?: string }).userId

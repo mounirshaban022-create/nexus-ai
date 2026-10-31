@@ -43,6 +43,14 @@ import {
   Square,
 } from 'lucide-react'
 import { io, type Socket } from 'socket.io-client'
+import {
+  browserSpeak,
+  speechRecognitionSupported,
+  speechSynthesisSupported,
+  startDictation,
+  type DictationHandle,
+  type SpeakHandle,
+} from '@/lib/browser-speech'
 import { BrandMark, BRAND } from './shared'
 
 /* ------------------------------------------------------------------ */
@@ -197,6 +205,11 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
   const [notice, setNotice] = useState('')
   const [callError, setCallError] = useState('')
   const [draft, setDraft] = useState('')
+  /** ON-DEVICE VOICE — active when the call mini-service is unreachable
+   *  (Vercel & any host without the sandbox gateway). The browser's own
+   *  Web Speech API runs recognition + synthesis; the brain is /api/chat. */
+  const [browserMode, setBrowserMode] = useState(false)
+  const [interim, setInterim] = useState('')
 
   /* --------------------------- refs (engine) ------------------------ */
   const socketRef = useRef<Socket | null>(null)
@@ -224,6 +237,12 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
   const captionIdRef = useRef(0)
   const discardRecordingRef = useRef<(() => void) | null>(null)
   const bargeInRef = useRef<((manual?: boolean) => void) | null>(null)
+  const browserModeRef = useRef(false)
+  const dictationRef = useRef<DictationHandle | null>(null)
+  const speakHandleRef = useRef<SpeakHandle | null>(null)
+  const sessionIdRef = useRef<string | undefined>(undefined)
+  const turnBusyRef = useRef(false)
+  const browserTurnRef = useRef<((text: string) => Promise<void>) | null>(null)
 
   /** Mic RMS → orb pulse (spring-smoothed; only driven while listening). */
   const levelMotion = useMotionValue(0)
@@ -540,17 +559,191 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
     }
   }, [ensureAudioCtx, startVadLoop])
 
+  /* ------------------- ON-DEVICE VOICE ENGINE ----------------------- */
+  /* When the voice-call mini-service is unreachable (Vercel and every   */
+  /* host without the sandbox gateway), the call switches to the         */
+  /* browser's built-in Web Speech API: recognition listens, /api/chat   */
+  /* thinks (the exact same engine normal chat uses), and                */
+  /* speechSynthesis speaks — no server-side voice infrastructure.       */
+
+  const pauseDictation = useCallback(() => {
+    dictationRef.current?.stop()
+    dictationRef.current = null
+    setInterim('')
+  }, [])
+
+  const startBrowserDictation = useCallback(() => {
+    if (!browserModeRef.current || mutedRef.current) return
+    if (!speechRecognitionSupported()) return
+    if (dictationRef.current) return
+    dictationRef.current = startDictation({
+      onFinal: (text) => {
+        void browserTurnRef.current?.(text)
+      },
+      onInterim: (t) => setInterim(t),
+      onError: (code) => {
+        // Hard mic/permission failures degrade to captions mode — typed
+        // input still reaches the AI and replies are still spoken.
+        if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
+          setMicAvailable('denied')
+          pauseDictation()
+        }
+      },
+    })
+  }, [pauseDictation])
+
+  const browserTurn = useCallback(
+    async (raw: string) => {
+      const text = raw.trim()
+      if (!text || turnBusyRef.current) return
+      turnBusyRef.current = true
+      pauseDictation() // turn-taking: the mic pauses while NEXUS thinks/speaks
+      pushTurn('user', text)
+      goPhase('thinking')
+
+      let reply = ''
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text.slice(0, 8000),
+            ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+          }),
+        })
+        if (!res.ok || !res.body) {
+          const data = (await res.json().catch(() => null)) as { error?: string } | null
+          throw new Error(data?.error || 'The AI could not answer — try again.')
+        }
+        // Consume the NDJSON stream (same wire format as the chat view).
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
+          for (const line of lines) {
+            const t = line.trim()
+            if (!t) continue
+            let ev: { type?: string; delta?: string; sessionId?: string; message?: string }
+            try {
+              ev = JSON.parse(t) as typeof ev
+            } catch {
+              continue
+            }
+            if (ev.type === 'assistant_delta' && typeof ev.delta === 'string') {
+              reply += ev.delta
+            } else if (ev.type === 'done' && typeof ev.sessionId === 'string') {
+              sessionIdRef.current = ev.sessionId
+            } else if (ev.type === 'error') {
+              throw new Error(ev.message || 'The AI could not answer — try again.')
+            }
+          }
+        }
+      } catch (err) {
+        setNotice(err instanceof Error ? err.message : 'The AI could not answer — try again.')
+        turnBusyRef.current = false
+        if (phaseRef.current !== 'ended') {
+          goPhase('listening')
+          startBrowserDictation()
+        }
+        return
+      }
+      turnBusyRef.current = false
+
+      // Speak the reply — strip markdown noise so it reads naturally.
+      const clean = reply
+        .replace(/```[\s\S]*?```/g, ' Code omitted. ')
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/[*_#>`]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (!clean || phaseRef.current === 'ended') {
+        if (phaseRef.current !== 'ended') {
+          goPhase('listening')
+          startBrowserDictation()
+        }
+        return
+      }
+      pushTurn('assistant', clean)
+      goPhase('speaking')
+      const { done, handle } = browserSpeak(clean, { lang: navigator.language || 'en-US' })
+      speakHandleRef.current = handle
+      await done
+      speakHandleRef.current = null
+      if (phaseRef.current === 'ended') return
+      goPhase('listening')
+      startBrowserDictation()
+    },
+    [goPhase, pauseDictation, pushTurn, startBrowserDictation]
+  )
+
+  useEffect(() => {
+    browserTurnRef.current = browserTurn
+  }, [browserTurn])
+
+  /** Switch the call to on-device voice — invoked when the call service
+   *  can't be reached (no sandbox gateway → Vercel & friends). */
+  const enterBrowserMode = useCallback(() => {
+    if (browserModeRef.current) return
+    browserModeRef.current = true
+    setBrowserMode(true)
+    // The socket path is dead on this host — stop the reconnect loop.
+    try {
+      socketRef.current?.removeAllListeners()
+      socketRef.current?.disconnect()
+    } catch {
+      /* already gone */
+    }
+    socketRef.current = null
+    // The recognizer manages the mic itself; the VAD/MediaRecorder
+    // pipeline is unnecessary here.
+    micOkRef.current = false
+    setMicAvailable(speechRecognitionSupported() ? 'ok' : 'denied')
+    // Barge-in = cancel synthesis + resume listening.
+    bargeInRef.current = () => {
+      speakHandleRef.current?.cancel()
+      speakHandleRef.current = null
+      try {
+        window.speechSynthesis?.cancel()
+      } catch {
+        /* not speaking */
+      }
+      if (phaseRef.current === 'ended') return
+      goPhase('listening')
+      startBrowserDictation()
+    }
+    if (!speechSynthesisSupported()) {
+      setNotice('This browser cannot speak aloud — replies will appear as captions only.')
+    }
+    startedAtRef.current = Date.now()
+    setSeconds(0)
+    goPhase('listening')
+    startBrowserDictation()
+  }, [goPhase, startBrowserDictation])
+
   /* --------------------------- call actions ------------------------- */
 
   const endCall = useCallback(() => {
     socketRef.current?.emit('call:end')
+    pauseDictation()
+    speakHandleRef.current?.cancel()
+    speakHandleRef.current = null
+    try {
+      window.speechSynthesis?.cancel()
+    } catch {
+      /* not speaking */
+    }
     stopPlayback()
     teardownMic()
     setFinalDuration(
       startedAtRef.current ? Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)) : 0
     )
     goPhase('ended')
-  }, [goPhase, stopPlayback, teardownMic])
+  }, [goPhase, pauseDictation, stopPlayback, teardownMic])
 
   const callAgain = useCallback(() => {
     setCaptions([])
@@ -563,24 +756,53 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
     startedAtRef.current = 0
     queueRef.current = []
     goPhase('connecting')
+    if (browserModeRef.current) {
+      // On-device voice — no call service to dial, just resume listening.
+      startedAtRef.current = Date.now()
+      setSeconds(0)
+      goPhase('listening')
+      startBrowserDictation()
+      return
+    }
     // If the socket happens to be down, the 'connect' handler re-emits this.
     socketRef.current?.emit('call:start', { voice: CALL_VOICE })
     void startMic()
-  }, [goPhase, startMic])
+  }, [goPhase, startBrowserDictation, startMic])
 
   const toggleMute = useCallback(() => {
     const next = !mutedRef.current
     mutedRef.current = next
     setMuted(next)
+    if (browserModeRef.current) {
+      if (next) {
+        pauseDictation()
+        speakHandleRef.current?.cancel()
+        speakHandleRef.current = null
+        try {
+          window.speechSynthesis?.cancel()
+        } catch {
+          /* not speaking */
+        }
+      } else {
+        startBrowserDictation()
+      }
+      return
+    }
     if (next) discardRecordingRef.current?.() // drop any half-recorded segment
-  }, [])
+  }, [pauseDictation, startBrowserDictation])
 
-  /** Typed fallback (`call:text`) — captions-only mode when the mic is gone. */
+  /** Typed fallback (`call:text`) — captions-only mode when the mic is gone.
+   *  In on-device (browser) mode the same input runs over plain HTTP. */
   const sendText = useCallback(
     (raw: string) => {
       const text = raw.trim()
+      if (!text) return
+      if (browserModeRef.current) {
+        void browserTurnRef.current?.(text)
+        return
+      }
       const socket = socketRef.current
-      if (!text || !socket || !socket.connected) return
+      if (!socket || !socket.connected) return
       pushTurn('user', text)
       goPhase('thinking')
       socket.emit('call:text', { text: text.slice(0, 2000) })
@@ -600,7 +822,21 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
     })
     socketRef.current = socket
 
+    // BROWSER-MODE WATCHDOG: on hosts without the voice mini-service
+    // (Vercel — any plain Node host) the socket never connects and the
+    // call would hang on "Connecting…" forever. After a short grace
+    // period the call switches to the browser's own Web Speech engine
+    // over plain HTTP, which works everywhere with zero configuration.
+    const fallbackTimer = window.setTimeout(() => {
+      if (!socket.connected && !browserModeRef.current) enterBrowserMode()
+    }, 4500)
+
     socket.on('connect', () => {
+      window.clearTimeout(fallbackTimer)
+      if (browserModeRef.current) {
+        socket.disconnect() // on-device voice owns this call now
+        return
+      }
       setConnected(true)
       socket.emit('call:start', { voice: CALL_VOICE })
     })
@@ -652,19 +888,29 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
       if (phaseRef.current !== 'ended') goPhase('listening')
     })
 
-    void startMic()
+    if (!browserModeRef.current) void startMic()
 
     return () => {
+      window.clearTimeout(fallbackTimer)
       socket.removeAllListeners()
       socket.disconnect()
       socketRef.current = null
+      dictationRef.current?.stop()
+      dictationRef.current = null
+      speakHandleRef.current?.cancel()
+      speakHandleRef.current = null
+      try {
+        window.speechSynthesis?.cancel()
+      } catch {
+        /* not speaking */
+      }
       stopPlayback()
       teardownMic()
       const ctx = audioCtxRef.current
       audioCtxRef.current = null
       if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => {})
     }
-  }, [goPhase, pumpQueue, pushTurn, startMic, stopPlayback, teardownMic])
+  }, [enterBrowserMode, goPhase, pumpQueue, pushTurn, startMic, stopPlayback, teardownMic])
 
   /* --------------------------- call timer --------------------------- */
 
@@ -682,7 +928,7 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
   const statusText =
     phase === 'connecting'
       ? 'Connecting…'
-      : !connected
+      : !connected && !browserMode
         ? 'Reconnecting…'
         : phase === 'listening'
           ? muted
@@ -735,7 +981,13 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!connected && phase !== 'ended' && (
+          {browserMode && phase !== 'ended' && (
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[11px] text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              On-device voice
+            </span>
+          )}
+          {!browserMode && !connected && phase !== 'ended' && (
             <span className="flex items-center gap-1.5 rounded-full border border-[#f5a623]/30 bg-[#f5a623]/10 px-3 py-1 text-[11px] text-[#f5a623]">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#f5a623]" />
               Reconnecting…
@@ -820,6 +1072,9 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
             <Loader2 className="h-4 w-4 animate-spin text-white/50" aria-hidden />
           )}
           <p className="text-sm font-medium text-white/70">{statusText}</p>
+          {browserMode && interim && phase === 'listening' && micAvailable !== 'denied' && (
+            <p className="max-w-xs truncate text-center text-xs text-white/45">“{interim}”</p>
+          )}
           {notice && phase !== 'ended' && (
             <p className="max-w-xs text-center text-xs text-[#f5a623]">{notice}</p>
           )}
@@ -884,7 +1139,7 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
           />
           <button
             type="submit"
-            disabled={!draft.trim() || !connected}
+            disabled={!draft.trim() || (!browserMode && !connected)}
             aria-label="Send message"
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white transition-opacity disabled:opacity-40"
             style={{ background: BRAND.gradient }}

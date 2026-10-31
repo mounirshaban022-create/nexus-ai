@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
+import { browserSpeak, speechSynthesisSupported, type SpeakHandle } from '@/lib/browser-speech'
 import type { AgentAssignEvent, AgentMeta, SkillRunEvent } from './shared'
 import { BrandMark, DIVISION_MAP, tint, toolLabel, toolVisual } from './shared'
 
@@ -1015,9 +1016,20 @@ function TtsAttachment({ text }: { text: string }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
+  /** On-device playback state — used when the server TTS engine can't
+   *  serve audio (e.g. hosts without a voice engine — Vercel free tier).
+   *  The browser's built-in synthesizer reads the text instead. */
+  const [devicePlaying, setDevicePlaying] = useState(false)
+  const speakHandleRef = useRef<SpeakHandle | null>(null)
+
+  const stopDevicePlayback = () => {
+    speakHandleRef.current?.cancel()
+    speakHandleRef.current = null
+    setDevicePlaying(false)
+  }
 
   const synthesize = async () => {
-    if (loading || audioUrl) return
+    if (loading || audioUrl || devicePlaying) return
     setLoading(true)
     setErr('')
     try {
@@ -1030,6 +1042,18 @@ function TtsAttachment({ text }: { text: string }) {
       const blob = await res.blob()
       setAudioUrl(URL.createObjectURL(blob))
     } catch {
+      // SERVER TTS UNAVAILABLE → fall back to the browser's own voice.
+      // Works on every host with zero configuration (Web Speech API).
+      if (speechSynthesisSupported()) {
+        setLoading(false)
+        setDevicePlaying(true)
+        const { done, handle } = browserSpeak(text, { onStart: () => undefined })
+        speakHandleRef.current = handle
+        await done
+        speakHandleRef.current = null
+        setDevicePlaying(false)
+        return
+      }
       setErr('Could not synthesize — try again.')
     } finally {
       setLoading(false)
@@ -1039,6 +1063,12 @@ function TtsAttachment({ text }: { text: string }) {
   useEffect(() => {
     return () => {
       if (audioUrl) URL.revokeObjectURL(audioUrl)
+      speakHandleRef.current?.cancel()
+      try {
+        window.speechSynthesis?.cancel()
+      } catch {
+        /* not speaking */
+      }
     }
   }, [audioUrl])
 
@@ -1047,13 +1077,15 @@ function TtsAttachment({ text }: { text: string }) {
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={synthesize}
+          onClick={devicePlaying ? stopDevicePlayback : synthesize}
           disabled={loading || Boolean(audioUrl)}
           className="nx-gradient-surface grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition hover:brightness-110 disabled:opacity-70"
-          aria-label="Play speech"
+          aria-label={devicePlaying ? 'Stop speech' : 'Play speech'}
         >
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : devicePlaying ? (
+            <X className="h-4 w-4" aria-hidden />
           ) : (
             <Play className="h-4 w-4" aria-hidden />
           )}
@@ -1061,7 +1093,7 @@ function TtsAttachment({ text }: { text: string }) {
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
             <Volume2 className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-[#ff8a8d]" aria-hidden />
-            Neural speech
+            {devicePlaying ? 'Playing on this device' : 'Neural speech'}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{text}</p>
         </div>
