@@ -30,6 +30,7 @@ import { SkillsMode } from '@/components/omni/skills-mode'
 import { PhotoStudioMode } from '@/components/omni/photo-studio-mode'
 import { VideoIntelMode } from '@/components/omni/video-intel-mode'
 import { VoiceCallMode } from '@/components/nexus/voice-call'
+import { KnowledgeMode } from '@/components/nexus/knowledge-mode'
 import { translate } from '@/lib/i18n'
 
 export default function Page() {
@@ -275,6 +276,19 @@ export default function Page() {
           >
             <div className="dark flex h-full min-h-0 flex-1 flex-col">
               <VoiceCallMode onExit={() => setView({ type: 'chat' })} />
+            </div>
+          </FramedPanel>
+        )}
+
+        {view.type === 'knowledge' && (
+          <FramedPanel
+            fill
+            dark
+            title="Knowledge Base"
+            description="Upload your documents and chat with them — grounded answers with numbered citations you can verify."
+          >
+            <div className="dark flex h-full min-h-0 flex-1 flex-col">
+              <KnowledgeMode />
             </div>
           </FramedPanel>
         )}

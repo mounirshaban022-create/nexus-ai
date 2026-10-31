@@ -70,6 +70,41 @@ model GeneratedImage {
   createdAt DateTime @default(now())
 }
 
+/* ------------------------------------------------------------------ */
+/* KNOWLEDGE BASE — RAG chat with your documents                       */
+/*                                                                     */
+/* Modeled on the most-starred open-source AI apps (AnythingLLM,       */
+/* Open WebUI): upload documents → chunk → retrieve → answer with      */
+/* inline citations. Chunks live in SQLite; retrieval uses a BM25-     */
+/* style term-overlap scorer so no external vector DB is required.     */
+/* ------------------------------------------------------------------ */
+model KnowledgeDoc {
+  id        String   @id @default(cuid())
+  // null = guest upload (sandbox-friendly); non-null = owned by user
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename  String
+  title     String
+  format    String   @default("txt") // pdf | docx | txt | md | csv
+  size      Int      @default(0)     // bytes of the source file
+  chunkCount Int     @default(0)
+  status    String   @default("ready") // parsing | ready | error
+  error     String?
+  createdAt DateTime @default(now())
+  chunks    KnowledgeChunk[]
+
+  @@index([userId, createdAt])
+}
+
+model KnowledgeChunk {
+  id      String       @id @default(cuid())
+  docId   String
+  doc     KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  idx     Int          // position of the chunk inside its document
+  content String       // chunk text (≤ ~1400 chars)
+  @@index([docId, idx])
+}
+
 model GeneratedVideo {
   id        String   @id @default(cuid())
   prompt    String
@@ -134,6 +169,7 @@ model User {
   emailAccounts EmailAccount[]  // SECURITY: private connected email accounts
   aiProviders   AiProvider[]   // SECURITY: private connected AI provider keys
   whatsappAccounts WhatsAppAccount[] // SECURITY: private WhatsApp connections
+  knowledgeDocs KnowledgeDoc[]  // KNOWLEDGE BASE: private RAG document library
 }
 
 model EmailAccount {

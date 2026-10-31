@@ -23,8 +23,19 @@ A full-stack AI super app — 13 abilities, 27 live connectors, a real code sand
 
 | | |
 |---|---|
-| 📞 **AI Voice Call** — a true real-time phone call with NEXUS: socket.io streaming pipeline (ASR → LLM → TTS), animated call screen with timer, mute & barge-in interruption, live captions, and a captions-mode fallback when the mic is unavailable. | 🪄 **AI Photo Studio** — edit any photo with a sentence (remove background, restore & colorize old photos, cinematic grade, headshots…) powered by the free built-in image-edit engine, plus **Stock Photos** search across the open web (Z.ai engine with an Openverse fallback — always source-attributed). |
-| 🎬 **Video Intelligence** — upload or link a video and NEXUS *watches* it: scene-by-scene breakdown, objects & people, on-screen text, mood & pacing — then answers your follow-up questions with timestamps. | ⚡ **Z.ai gateway re-enabled (Vercel-safe)** — the millisecond sandbox engine is back via config-file detection: zero network attempts on Vercel (premium engines take over), full multimodal power (chat, TTS, ASR, vision, image edit/search) in the sandbox. |
+| 📚 **Knowledge Base (RAG)** — chat with your documents, AnythingLLM/Open WebUI style: upload PDF, DOCX, TXT, MD or CSV → sentence-aware chunking with overlap → BM25-style retrieval → grounded answers with numbered citation chips that map back to the source file and chunk. Private per-user libraries, zero external vector DB. | 📞 **AI Voice Call** — a true real-time phone call with NEXUS: socket.io streaming pipeline (ASR → LLM → TTS), animated call screen with timer, mute & barge-in interruption, live captions, and a captions-mode fallback when the mic is unavailable. |
+| 🪄 **AI Photo Studio** — edit any photo with a sentence (remove background, restore & colorize old photos, cinematic grade, headshots…) powered by the free built-in image-edit engine, plus **Stock Photos** search across the open web (Z.ai engine with an Openverse fallback — always source-attributed). | 🎬 **Video Intelligence** — upload or link a video and NEXUS *watches* it: scene-by-scene breakdown, objects & people, on-screen text, mood & pacing — then answers your follow-up questions with timestamps. |
+
+### 📚 Knowledge Base — powered by the open-source RAG pattern
+
+The new **Knowledge** view implements the signature capability of the most-starred
+open-source AI apps (AnythingLLM ⭐45k, Open WebUI ⭐100k, LibreChat ⭐30k):
+
+1. **Upload** — drag & drop PDF / DOCX / TXT / MD / CSV (10MB max) or paste raw text
+2. **Chunk** — sentence-aware splitting (~900 chars, 140-char overlap) so ideas are never cut mid-thought
+3. **Retrieve** — dependency-free BM25-style scoring (idf + length normalization) over your chunks
+4. **Answer** — the LLM must answer ONLY from retrieved passages, with `[n]` citation chips you can click to expand the exact source snippet
+5. **Persist** — documents and chunks live in SQLite (`KnowledgeDoc` / `KnowledgeChunk`), scoped privately per user account
 
 ## 🔌 27 Live Connectors
 

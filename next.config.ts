@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Allow the sandbox preview host to load Next.js dev resources (fonts, HMR).
+  allowedDevOrigins: ["space-z.ai"],
   experimental: {
     serverActions: {
       bodySizeLimit: "40mb",

@@ -48,6 +48,7 @@ export type View =
   | { type: 'photo-studio' }
   | { type: 'video-intel' }
   | { type: 'call' }
+  | { type: 'knowledge' }
 
 /* ------------------------------------------------------------------ */
 /* Catalog (static import — instant client-side search over 255)       */

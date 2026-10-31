@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Clapperboard,
+  Library,
   LogOut,
   Menu,
   MessageCircle,
@@ -389,6 +390,13 @@ function SidebarContent({
             active={view.type === 'video-intel'}
             onClick={() => go({ type: 'video-intel' })}
             iconClassName="text-violet-500 dark:text-violet-400"
+          />
+          <NavItem
+            icon={Library}
+            label="Knowledge"
+            active={view.type === 'knowledge'}
+            onClick={() => go({ type: 'knowledge' })}
+            iconClassName="text-emerald-500 dark:text-emerald-400"
           />
           <NavItem
             icon={Puzzle}
