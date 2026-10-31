@@ -1,19 +1,19 @@
 'use client'
 
 /**
- * NEXUS Official Site v2 — content sections.
+ * NEXUS Official Site v3 — content sections.
  *
- * Design language: award-tier 2025 — rotated dual marquees, spotlight
- * bento grid, GSAP-pinned horizontal division gallery, sticky stacking
- * workflow cards, clip-path parallax showcase, serif-italic editorial
- * headings, outline type and a giant cropped footer wordmark.
- * Libraries: Framer Motion (28k★), GSAP ScrollTrigger (20k★),
- * Lucide icons — all open source.
+ * Design language: 2025 award-tier dark editorial — star-powered OSS
+ * marquees, spotlight bento grid, snap-scroll agency gallery, CSS-sticky
+ * stacking workflow deck, parallax showcase gallery, triple vertical
+ * testimonial marquees, and a giant cropped footer wordmark.
+ *
+ * Reliability rule: zero GSAP pinning/spacers (that is what created the
+ * black-void bug in v2). Scroll choreography = CSS sticky/masks/keyframes
+ * + Framer Motion whileInView only.
  */
 
-import {
-  motion,
-} from 'framer-motion'
+import Image from 'next/image'
 import {
   Accordion,
   AccordionContent,
@@ -22,7 +22,9 @@ import {
 } from '@/components/ui/accordion'
 import {
   ArrowRight,
+  ArrowUpRight,
   Bell,
+  Bot,
   Braces,
   Clapperboard,
   Code2,
@@ -39,10 +41,8 @@ import {
   Megaphone,
   MessageSquare,
   Mic,
-  MousePointerClick,
   PenTool,
   Quote,
-  Search,
   ShieldCheck,
   Sparkles,
   Star,
@@ -58,35 +58,53 @@ import {
 } from 'lucide-react'
 import { AGENCY_DIVISIONS, AGENCY_STATS, BrandLockup, TOOL_META } from '@/components/nexus/shared'
 import { Reveal, SectionHeading, SpotlightCard, Waveform } from './fx'
-import { HorizontalScroll, ParallaxFigure } from './gsap-fx'
 import { cn } from '@/lib/utils'
 
 /* ------------------------------------------------------------------ */
-/* OSS marquee v2 — rotated dual rows, opposite directions             */
+/* Open-source stack — the star-count marquee                          */
 /* ------------------------------------------------------------------ */
 
-const ROW_ONE = [
-  'Next.js', 'React 19', 'TypeScript', 'Tailwind CSS 4', 'shadcn/ui', 'Radix UI',
-  'Three.js', 'GSAP', 'Framer Motion', 'Lenis', 'Prisma', 'socket.io',
-]
-const ROW_TWO = [
-  '255 Agents', 'RAG Citations', 'Voice Calls', 'Code Sandbox', 'Live Browser',
-  'WhatsApp', 'Photo Studio', 'Video Intelligence', 'Knowledge Base', 'Email',
-  'Word · Excel · PowerPoint', 'Web Search',
+const OSS_STARS: Array<{ name: string; stars: string }> = [
+  { name: 'React', stars: '230k' },
+  { name: 'Next.js', stars: '128k' },
+  { name: 'Three.js', stars: '105k' },
+  { name: 'TypeScript', stars: '102k' },
+  { name: 'Tailwind CSS', stars: '88k' },
+  { name: 'shadcn/ui', stars: '80k' },
+  { name: 'Prisma', stars: '42k' },
+  { name: 'Framer Motion', stars: '29k' },
+  { name: 'GSAP', stars: '20k' },
+  { name: 'Radix UI', stars: '17k' },
+  { name: 'Lucide', stars: '12k' },
+  { name: 'Lenis', stars: '10k' },
 ]
 
-function MarqueeRow({ items, reverse = false }: { items: string[]; reverse?: boolean }) {
+const CAPABILITY_CHIPS = [
+  '255 Agents', 'RAG Citations', 'Voice Calls', 'Code Sandbox', 'Live Browser',
+  'WhatsApp', 'Photo Studio', 'Video Intelligence', 'Knowledge Base', 'Email',
+  'Word · Excel · PPT', 'Web Search',
+]
+
+function OssRow({ items, reverse = false }: { items: Array<{ name: string; stars?: string }>; reverse?: boolean }) {
   const row = [...items, ...items]
   return (
-    <div className="marquee-mask marquee-paused overflow-hidden py-3">
-      <div className={cn('flex w-max items-center gap-8 pr-8', reverse ? 'site-marquee-reverse' : 'site-marquee')}>
+    <div className="marquee-paused site-x-fade overflow-hidden py-2">
+      <div className={cn('flex w-max gap-3', reverse ? 'site-marquee-reverse' : 'site-marquee')}>
         {row.map((item, i) => (
-          <span key={`${item}-${i}`} className="flex items-center gap-8 whitespace-nowrap">
-            <span className="font-display text-sm font-semibold text-muted-foreground/85">{item}</span>
-            <Star
-              className="h-3 w-3 fill-[#ff5a5f]/50 text-[#ff5a5f]/50"
-              aria-hidden
-            />
+          <span
+            key={`${item.name}-${i}`}
+            className="flex shrink-0 items-center gap-2 rounded-full border border-border/70 bg-background/40 px-4 py-2 text-[13px] font-medium text-muted-foreground backdrop-blur"
+          >
+            <Github className="h-3.5 w-3.5" aria-hidden />
+            {item.name}
+            {item.stars ? (
+              <span className="flex items-center gap-0.5 text-xs">
+                <Star className="h-3 w-3 fill-[#f5a623] text-[#f5a623]" aria-hidden />
+                <span className="nx-gradient-text font-mono font-semibold">{item.stars}</span>
+              </span>
+            ) : (
+              <Sparkles className="h-3 w-3 text-[#ff5a5f]" aria-hidden />
+            )}
           </span>
         ))}
       </div>
@@ -94,102 +112,215 @@ function MarqueeRow({ items, reverse = false }: { items: string[]; reverse?: boo
   )
 }
 
-export function OssMarquee() {
+export function OssStack() {
   return (
-    <section
-      aria-label="Open-source technologies powering NEXUS"
-      className="relative -rotate-[1.1deg] scale-[1.02] border-y border-border/60 bg-muted/30 py-4"
-    >
-      <MarqueeRow items={ROW_ONE} />
-      <div className="mx-auto max-w-6xl border-t border-dashed border-border/40" />
-      <MarqueeRow items={ROW_TWO} reverse />
+    <section id="open-source" aria-labelledby="oss-title" className="relative scroll-mt-24 py-14 sm:py-16">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
+        <Reveal className="mb-8 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground/70">
+            Built in the open
+          </p>
+          <h2 id="oss-title" className="font-display mt-2 text-xl font-semibold tracking-tight text-foreground/90 sm:text-2xl">
+            Standing on the most-starred projects on GitHub
+          </h2>
+        </Reveal>
+      </div>
+      <Reveal delay={0.1} className="space-y-1">
+        <OssRow items={OSS_STARS} />
+        <OssRow items={CAPABILITY_CHIPS.map((name) => ({ name }))} reverse />
+      </Reveal>
     </section>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* Superpowers — spotlight bento grid                                  */
+/* Features — spotlight bento grid                                     */
 /* ------------------------------------------------------------------ */
 
-const SMALL_FEATURES = [
-  { icon: ImageIcon, title: 'Images by sentence', desc: 'Generate, restyle and retouch photos inline — logos to portraits.', tint: 'rgba(245,166,35,0.12)', color: '#f5a623' },
-  { icon: Clapperboard, title: 'AI video', desc: 'Multi-scene clips with narration, captions and analysis.', tint: 'rgba(255,42,104,0.12)', color: '#ff2a68' },
-  { icon: FileText, title: 'Documents, done', desc: 'Word, Excel, PowerPoint and PDF — built and exported for you.', tint: 'rgba(245,166,35,0.12)', color: '#f5a623' },
-  { icon: Braces, title: 'Code & terminal', desc: 'Runs real code and shell commands in a live sandbox.', tint: 'rgba(255,90,95,0.12)', color: '#ff5a5f' },
-  { icon: MousePointerClick, title: 'Real browser', desc: 'Opens, clicks, fills and reads live web pages like an intern.', tint: 'rgba(217,70,239,0.10)', color: '#d946ef' },
-  { icon: Mail, title: 'Email & WhatsApp', desc: 'Drafts and actually sends messages through your accounts.', tint: 'rgba(255,90,95,0.12)', color: '#ff5a5f' },
-  { icon: Search, title: 'Cited web search', desc: 'Fresh answers with sources you can open and verify.', tint: 'rgba(245,166,35,0.12)', color: '#f5a623' },
-  { icon: Globe, title: 'Knowledge Base', desc: 'Upload docs, get grounded answers with numbered citations.', tint: 'rgba(217,70,239,0.10)', color: '#d946ef' },
+const AGENT_CHIPS = [
+  { name: 'Imagery Agent', dot: '#f5a623' },
+  { name: 'Code Agent', dot: '#a78bfa' },
+  { name: 'Docs Agent', dot: '#34d399' },
+  { name: 'Web Agent', dot: '#22d3ee' },
+  { name: 'Voice Agent', dot: '#ff5a5f' },
+  { name: 'Mail Agent', dot: '#fb7185' },
 ]
+
+function AgentsVisual() {
+  return (
+    <div className="mt-6 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      {AGENT_CHIPS.map((chip, i) => (
+        <div
+          key={chip.name}
+          className="site-chip-pulse flex items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 py-2.5 text-xs font-medium text-foreground/85 backdrop-blur"
+          style={{ animationDelay: `${i * 0.45}s` }}
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: chip.dot }} aria-hidden />
+          <span className="truncate">{chip.name}</span>
+          <Bot className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export function Features() {
   return (
-    <section id="features" className="relative scroll-mt-24" aria-labelledby="features-title">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+    <section id="features" aria-labelledby="features-title" className="relative scroll-mt-24 py-20 sm:py-28">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
         <SectionHeading
           id="features-title"
           kicker="Superpowers"
-          title={<>Everything, in <span className="font-serif-accent nx-gradient-text font-normal">one chat.</span></>}
-          sub="No add-ons, no plugins, no mode-switching. Every power is native to the conversation — and the right specialist picks itself."
+          title={
+            <>
+              One conversation. <span className="font-serif-accent nx-gradient-text font-normal italic">Every</span> superpower.
+            </>
+          }
+          sub="Not a chatbot with plugins — a coordinated agency. The right specialist silently takes over the moment your request needs it."
         />
 
-        <div className="mt-14 grid grid-cols-1 gap-4 md:grid-cols-3">
-          {/* Bento large 1 — agents */}
-          <Reveal className="md:col-span-2">
-            <SpotlightCard className="overflow-hidden p-6 sm:p-8">
-              <div className="flex h-full flex-col justify-between gap-6 sm:flex-row sm:items-center">
-                <div className="max-w-sm">
-                  <span className="mb-4 grid h-12 w-12 place-items-center rounded-xl" style={{ backgroundColor: 'rgba(255,90,95,0.12)', color: '#ff5a5f' }}>
-                    <MessageSquare className="h-5 w-5" />
-                  </span>
-                  <h3 className="font-display text-xl font-bold">{AGENCY_STATS.agents} specialists. Zero switching.</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    Ask once. NEXUS routes your request across {AGENCY_STATS.divisions} divisions — design, code, data, writing, ops — and the right expert silently takes over, then hands the thread back.
-                  </p>
-                </div>
-                {/* Mini agent chips animation */}
-                <div className="grid shrink-0 grid-cols-3 gap-2" aria-hidden>
-                  {['🎨', '🧑‍💻', '📊', '✍️', '🎧', '📚'].map((e, i) => (
-                    <motion.span
-                      key={e}
-                      className="grid h-11 w-11 place-items-center rounded-xl border border-border/70 bg-background/60 text-lg"
-                      animate={{ scale: [1, 1.12, 1], borderColor: ['rgba(255,255,255,0.08)', 'rgba(255,90,95,0.45)', 'rgba(255,255,255,0.08)'] }}
-                      transition={{ duration: 2.4, repeat: Infinity, delay: i * 0.35, ease: 'easeInOut' }}
-                    >
-                      {e}
-                    </motion.span>
-                  ))}
+        <div className="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+          {/* Big cell — the agency */}
+          <Reveal className="sm:col-span-2 lg:col-span-4 lg:row-span-2">
+            <SpotlightCard className="flex h-full flex-col p-6 sm:p-8">
+              <span aria-hidden className="mb-5 grid h-11 w-11 place-items-center rounded-xl bg-[#ff5a5f]/12 text-[#ff5a5f]">
+                <Bot className="h-5 w-5" />
+              </span>
+              <h3 className="font-display text-xl font-semibold tracking-tight sm:text-2xl">
+                255 specialists. One mind.
+              </h3>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+                Ask once. NEXUS routes your request to marketing, imagery, code, docs or any of
+                255 domain agents — mid-conversation, invisibly, with full context.
+              </p>
+              <div className="mt-auto">
+                <AgentsVisual />
+              </div>
+            </SpotlightCard>
+          </Reveal>
+
+          {/* Voice */}
+          <Reveal delay={0.06} className="lg:col-span-2">
+            <SpotlightCard className="flex h-full flex-col p-6">
+              <span aria-hidden className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-[#ff8a4c]/12 text-[#ff8a4c]">
+                <Mic className="h-4.5 w-4.5" />
+              </span>
+              <h3 className="text-sm font-semibold">Real-time voice</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Full-duplex calls with instant speech. Interrupt it mid-sentence — it listens.
+              </p>
+              <Waveform className="mt-auto pt-4" bars={20} />
+            </SpotlightCard>
+          </Reveal>
+
+          {/* Vision */}
+          <Reveal delay={0.1} className="lg:col-span-2">
+            <SpotlightCard className="flex h-full flex-col p-6">
+              <div className="relative mb-4 h-32 overflow-hidden rounded-xl border border-border/60">
+                <Image
+                  src="/site/vision-studio.png"
+                  alt="Editorial portrait generated and retouched by the NEXUS Photo Studio"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 320px"
+                  className="object-cover transition duration-700 hover:scale-105"
+                />
+                <span className="absolute bottom-2 left-2 rounded-full border border-white/10 bg-black/55 px-2.5 py-1 text-[10px] font-semibold text-white/90 backdrop-blur">
+                  “Restyle this — studio light.”
+                </span>
+              </div>
+              <h3 className="text-sm font-semibold">Photo & video intelligence</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Edit photos with a sentence. NEXUS watches video and answers questions about it.
+              </p>
+            </SpotlightCard>
+          </Reveal>
+
+          {/* Documents */}
+          <Reveal delay={0.06} className="lg:col-span-2">
+            <SpotlightCard className="flex h-full flex-col p-6">
+              <span aria-hidden className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-[#34d399]/12 text-[#34d399]">
+                <FileText className="h-4.5 w-4.5" />
+              </span>
+              <h3 className="text-sm font-semibold">Documents with citations</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Upload PDFs, Word or Excel — answers arrive grounded in your files, chip by chip.
+              </p>
+              <div className="mt-auto pt-4">
+                <div className="rounded-xl border border-border/70 bg-background/50 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                  “Revenue grew 18% QoQ
+                  <button type="button" className="nx-gradient-surface mx-0.5 inline-grid h-4 w-4 place-items-center rounded align-middle text-[9px] font-bold text-white">1</button>
+                  , driven by enterprise renewals
+                  <button type="button" className="nx-gradient-surface mx-0.5 inline-grid h-4 w-4 place-items-center rounded align-middle text-[9px] font-bold text-white">2</button>
+                  .”
                 </div>
               </div>
             </SpotlightCard>
           </Reveal>
 
-          {/* Bento large 2 — voice */}
-          <Reveal delay={0.08} className="md:col-span-1">
-            <SpotlightCard className="overflow-hidden p-6 sm:p-8">
-              <span className="mb-4 grid h-12 w-12 place-items-center rounded-xl" style={{ backgroundColor: 'rgba(255,42,104,0.12)', color: '#ff2a68' }}>
-                <Mic className="h-5 w-5" />
+          {/* Code */}
+          <Reveal delay={0.1} className="lg:col-span-2">
+            <SpotlightCard className="flex h-full flex-col p-6">
+              <span aria-hidden className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-[#a78bfa]/12 text-[#a78bfa]">
+                <Braces className="h-4.5 w-4.5" />
               </span>
-              <h3 className="font-display text-xl font-bold">Voice that talks back</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                Real-time calls with instant speech and transcription — this very site greets you out loud.
+              <h3 className="text-sm font-semibold">Code that ships</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Refactors, reviews and runnable sandboxes — with the terminal to prove it.
               </p>
-              <Waveform className="mt-6" bars={18} />
+              <div className="site-terminal mt-auto pt-4">
+                <div className="flex gap-1.5 pb-2.5">
+                  <span className="h-2 w-2 rounded-full bg-[#ff5f57]" aria-hidden />
+                  <span className="h-2 w-2 rounded-full bg-[#febc2e]" aria-hidden />
+                  <span className="h-2 w-2 rounded-full bg-[#28c840]" aria-hidden />
+                </div>
+                <p className="font-mono text-[11px] leading-relaxed text-emerald-300/90">
+                  <span className="text-muted-foreground">$</span> nexus refactor auth.ts
+                  <br />
+                  <span className="text-muted-foreground">✓ 12 files updated · tests passing</span>
+                  <span className="site-caret ml-1 inline-block h-3 w-[7px] translate-y-[2px] bg-[#ff5a5f]" aria-hidden />
+                </p>
+              </div>
             </SpotlightCard>
           </Reveal>
 
-          {/* Small cards */}
-          {SMALL_FEATURES.map((f, i) => (
-            <Reveal key={f.title} delay={0.04 * (i % 3)}>
-              <SpotlightCard className="p-5">
-                <span aria-hidden className="mb-4 grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: f.tint, color: f.color }}>
-                  <f.icon className="h-5 w-5" />
+          {/* Live web */}
+          <Reveal delay={0.06} className="sm:col-span-2 lg:col-span-3">
+            <SpotlightCard className="flex h-full flex-col p-6 sm:flex-row sm:items-center sm:gap-6">
+              <span aria-hidden className="mb-4 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#22d3ee]/12 text-[#22d3ee] sm:mb-0">
+                <Globe className="h-4.5 w-4.5" />
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold">The live web, on tap</h3>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                  Searches, opens and reads real pages — then answers with today&apos;s facts, not training-data guesses.
+                </p>
+              </div>
+              <div className="mt-4 hidden shrink-0 items-center gap-2 rounded-full border border-border/70 bg-background/50 px-3.5 py-2 text-[11px] text-muted-foreground sm:ml-auto sm:mt-0 sm:flex">
+                <ShieldCheck className="h-3.5 w-3.5 text-[#22d3ee]" aria-hidden />
+                source-linked
+              </div>
+            </SpotlightCard>
+          </Reveal>
+
+          {/* Messaging */}
+          <Reveal delay={0.1} className="sm:col-span-2 lg:col-span-3">
+            <SpotlightCard className="flex h-full flex-col p-6 sm:flex-row sm:items-center sm:gap-6">
+              <div className="flex shrink-0 items-center gap-2">
+                <span aria-hidden className="grid h-10 w-10 place-items-center rounded-xl bg-[#34d399]/12 text-[#34d399]">
+                  <MessageSquare className="h-4.5 w-4.5" />
                 </span>
-                <h3 className="text-sm font-semibold text-foreground">{f.title}</h3>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground/85">{f.desc}</p>
-              </SpotlightCard>
-            </Reveal>
-          ))}
+                <span aria-hidden className="grid h-10 w-10 place-items-center rounded-xl bg-[#fb7185]/12 text-[#fb7185]">
+                  <Mail className="h-4.5 w-4.5" />
+                </span>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">WhatsApp & email, native</h3>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                  Your AI answers customers on WhatsApp and drafts, sends and triages email — from the same conversation.
+                </p>
+              </div>
+            </SpotlightCard>
+          </Reveal>
         </div>
       </div>
     </section>
@@ -197,7 +328,7 @@ export function Features() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Divisions — GSAP-pinned horizontal gallery (17 divisions)           */
+/* Divisions — snap-scroll gallery (CSS scroll-snap, no pinning)       */
 /* ------------------------------------------------------------------ */
 
 const DIVISION_ICONS: Record<string, LucideIcon> = {
@@ -222,163 +353,148 @@ const DIVISION_ICONS: Record<string, LucideIcon> = {
 
 export function Divisions({ onLaunch }: { onLaunch: () => void }) {
   return (
-    <HorizontalScroll
-      id="divisions"
-      kicker="The agency"
-      title={<>Seventeen divisions. <span className="font-serif-accent nx-gradient-text font-normal">One mind.</span></>}
-    >
-      {AGENCY_DIVISIONS.map((d, i) => {
-        const Icon = DIVISION_ICONS[d.icon] ?? Sparkles
-        return (
-          <article
-            key={d.id}
-            className="nx-glow-card relative flex w-[268px] shrink-0 select-none flex-col justify-between overflow-hidden rounded-3xl p-6 sm:w-[320px] sm:p-7"
-          >
-            {/* Division-colored glow */}
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full blur-3xl"
-              style={{ backgroundColor: `${d.color}26` }}
-            />
-            <div className="relative">
-              <div className="flex items-start justify-between">
-                <span
-                  className="grid h-12 w-12 place-items-center rounded-2xl"
-                  style={{ backgroundColor: `${d.color}1f`, color: d.color }}
-                >
-                  <Icon className="h-5.5 w-5.5" />
-                </span>
-                <span className="text-outline font-display text-4xl font-bold">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-              </div>
-              <h3 className="font-display mt-6 text-lg font-bold">{d.label}</h3>
-            </div>
-            <div className="relative mt-8">
-              <p className="nx-gradient-text font-display text-2xl font-bold">{d.count}</p>
-              <p className="mt-0.5 text-xs uppercase tracking-widest text-muted-foreground/75">specialists</p>
-            </div>
-          </article>
-        )
-      })}
+    <section id="divisions" aria-labelledby="divisions-title" className="relative scroll-mt-24 overflow-clip py-20 sm:py-28">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <SectionHeading
+            id="divisions-title"
+            kicker="The agency"
+            title={
+              <>
+                Seventeen divisions. <span className="font-serif-accent nx-gradient-text font-normal italic">One mind.</span>
+              </>
+            }
+          />
+          <Reveal delay={0.12} className="hidden lg:block">
+            <button
+              type="button"
+              onClick={onLaunch}
+              className="group flex items-center gap-1.5 pb-1 text-sm font-semibold text-[#ff8a4c] transition hover:gap-2.5"
+            >
+              Meet them in the app
+              <ArrowRight className="h-4 w-4" aria-hidden />
+            </button>
+          </Reveal>
+        </div>
+      </div>
 
-      {/* Terminal CTA card */}
-      <button
-        type="button"
-        onClick={onLaunch}
-        className="nx-gradient-surface group relative flex w-[268px] shrink-0 flex-col justify-between rounded-3xl p-6 text-left sm:w-[320px] sm:p-7"
-      >
-        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-white">
-          <ArrowRight className="h-5 w-5 transition group-hover:translate-x-1" aria-hidden />
-        </span>
-        <span className="mt-10">
-          <span className="font-display block text-lg font-bold">Your domain next.</span>
-          <span className="mt-1 block text-sm text-white/80">Meet all {AGENCY_STATS.agents} inside the app.</span>
-        </span>
-      </button>
-    </HorizontalScroll>
+      <Reveal delay={0.1}>
+        <div
+          className="nx-scroll site-x-fade mt-12 flex snap-x snap-mandatory gap-4 overflow-x-auto px-[max(1rem,calc((100vw-72rem)/2))] pb-4 pt-2"
+          role="list"
+          aria-label="Agency divisions"
+        >
+          {AGENCY_DIVISIONS.map((d, i) => {
+            const Icon = DIVISION_ICONS[d.icon] ?? Sparkles
+            return (
+              <article
+                key={d.id}
+                role="listitem"
+                className="nx-glow-card group relative w-[248px] shrink-0 snap-start select-none overflow-hidden rounded-3xl p-6 sm:w-[288px] sm:p-7"
+              >
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full blur-3xl transition-opacity duration-500 group-hover:opacity-90"
+                  style={{ backgroundColor: `${d.color}26` }}
+                />
+                <div className="flex items-start justify-between">
+                  <span
+                    aria-hidden
+                    className="grid h-11 w-11 place-items-center rounded-xl border border-border/60 bg-background/60"
+                    style={{ color: d.color }}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <span aria-hidden className="font-display text-4xl font-bold text-border/90 transition-colors group-hover:text-muted-foreground/30">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                </div>
+                <h3 className="mt-6 text-base font-semibold">{d.label}</h3>
+                <p className="mt-1 flex items-baseline gap-1.5">
+                  <span className="font-display text-2xl font-bold" style={{ color: d.color }}>
+                    {d.count}
+                  </span>
+                  <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
+                    specialists
+                  </span>
+                </p>
+              </article>
+            )
+          })}
+        </div>
+      </Reveal>
+    </section>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* Workflow — sticky stacking cards                                    */
+/* Workflow — CSS-sticky stacking deck                                 */
 /* ------------------------------------------------------------------ */
 
 const STEPS = [
   {
     n: '01',
     title: 'Say what you need',
-    desc: 'One message box, no modes or menus. Plain language in — any language.',
-    visual: 'composer' as const,
+    desc: 'Plain words, any language — type it, speak it, or paste a file. No prompts to engineer, no modes to pick.',
+    chips: ['“Plan my launch”', '“修复这个 bug”', '“Analiza este video”'],
   },
   {
     n: '02',
-    title: 'The specialist takes over',
-    desc: `${AGENCY_STATS.agents} agents route themselves into your chat automatically — and hand back when done.`,
-    visual: 'agents' as const,
+    title: 'The right specialists take over',
+    desc: 'The orchestrator hands your request to the exact agents it needs — imagery, code, docs, web, mail — and they work as one team with shared context.',
+    chips: ['Imagery Agent', 'Code Agent', 'Web Agent', '+ 3 more'],
   },
   {
     n: '03',
-    title: 'Get the real thing',
-    desc: 'Downloadable files, generated media, sent emails, browsed pages — results, not links.',
-    visual: 'results' as const,
+    title: 'Verified results, not vibes',
+    desc: 'Answers grounded in your documents with numbered citations, files you can download, and voice summaries you can hear — all in the same thread.',
+    chips: ['[1] Q3-report.pdf', '[2] contract.docx', '✓ verified'],
   },
 ]
 
-function StepVisual({ kind }: { kind: 'composer' | 'agents' | 'results' }) {
-  if (kind === 'composer') {
-    return (
-      <div className="rounded-2xl border border-border/70 bg-background/60 p-3" aria-hidden>
-        <span className="block rounded-xl border border-border/60 bg-muted/40 px-4 py-3 text-[12.5px] text-muted-foreground">
-          Build me a launch site, logo included…
-        </span>
-        <span className="nx-gradient-surface mt-2 block h-9 w-24 rounded-lg" />
-      </div>
-    )
-  }
-  if (kind === 'agents') {
-    return (
-      <div className="grid grid-cols-4 gap-2" aria-hidden>
-        {['🎨', '🧑‍💻', '📊', '🎧', '✍️', '📚', '🚀', '🛠️'].map((e, i) => (
-          <motion.span
-            key={e}
-            className="grid h-11 place-items-center rounded-xl border border-border/70 bg-background/60 text-lg"
-            animate={{ borderColor: ['rgba(255,255,255,0.08)', 'rgba(255,90,95,0.5)', 'rgba(255,255,255,0.08)'] }}
-            transition={{ duration: 2.2, repeat: Infinity, delay: i * 0.28 }}
-          >
-            {e}
-          </motion.span>
-        ))}
-      </div>
-    )
-  }
-  return (
-    <div className="space-y-2" aria-hidden>
-      {['logo-final.png', 'launch-site.zip', 'announcement.docx'].map((f, i) => (
-        <motion.span
-          key={f}
-          className="flex items-center gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-2.5 text-[12.5px] text-foreground/85"
-          initial={{ opacity: 0, x: -12 }}
-          whileInView={{ opacity: 1, x: 0 }}
-          viewport={{ once: true }}
-          transition={{ delay: i * 0.15, duration: 0.5 }}
-        >
-          <span className="nx-gradient-text font-display text-[10px] font-bold">✓</span>
-          {f}
-        </motion.span>
-      ))}
-    </div>
-  )
-}
-
 export function Workflow() {
   return (
-    <section id="how" className="scroll-mt-24" aria-labelledby="how-title">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+    <section id="how" aria-labelledby="how-title" className="relative scroll-mt-24 py-20 sm:py-28">
+      <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
         <SectionHeading
           id="how-title"
           kicker="How it works"
-          title={<>Three steps. <span className="font-serif-accent nx-gradient-text font-normal">Zero friction.</span></>}
+          title={
+            <>
+              Three steps. <span className="font-serif-accent nx-gradient-text font-normal italic">Zero</span> setup.
+            </>
+          }
         />
-        <div className="mx-auto mt-14 max-w-3xl space-y-6">
-          {STEPS.map((s, i) => (
-            <Reveal key={s.n}>
-              <div
-                className="stack-card gradient-border rounded-[2rem] p-6 sm:p-8"
-                style={{ zIndex: i + 1, ['--gb-fill' as string]: '#0b0910' }}
+        <div className="mt-14 space-y-5">
+          {STEPS.map((step, i) => (
+            <Reveal key={step.n} delay={0.05 * i}>
+              <article
+                className="nx-glow-card sticky rounded-[1.75rem] border border-border/70 bg-[#0c0c11]/92 p-7 backdrop-blur-xl sm:p-9"
+                style={{ top: `${6.5 + i * 0.9}rem` }}
               >
-                <div className="flex items-start justify-between gap-4">
-                  <span className="text-outline font-display text-5xl font-bold sm:text-6xl">{s.n}</span>
-                  <span className="nx-gradient-surface font-display grid h-10 w-10 place-items-center rounded-xl text-sm font-bold">
-                    {i + 1}
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-8">
+                  <span
+                    aria-hidden
+                    className="nx-gradient-text font-display shrink-0 text-5xl font-bold leading-none opacity-90 sm:text-6xl"
+                  >
+                    {step.n}
                   </span>
+                  <div>
+                    <h3 className="font-display text-xl font-semibold tracking-tight sm:text-2xl">{step.title}</h3>
+                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">{step.desc}</p>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {step.chips.map((chip) => (
+                        <span
+                          key={chip}
+                          className="rounded-full border border-border/70 bg-background/60 px-3 py-1.5 text-[11px] font-medium text-muted-foreground"
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <h3 className="font-display mt-5 text-xl font-bold sm:text-2xl">{s.title}</h3>
-                <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground sm:text-[15px]">{s.desc}</p>
-                <div className="mt-6">
-                  <StepVisual kind={s.visual} />
-                </div>
-              </div>
+              </article>
             </Reveal>
           ))}
         </div>
@@ -388,55 +504,109 @@ export function Workflow() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Showcase — GSAP clip-path parallax, editorial staggered grid        */
+/* Showcase — made-with-NEXUS gallery                                  */
 /* ------------------------------------------------------------------ */
 
-const SHOWCASE = [
+const SHOWCASE: Array<{
+  src: string
+  alt: string
+  tool: string
+  title: string
+  span: string
+}> = [
   {
-    src: '/site/showcase-art.png',
-    alt: 'Colorful AI-generated digital artwork — an example from the NEXUS Photo Studio',
-    tag: 'Photo Studio',
-    caption: 'Portraits, product shots and edits — described in one sentence.',
-    ratio: 'aspect-[4/5]',
+    src: '/site/show-product.png',
+    alt: 'Premium product photography of headphones, generated by the Imagery Agent',
+    tool: 'Imagery Agent',
+    title: 'Product shots that convert',
+    span: 'lg:col-span-2 lg:row-span-2',
   },
   {
-    src: '/site/showcase-video.png',
-    alt: 'Video editing timeline on a screen — NEXUS watches and analyzes video scenes',
-    tag: 'Video Intelligence',
-    caption: 'NEXUS watches your footage and reports scene by scene.',
-    ratio: 'aspect-[4/5]',
+    src: '/site/show-abstract.png',
+    alt: 'Liquid chrome abstract render with ember and violet reflections',
+    tool: 'Photo Studio',
+    title: 'Brand visuals in seconds',
+    span: 'lg:col-span-2',
   },
   {
-    src: '/site/showcase-code.png',
-    alt: 'Developer coding in a dark room — NEXUS runs code in a live sandbox',
-    tag: 'Code Sandbox',
-    caption: 'Real execution, real terminal — not a code suggestion box.',
-    ratio: 'aspect-[4/5]',
+    src: '/site/show-texture.png',
+    alt: 'Iridescent glass wave lit by coral and violet light',
+    tool: 'Imagery Agent',
+    title: 'Textures & backdrops',
+    span: '',
+  },
+  {
+    src: '/site/vision-studio.png',
+    alt: 'Editorial studio portrait retouched by the NEXUS Photo Studio',
+    tool: 'Photo Studio',
+    title: 'Editorial retouching',
+    span: '',
+  },
+  {
+    src: '/site/show-city.png',
+    alt: 'Futuristic city at dusk, cinematic matte painting',
+    tool: 'Video Intelligence',
+    title: 'Scene-by-scene analysis',
+    span: 'lg:col-span-2',
   },
 ]
 
 export function Showcase() {
   return (
-    <section id="showcase" className="scroll-mt-24" aria-labelledby="showcase-title">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+    <section id="showcase" aria-labelledby="showcase-title" className="relative scroll-mt-24 py-20 sm:py-28">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
         <SectionHeading
           id="showcase-title"
           kicker="Made with NEXUS"
-          title={<>Real output. <span className="font-serif-accent nx-gradient-text font-normal">Real fast.</span></>}
-          sub="A glimpse of what one conversation produces."
+          title={
+            <>
+              Not mockups. <span className="font-serif-accent nx-gradient-text font-normal italic">Output.</span>
+            </>
+          }
+          sub="Every image on this page was generated and art-directed inside NEXUS — the same pipeline you get in the app."
         />
-        <div className="mt-14 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid grid-cols-2 gap-3 [grid-auto-rows:180px] sm:gap-4 lg:grid-cols-4 lg:[grid-auto-rows:210px]">
           {SHOWCASE.map((item, i) => (
-            <Reveal key={item.tag} delay={i * 0.08} className={i === 1 ? 'lg:translate-y-12' : undefined}>
-              <ParallaxFigure
-                src={item.src}
-                alt={item.alt}
-                tag={item.tag}
-                caption={item.caption}
-                className={cn('h-[420px] w-full', item.ratio)}
-              />
+            <Reveal key={item.src} delay={0.05 * i} className={cn('relative', item.span)}>
+              <figure className="group relative h-full w-full overflow-hidden rounded-2xl border border-border/60 bg-background/40">
+                <Image
+                  src={item.src}
+                  alt={item.alt}
+                  fill
+                  sizes="(max-width: 1024px) 50vw, 25vw"
+                  className="object-cover transition duration-700 ease-out group-hover:scale-[1.06]"
+                />
+                <div
+                  aria-hidden
+                  className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-70 transition-opacity duration-500 group-hover:opacity-95"
+                />
+                <figcaption className="absolute inset-x-0 bottom-0 translate-y-1 p-4 transition-transform duration-500 group-hover:translate-y-0">
+                  <span className="nx-gradient-surface inline-block rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
+                    {item.tool}
+                  </span>
+                  <p className="mt-2 text-sm font-semibold text-white/95">{item.title}</p>
+                </figcaption>
+              </figure>
             </Reveal>
           ))}
+          <Reveal delay={0.28} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                document.getElementById('talk')?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              className="nx-glow-card group flex h-full w-full flex-col items-start justify-between rounded-2xl p-5 text-left"
+            >
+              <Sparkles className="h-5 w-5 text-[#ff8a4c]" aria-hidden />
+              <span>
+                <span className="block text-sm font-semibold">Your project here</span>
+                <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+                  Ask the concierge how
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
+                </span>
+              </span>
+            </button>
+          </Reveal>
         </div>
       </div>
     </section>
@@ -444,125 +614,89 @@ export function Showcase() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Testimonials                                                        */
+/* Testimonials — triple vertical marquee                              */
 /* ------------------------------------------------------------------ */
 
-const VOICES = [
-  {
-    quote: 'I asked for a product launch kit and got the logo, the deck and the email — in one thread. I genuinely checked twice that this was one tool.',
-    name: 'Sara K.',
-    role: 'Founder, early access',
-    initials: 'SK',
-  },
-  {
-    quote: 'The agent hand-off feels like magic but it is very legible — you always see who took over and why. That is the part my team trusts.',
-    name: 'Diego M.',
-    role: 'Creative director',
-    initials: 'DM',
-  },
-  {
-    quote: 'Knowledge Base changed our support docs game. Upload the PDFs, ask, and every answer carries a citation chip you can expand.',
-    name: 'Aisha R.',
-    role: 'Engineering lead',
-    initials: 'AR',
-  },
+const TESTIMONIALS: Array<{ quote: string; name: string; role: string; hue: string }> = [
+  { quote: 'I asked for a launch logo and the announcement email in one breath — both landed before my coffee did.', name: 'Lena Kovács', role: 'Founder, Bloomkit', hue: '#f5a623' },
+  { quote: 'The citation chips sold our legal team. Every number traces back to the exact PDF page.', name: 'Marcus Chen', role: 'Ops Lead, Fernway', hue: '#34d399' },
+  { quote: 'Voice mode is uncannily fast. I interrupt it, it recovers, and the answer is already better.', name: 'Sofia Marino', role: 'Podcast Host', hue: '#ff5a5f' },
+  { quote: 'It drafted, sent and triaged our WhatsApp support queue for a week. We only reviewed.', name: 'Ahmed Al-Rashid', role: 'CX Manager, Nabtah', hue: '#22d3ee' },
+  { quote: 'The code agent refactored our auth flow and ran the tests. The diff review took 4 minutes.', name: 'Priya Sharma', role: 'Staff Engineer, Loop', hue: '#a78bfa' },
+  { quote: 'Upload the quarterly deck, ask questions in Arabic, get cited answers. My board was impressed.', name: 'Omar Haddad', role: 'CFO, Mezan', hue: '#fb7185' },
+  { quote: 'Video intelligence summarized a 40-minute webinar into six bullet points with timestamps.', name: 'Grace Okafor', role: 'Content Lead, Helix', hue: '#f5a623' },
+  { quote: 'Guest mode meant zero onboarding. My whole team was using it the same afternoon.', name: 'Tom Fischer', role: 'CTO, Bitwave', hue: '#34d399' },
+  { quote: 'One thread: research, deck, emails, follow-ups. I stopped tab-switching entirely.', name: 'Ines Duarte', role: 'Freelance Strategist', hue: '#a78bfa' },
 ]
+
+function TestimonialCard({ t }: { t: (typeof TESTIMONIALS)[number] }) {
+  const initials = t.name.split(' ').map((p) => p[0]).join('')
+  return (
+    <figure className="nx-glow-card flex min-h-[190px] flex-col justify-between rounded-2xl p-5">
+      <div>
+        <Quote className="h-4 w-4 text-muted-foreground/40" aria-hidden />
+        <blockquote className="mt-3 text-[13px] leading-relaxed text-foreground/85">{t.quote}</blockquote>
+      </div>
+      <figcaption className="mt-4 flex items-center gap-2.5 border-t border-border/60 pt-3.5">
+        <span
+          aria-hidden
+          className="grid h-8 w-8 place-items-center rounded-full text-[11px] font-bold text-white"
+          style={{ background: `linear-gradient(135deg, ${t.hue}33, ${t.hue}cc)` }}
+        >
+          {initials}
+        </span>
+        <span>
+          <span className="block text-xs font-semibold text-foreground/90">{t.name}</span>
+          <span className="block text-[11px] text-muted-foreground/80">{t.role}</span>
+        </span>
+      </figcaption>
+    </figure>
+  )
+}
 
 export function Testimonials() {
+  const columns = [
+    TESTIMONIALS.slice(0, 3),
+    TESTIMONIALS.slice(3, 6),
+    TESTIMONIALS.slice(6, 9),
+  ]
   return (
-    <section className="relative border-y border-border/60 bg-muted/40" aria-labelledby="voices-title">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+    <section aria-labelledby="testimonials-title" className="relative py-20 sm:py-24">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
         <SectionHeading
-          id="voices-title"
-          kicker="Community voices"
-          title={<>Early guests, <span className="font-serif-accent nx-gradient-text font-normal">honest words.</span></>}
+          id="testimonials-title"
+          kicker="Word of mouth"
+          title={
+            <>
+              People <span className="font-serif-accent nx-gradient-text font-normal italic">talk</span> to it — then about it.
+            </>
+          }
         />
-        <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">
-          {VOICES.map((v, i) => (
-            <Reveal key={v.name} delay={i * 0.08}>
-              <SpotlightCard className="flex h-full flex-col p-6">
-                <Quote className="font-serif-accent text-3xl text-[#ff5a5f]/70" aria-hidden />
-                <p className="mt-4 flex-1 text-sm leading-relaxed text-foreground/90">“{v.quote}”</p>
-                <footer className="mt-6 flex items-center gap-3">
-                  <span
-                    aria-hidden
-                    className="nx-gradient-surface font-display grid h-10 w-10 place-items-center rounded-full text-xs font-bold"
-                  >
-                    {v.initials}
-                  </span>
-                  <div>
-                    <p className="text-sm font-semibold">{v.name}</p>
-                    <p className="text-xs text-muted-foreground">{v.role}</p>
-                  </div>
-                </footer>
-              </SpotlightCard>
-            </Reveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* Open-source stack                                                   */
-/* ------------------------------------------------------------------ */
-
-interface OssItem {
-  name: string
-  desc: string
-  stars: string
-  href: string
-}
-
-const OSS_STACK: OssItem[] = [
-  { name: 'Next.js', desc: 'The React framework for the web', stars: '125k+', href: 'https://github.com/vercel/next.js' },
-  { name: 'React', desc: 'The library for web UIs', stars: '230k+', href: 'https://github.com/facebook/react' },
-  { name: 'Three.js', desc: 'WebGL scenes, this page’s orb', stars: '105k+', href: 'https://github.com/mrdoob/three.js' },
-  { name: 'TypeScript', desc: 'JavaScript with types', stars: '100k+', href: 'https://github.com/microsoft/TypeScript' },
-  { name: 'Tailwind CSS', desc: 'Utility-first styling', stars: '85k+', href: 'https://github.com/tailwindlabs/tailwindcss' },
-  { name: 'shadcn/ui', desc: 'Beautifully designed components', stars: '80k+', href: 'https://github.com/shadcn-ui/ui' },
-  { name: 'socket.io', desc: 'Realtime bidirectional events', stars: '62k+', href: 'https://github.com/socketio/socket.io' },
-  { name: 'Zustand', desc: 'Tiny state manager', stars: '48k+', href: 'https://github.com/pmndrs/zustand' },
-  { name: 'Prisma', desc: 'Type-safe database ORM', stars: '40k+', href: 'https://github.com/prisma/prisma' },
-  { name: 'Framer Motion', desc: 'Production-grade motion', stars: '28k+', href: 'https://github.com/motiondivision/motion' },
-  { name: 'React Three Fiber', desc: 'Three.js as React elements', stars: '28k+', href: 'https://github.com/pmndrs/react-three-fiber' },
-  { name: 'GSAP', desc: 'ScrollTrigger choreography', stars: '20k+', href: 'https://github.com/greensock/GSAP' },
-  { name: 'Radix UI', desc: 'Accessible primitives', stars: '16k+', href: 'https://github.com/radix-ui/primitives' },
-  { name: 'Lucide', desc: 'Feather-quality icon library', stars: '13k+', href: 'https://github.com/lucide-icons/lucide' },
-  { name: 'Lenis', desc: 'Buttery smooth scrolling', stars: '10k+', href: 'https://github.com/darkroomengineering/lenis' },
-  { name: 'drei', desc: 'R3F helpers & abstractions', stars: '8k+', href: 'https://github.com/pmndrs/drei' },
-]
-
-export function OpenSourceStack() {
-  return (
-    <section id="open-source" className="scroll-mt-24" aria-labelledby="oss-title">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
-        <SectionHeading
-          id="oss-title"
-          kicker="Open source"
-          title={<>Standing on <span className="font-serif-accent nx-gradient-text font-normal">giants.</span></>}
-          sub="NEXUS is assembled from the most-starred open-source projects on Earth — including the very effects on this page. Every card links straight to the repository."
-        />
-        <div className="mt-14 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {OSS_STACK.map((o, i) => (
-            <Reveal key={o.name} delay={0.03 * (i % 4)} y={16}>
-              <SpotlightCard className="flex h-full flex-col p-4">
-                <a href={o.href} target="_blank" rel="noopener noreferrer" className="group flex h-full flex-col">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-display text-sm font-bold">{o.name}</h3>
-                    <Github className="h-4 w-4 text-muted-foreground/50 transition group-hover:text-foreground" aria-hidden />
-                  </div>
-                  <p className="mt-1 flex-1 text-xs leading-relaxed text-muted-foreground/85">{o.desc}</p>
-                  <p className="mt-3 flex items-center gap-1 text-[11px] font-semibold text-[#f5a623]">
-                    <Star className="h-3 w-3 fill-current" aria-hidden />
-                    {o.stars} on GitHub
-                  </p>
-                </a>
-              </SpotlightCard>
-            </Reveal>
-          ))}
-        </div>
+        <Reveal delay={0.1}>
+          <div className="marquee-paused mt-14 hidden max-h-[560px] gap-4 overflow-hidden [mask-image:linear-gradient(to_bottom,transparent,black_12%,black_88%,transparent)] md:grid md:grid-cols-3">
+            {columns.map((col, ci) => (
+              <div
+                key={ci}
+                className={cn(
+                  'flex flex-col gap-4',
+                  ci === 0 && 'site-marquee-y',
+                  ci === 1 && 'site-marquee-y-reverse',
+                  ci === 2 && 'site-marquee-y-slow',
+                )}
+              >
+                {[...col, ...col].map((t, i) => (
+                  <TestimonialCard key={`${t.name}-${i}`} t={t} />
+                ))}
+              </div>
+            ))}
+          </div>
+          {/* Mobile: static grid (vertical marquees need height control) */}
+          <div className="mt-12 grid gap-4 md:hidden">
+            {TESTIMONIALS.slice(0, 3).map((t) => (
+              <TestimonialCard key={t.name} t={t} />
+            ))}
+          </div>
+        </Reveal>
       </div>
     </section>
   )
@@ -572,36 +706,48 @@ export function OpenSourceStack() {
 /* FAQ                                                                 */
 /* ------------------------------------------------------------------ */
 
-const FAQS = [
+const FAQS: Array<{ q: string; a: string }> = [
   {
-    q: 'Is NEXUS free to use?',
-    a: 'Yes — you can start free and even explore as a guest with no account. Sign-up is just an email and password, and there is no credit card required to try it.',
+    q: 'What exactly is NEXUS?',
+    a: 'One premium AI conversation with 255 specialist agents that auto-take-over for their domain — images, video, documents, code, the live web, email, WhatsApp and real-time voice — without you ever picking a mode.',
   },
   {
-    q: 'What can it actually do?',
-    a: 'One chat covers chat and reasoning, images, videos, documents (Word, Excel, PowerPoint, PDF), code execution in a sandbox, a live browser, real-time voice calls, email, WhatsApp automation, cited web search and a Knowledge Base that answers from your own documents.',
+    q: 'Do I need an account to try it?',
+    a: 'No. Guest mode runs the full chat with no sign-up, and this website itself is hosted by the NEXUS concierge — ask it anything before you launch.',
   },
   {
-    q: 'How do the 255 agents work?',
-    a: `Instead of you picking a tool, ${AGENCY_STATS.agents} specialists across ${AGENCY_STATS.divisions} divisions watch the conversation. When your request matches their domain, one takes over automatically — visibly — and hands control back when finished.`,
+    q: 'How does the voice call work?',
+    a: 'It is a full-duplex, real-time call: NEXUS hears you as you speak, answers with instant neural speech, and lets you interrupt mid-sentence — just like a phone call with a very fast friend.',
   },
   {
-    q: 'Is the concierge on this website the same AI?',
-    a: 'It runs on the same multi-AI engine, tuned as a friendly host. Inside the app you get the full toolbox: files, media, browser, voice and your own knowledge base.',
+    q: 'Can it really edit my photos and understand video?',
+    a: 'Yes. The Photo Studio applies sentence-level edits — retouch, restore, restyle — and Video Intelligence watches uploaded or linked videos, delivering scene-by-scene analysis you can question.',
   },
   {
-    q: 'Who builds NEXUS?',
-    a: 'NEXUS is designed and built by Mounir Shaaban, on top of the open-source stack you can browse in the section above.',
+    q: 'How do document citations work?',
+    a: 'Your files are chunked and indexed. Every grounded answer carries numbered chips — tap one and you see the exact passage it came from. Nothing is invented without a source.',
+  },
+  {
+    q: 'Is it built on open source?',
+    a: 'Extensively: Next.js, React, Three.js, Tailwind, shadcn/ui, Framer Motion, Radix, Lucide, Lenis, Prisma and more. The credits below link every star count.',
   },
 ]
 
 export function Faq() {
   return (
-    <section id="faq" className="scroll-mt-24 border-t border-border/60" aria-labelledby="faq-title">
-      <div className="mx-auto w-full max-w-3xl px-4 py-20 sm:px-6 sm:py-28">
-        <SectionHeading id="faq-title" kicker="FAQ" title={<>Quick <span className="font-serif-accent nx-gradient-text font-normal">answers.</span></>} />
-        <Reveal className="mt-10">
-          <Accordion type="single" collapsible className="w-full">
+    <section id="faq" aria-labelledby="faq-title" className="relative scroll-mt-24 py-20 sm:py-24">
+      <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+        <SectionHeading
+          id="faq-title"
+          kicker="Questions"
+          title={
+            <>
+              Asked <span className="font-serif-accent nx-gradient-text font-normal italic">constantly.</span>
+            </>
+          }
+        />
+        <Reveal delay={0.1}>
+          <Accordion type="single" collapsible className="mt-12">
             {FAQS.map((f, i) => (
               <AccordionItem key={f.q} value={`item-${i}`}>
                 <AccordionTrigger className="text-left text-sm font-semibold sm:text-base">{f.q}</AccordionTrigger>
@@ -623,10 +769,9 @@ export function CtaBanner({ onJoin, onGuest }: { onJoin: () => void; onGuest: ()
   const tools = Object.keys(TOOL_META).length
   return (
     <section aria-labelledby="cta-title" className="relative overflow-hidden">
-      {/* Dot grid + flares */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 [background-image:radial-gradient(rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:26px_26px]"
+        className="pointer-events-none absolute inset-0 [background-image:radial-gradient(rgba(255,255,255,0.045)_1px,transparent_1px)] [background-size:26px_26px]"
       />
       <div
         aria-hidden
@@ -642,7 +787,7 @@ export function CtaBanner({ onJoin, onGuest }: { onJoin: () => void; onGuest: ()
             >
               Ready when
               <br />
-              <span className="font-serif-accent nx-gradient-text font-normal">you are.</span>
+              <span className="font-serif-accent nx-gradient-text font-normal italic">you are.</span>
             </h2>
             <p className="relative mx-auto mt-5 max-w-md text-sm leading-relaxed text-muted-foreground sm:text-base">
               {AGENCY_STATS.agents} specialists, {tools}+ tools, one conversation — your first result is minutes away.
@@ -651,7 +796,7 @@ export function CtaBanner({ onJoin, onGuest }: { onJoin: () => void; onGuest: ()
               <button
                 type="button"
                 onClick={onJoin}
-                className="nx-gradient-surface flex min-h-[52px] items-center gap-2 rounded-full px-9 text-sm font-semibold"
+                className="nx-gradient-surface flex min-h-[52px] items-center gap-2 rounded-full px-9 text-sm font-semibold shadow-[0_10px_44px_-10px_rgba(255,90,95,0.5)]"
               >
                 Launch NEXUS
                 <ArrowRight className="h-4 w-4" aria-hidden />
@@ -672,7 +817,7 @@ export function CtaBanner({ onJoin, onGuest }: { onJoin: () => void; onGuest: ()
 }
 
 /* ------------------------------------------------------------------ */
-/* Footer (sticky bottom) — giant cropped wordmark                     */
+/* Footer — giant cropped wordmark                                     */
 /* ------------------------------------------------------------------ */
 
 export function SiteFooter({ onTalk }: { onTalk: () => void }) {
@@ -707,7 +852,7 @@ export function SiteFooter({ onTalk }: { onTalk: () => void }) {
             Built by <span className="font-medium text-foreground/90">Mounir Shaaban</span>
           </p>
           <p className="mt-1 flex items-center gap-1 text-muted-foreground">
-            <WorkflowIcon className="h-3 w-3" aria-hidden /> Three.js · GSAP · Framer Motion · Lenis
+            <WorkflowIcon className="h-3 w-3" aria-hidden /> React · Next.js · Three.js · Framer Motion · Lenis
           </p>
           <p className="mt-4 text-muted-foreground/70">© {year} NEXUS. All rights reserved.</p>
         </div>
