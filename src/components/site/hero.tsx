@@ -1,18 +1,32 @@
 'use client'
 
 /**
- * NEXUS Official Site — Hero.
+ * NEXUS Official Site — Hero v2.
  *
- * Aurora + particle constellation, word-by-word headline reveal, a live
- * "product window" that plays a looping conversation with an agent
- * hand-off, animated stat counters and parallax — all Framer Motion.
+ * Three.js plasma orb (WebGL) breathes behind a kinetic split-char
+ * headline — bold Space Grotesk lines with one Instrument Serif italic
+ * accent word (the 2025 editorial move). A glass "product window" plays
+ * a looping agent conversation under the orb, floating glass chips and
+ * animated counters complete the stack. Framer Motion + Lenis + GSAP.
  */
 
+import dynamic from 'next/dynamic'
 import { useEffect, useRef, useState } from 'react'
 import { motion, useReducedMotion, useScroll, useTransform, type Variants } from 'framer-motion'
-import { ArrowRight, MessagesSquare, Sparkles } from 'lucide-react'
-import { AGENCY_STATS, BrandLockup, TOOL_META } from '@/components/nexus/shared'
+import { ArrowDown, ArrowRight, MessagesSquare, Sparkles } from 'lucide-react'
+import { AGENCY_STATS, TOOL_META } from '@/components/nexus/shared'
 import { AuroraBackdrop, Counter, Magnetic, ParticleField } from './fx'
+import { SplitReveal } from './gsap-fx'
+
+// WebGL is client-only — never rendered on the server.
+const WebglOrb = dynamic(() => import('./webgl-orb'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-full w-full">
+      <div className="nx-aura mx-auto mt-[8%] h-[540px] w-[540px] rounded-full opacity-70" />
+    </div>
+  ),
+})
 
 const stagger: Variants = {
   hidden: {},
@@ -39,7 +53,6 @@ const MOCK_SCRIPT: MockLine[] = [
 function ProductWindow() {
   const reduceMotion = useReducedMotion()
   const [step, setStep] = useState(1)
-  // Reduced motion → show the whole script at once (derived, no effect).
   const visible = reduceMotion ? MOCK_SCRIPT.length : step
 
   useEffect(() => {
@@ -51,7 +64,7 @@ function ProductWindow() {
   }, [reduceMotion])
 
   return (
-    <div className="nx-glow-card relative overflow-hidden rounded-3xl bg-card/70 p-3 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-4">
+    <div className="gradient-border relative overflow-hidden rounded-3xl p-3 shadow-2xl shadow-black/50 backdrop-blur-xl sm:p-4">
       {/* Window chrome */}
       <div className="mb-3 flex items-center gap-2 px-1.5 pt-1">
         <span className="h-2.5 w-2.5 rounded-full bg-[#ff5a5f]/80" aria-hidden />
@@ -119,9 +132,10 @@ export function Hero({
   const sectionRef = useRef<HTMLElement | null>(null)
   const reduceMotion = useReducedMotion()
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ['start start', 'end start'] })
+  const orbY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 140])
   const mockY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 90])
   const mockRotate = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 3])
-  const glowOpacity = useTransform(scrollYProgress, [0, 0.8], [1, 0.2])
+  const fade = useTransform(scrollYProgress, [0, 0.75], [1, 0.15])
 
   const tools = Object.keys(TOOL_META).length
 
@@ -130,19 +144,34 @@ export function Hero({
       {/* Backdrop graphics */}
       <AuroraBackdrop className="opacity-90" />
       <ParticleField />
+
+      {/* WebGL plasma orb — behind headline and product window */}
+      <motion.div
+        aria-hidden
+        style={{ y: orbY, opacity: fade }}
+        className="pointer-events-none absolute left-1/2 top-[13%] z-0 h-[600px] w-[min(94vw,780px)] -translate-x-1/2 opacity-75 sm:h-[720px]"
+      >
+        <WebglOrb className="h-full w-full" />
+      </motion.div>
+      {/* Contrast veil — keeps hero copy readable over the orb */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background to-transparent"
+        className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_58%_50%_at_50%_38%,rgba(5,4,8,0.42),transparent_72%)]"
       />
 
-      <div className="relative mx-auto w-full max-w-6xl px-4 pb-20 pt-16 sm:px-6 sm:pt-24 lg:pb-28">
-        <motion.div variants={stagger} initial="hidden" animate="show" className="mx-auto max-w-3xl text-center">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-40 bg-gradient-to-t from-background to-transparent"
+      />
+
+      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-24 pt-14 sm:px-6 sm:pt-20 lg:pb-28">
+        <motion.div variants={stagger} initial="hidden" animate="show" className="mx-auto max-w-4xl text-center">
           {/* Announcement pill */}
           <motion.div variants={fadeUp} className="flex justify-center">
             <button
               type="button"
               onClick={onTalk}
-              className="group flex items-center gap-2 rounded-full border border-border/80 bg-card/60 py-1.5 pl-2 pr-3.5 text-xs font-medium text-muted-foreground backdrop-blur-md transition hover:border-[#ff5a5f]/40 hover:text-foreground"
+              className="group flex items-center gap-2 rounded-full border border-border/80 bg-card/50 py-1.5 pl-2 pr-3.5 text-xs font-medium text-muted-foreground backdrop-blur-md transition hover:border-[#ff5a5f]/40 hover:text-foreground"
             >
               <span className="nx-gradient-surface flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
                 <Sparkles className="h-3 w-3" aria-hidden />
@@ -153,20 +182,27 @@ export function Hero({
             </button>
           </motion.div>
 
-          {/* Headline */}
+          {/* Kinetic headline — bold sans + one serif-italic accent word */}
           <motion.h1
             id="hero-title"
             variants={fadeUp}
-            className="font-display mt-8 text-[2.6rem] font-bold leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl"
+            className="font-display mt-8 text-[2.85rem] font-bold leading-[1.02] tracking-[-0.03em] sm:text-7xl lg:text-[5.4rem]"
           >
-            One AI.
-            <br />
-            <span className="nx-gradient-text">Every superpower.</span>
+            <SplitReveal text="One AI." delay={0.15} className="block" />
+            <span className="block">
+              <SplitReveal text="Every" delay={0.55} className="mr-[0.22em]" />
+              <SplitReveal
+                text="superpower."
+                delay={0.72}
+                className="font-serif-accent font-normal tracking-[-0.01em]"
+                charClass="nx-gradient-text"
+              />
+            </span>
           </motion.h1>
 
           <motion.p
             variants={fadeUp}
-            className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg"
+            className="mx-auto mt-7 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg"
           >
             Chat, images, videos, documents, code, voice, email, WhatsApp, the live web — and{' '}
             <span className="font-semibold text-foreground">{AGENCY_STATS.agents} specialist agents</span>{' '}
@@ -190,7 +226,7 @@ export function Hero({
               <button
                 type="button"
                 onClick={onTalk}
-                className="flex min-h-[48px] items-center gap-2 rounded-full border border-border px-7 text-sm font-semibold text-foreground/90 transition hover:border-[#ff5a5f]/40 hover:bg-accent/50"
+                className="flex min-h-[48px] items-center gap-2 rounded-full border border-border bg-card/40 px-7 text-sm font-semibold text-foreground/90 backdrop-blur-md transition hover:border-[#ff5a5f]/40 hover:bg-accent/50"
               >
                 <MessagesSquare className="h-4 w-4 text-[#ff5a5f]" aria-hidden />
                 Talk to our AI
@@ -230,12 +266,10 @@ export function Hero({
           initial={{ opacity: 0, y: 60 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.5, ease: [0.21, 1.02, 0.73, 1] }}
-          style={{ y: mockY, rotateX: mockRotate, opacity: glowOpacity }}
+          style={{ y: mockY, rotateX: mockRotate, opacity: fade }}
           className="relative mx-auto mt-16 max-w-2xl [perspective:1200px]"
         >
-          <div className="nx-aura">
-            <ProductWindow />
-          </div>
+          <ProductWindow />
           {/* Floating chips */}
           <motion.span
             aria-hidden
@@ -256,10 +290,17 @@ export function Hero({
         </motion.div>
       </div>
 
-      {/* Brand lockup accent — keeps the official logo present */}
-      <div className="pointer-events-none absolute left-4 top-20 hidden opacity-60 xl:block" aria-hidden>
-        <BrandLockup height={20} className="grayscale-[35%]" />
-      </div>
+      {/* Scroll cue */}
+      <motion.div
+        aria-hidden
+        className="relative z-10 -mt-10 flex justify-center pb-8 sm:-mt-4"
+        animate={reduceMotion ? undefined : { y: [0, 8, 0] }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+      >
+        <span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-muted-foreground/60">
+          <ArrowDown className="h-3.5 w-3.5" /> scroll
+        </span>
+      </motion.div>
     </section>
   )
 }

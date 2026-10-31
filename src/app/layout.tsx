@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk, IBM_Plex_Sans_Arabic } from "next/font/google";
+import { Inter, Space_Grotesk, IBM_Plex_Sans_Arabic, Instrument_Serif } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
@@ -15,6 +15,15 @@ const inter = Inter({
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-display",
   subsets: ["latin"],
+});
+
+// Instrument Serif — editorial italic accent for the official site
+// (the "serif italic word inside a bold sans headline" 2025 trend).
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-serif-accent",
+  subsets: ["latin"],
+  weight: ["400"],
+  style: ["normal", "italic"],
 });
 
 // Arabic — IBM Plex Sans Arabic (complete RTL UI font, beautiful Naskh)
@@ -97,7 +106,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
       <body
-        className={`${inter.variable} ${spaceGrotesk.variable} ${ibmPlexArabic.variable} antialiased bg-background text-foreground`}
+        className={`${inter.variable} ${spaceGrotesk.variable} ${ibmPlexArabic.variable} ${instrumentSerif.variable} antialiased bg-background text-foreground`}
       >
         <ThemeProvider
           attribute="class"

@@ -1,13 +1,16 @@
 'use client'
 
 /**
- * NEXUS Official Site — the front door of the product.
+ * NEXUS Official Site v2 — the front door of the product.
  *
  * A full marketing website that TALKS with its visitors: an AI concierge
  * widget floats on every screen, a live demo chat sits mid-page, and a
  * "Launch NEXUS" CTA hands off into the real app (auth/guest flow owned
- * by page.tsx). Motion by Framer Motion, scroll by Lenis, layout by the
- * sticky-footer contract (min-h-screen flex column + mt-auto footer).
+ * by page.tsx).
+ *
+ * Elite open-source stack: Framer Motion (28k★) orchestration ·
+ * GSAP ScrollTrigger (20k★) pinned/scrubbed choreography · Three.js +
+ * R3F (105k★/28k★) WebGL orb · Lenis (10k★) buttery scroll · Lucide.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -16,13 +19,15 @@ import { ArrowRight, Bot, MessagesSquare, Sparkles } from 'lucide-react'
 import { BrandLockup } from '@/components/nexus/shared'
 import { ConciergePanel, ConciergeWidget } from './concierge'
 import { Hero } from './hero'
-import { Reveal, SectionHeading } from './fx'
+import { Reveal, ScrollProgress, SectionHeading } from './fx'
+import { syncLenisScrollTrigger } from './gsap-fx'
 import {
   CtaBanner,
+  Divisions,
   Faq,
   Features,
-  OpenSourceStack,
   OssMarquee,
+  OpenSourceStack,
   Showcase,
   SiteFooter,
   Testimonials,
@@ -30,7 +35,7 @@ import {
 } from './sections'
 
 /* ------------------------------------------------------------------ */
-/* Lenis smooth scroll (window-scoped, anchors scroll through it)      */
+/* Lenis smooth scroll — synced 1:1 with GSAP's ticker                 */
 /* ------------------------------------------------------------------ */
 
 declare global {
@@ -45,6 +50,7 @@ function SmoothScroll() {
     if (reduce) return
     const lenis = new Lenis({ lerp: 0.11, wheelMultiplier: 1 })
     window.__lenis = lenis
+    const unsync = syncLenisScrollTrigger(lenis)
     let raf = 0
     const loop = (time: number) => {
       lenis.raf(time)
@@ -53,6 +59,7 @@ function SmoothScroll() {
     raf = requestAnimationFrame(loop)
     return () => {
       cancelAnimationFrame(raf)
+      unsync()
       lenis.destroy()
       window.__lenis = undefined
     }
@@ -65,7 +72,7 @@ function scrollToId(id: string) {
   if (!el) return
   const lenis = window.__lenis
   if (lenis) {
-    lenis.scrollTo(el, { offset: -72, duration: 1.2 })
+    lenis.scrollTo(el, { offset: -88, duration: 1.2 })
   } else {
     el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -73,6 +80,7 @@ function scrollToId(id: string) {
 
 const NAV_LINKS = [
   { label: 'Superpowers', id: 'features' },
+  { label: 'Divisions', id: 'divisions' },
   { label: 'Showcase', id: 'showcase' },
   { label: 'Open source', id: 'open-source' },
   { label: 'FAQ', id: 'faq' },
@@ -95,7 +103,7 @@ function TalkDemo({ onLaunch }: { onLaunch: () => void }) {
           <SectionHeading
             id="talk-title"
             kicker="Don't take our word for it"
-            title={<>Talk to NEXUS <span className="nx-gradient-text">right here.</span></>}
+            title={<>Talk to NEXUS <span className="font-serif-accent nx-gradient-text font-normal">right here.</span></>}
           />
           <Reveal delay={0.1}>
             <p className="mx-auto mt-4 max-w-md text-center text-sm leading-relaxed text-muted-foreground sm:text-base lg:mx-0 lg:text-left">
@@ -161,7 +169,6 @@ export function OfficialSite({
   onGuest: () => void
 }) {
   const [conciergeOpen, setConciergeOpen] = useState(false)
-  const [scrolled, setScrolled] = useState(false)
 
   const openConcierge = useCallback(() => setConciergeOpen(true), [])
   const launch = useCallback(() => {
@@ -169,51 +176,51 @@ export function OfficialSite({
     onJoin()
   }, [onJoin])
 
-  // Nav gains a heavier glass once the hero starts leaving.
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24)
-    onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
-
   return (
     <div className="relative flex min-h-screen flex-col overflow-x-clip bg-background text-foreground">
+      {/* Cinematic grain + scroll progress hairline */}
+      <div aria-hidden className="site-grain" />
+      <ScrollProgress />
       <SmoothScroll />
 
-      {/* ---------------- Sticky glass nav ---------------- */}
-      <header
-        className={`sticky top-0 z-40 transition-all duration-300 ${
-          scrolled ? 'border-b border-border/60 bg-background/80 backdrop-blur-xl' : 'border-b border-transparent bg-transparent'
-        }`}
-      >
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
-          <BrandLockup height={22} />
-          <nav aria-label="Primary" className="hidden items-center gap-6 lg:flex">
+      {/* ---------------- Floating glass pill nav ---------------- */}
+      <header className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-3 sm:top-4">
+        <div className="pointer-events-auto flex h-14 w-full max-w-3xl items-center justify-between gap-2 rounded-full border border-border/70 bg-background/70 pl-4 pr-2 shadow-lg shadow-black/30 backdrop-blur-xl sm:pl-5">
+          <button
+            type="button"
+            onClick={() => window.__lenis?.scrollTo(0, { duration: 1.1 }) ?? window.scrollTo({ top: 0, behavior: 'smooth' })}
+            aria-label="Back to top"
+            className="shrink-0"
+          >
+            <BrandLockup height={20} />
+          </button>
+
+          <nav aria-label="Primary" className="hidden items-center gap-5 lg:flex">
             {NAV_LINKS.map((l) => (
               <button
                 key={l.id}
                 type="button"
                 onClick={() => scrollToId(l.id)}
-                className="text-sm font-medium text-muted-foreground transition hover:text-foreground"
+                className="text-[13px] font-medium text-muted-foreground transition hover:text-foreground"
               >
                 {l.label}
               </button>
             ))}
           </nav>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={openConcierge}
-              className="hidden min-h-[40px] items-center gap-1.5 rounded-full border border-border/80 px-4 text-sm font-medium text-muted-foreground transition hover:border-[#ff5a5f]/40 hover:text-foreground sm:flex"
+              className="hidden min-h-[38px] items-center gap-1.5 rounded-full border border-border/80 px-3.5 text-[13px] font-medium text-muted-foreground transition hover:border-[#ff5a5f]/40 hover:text-foreground sm:flex"
             >
-              <MessagesSquare className="h-4 w-4 text-[#ff5a5f]" aria-hidden />
+              <MessagesSquare className="h-3.5 w-3.5 text-[#ff5a5f]" aria-hidden />
               Ask AI
             </button>
             <button
               type="button"
               onClick={launch}
-              className="nx-gradient-surface min-h-[40px] rounded-full px-5 text-sm font-semibold"
+              className="nx-gradient-surface min-h-[38px] rounded-full px-4 text-[13px] font-semibold sm:px-5"
             >
               Launch app
             </button>
@@ -225,6 +232,7 @@ export function OfficialSite({
         <Hero onJoin={launch} onGuest={onGuest} onTalk={openConcierge} />
         <OssMarquee />
         <Features />
+        <Divisions onLaunch={launch} />
         <TalkDemo onLaunch={launch} />
         <Workflow />
         <Showcase />

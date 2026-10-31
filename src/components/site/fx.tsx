@@ -14,6 +14,7 @@ import {
   useInView,
   useMotionValue,
   useReducedMotion,
+  useScroll,
   useSpring,
   useTransform,
   animate,
@@ -323,6 +324,51 @@ export function Waveform({ className, bars = 24 }: { className?: string; bars?: 
         />
       ))}
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* SpotlightCard — pointer-tracked glow (Linear/Arc-style bento card)  */
+/* ------------------------------------------------------------------ */
+
+export function SpotlightCard({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  return (
+    <div
+      ref={ref}
+      className={cn('site-spotlight nx-glow-card h-full rounded-3xl', className)}
+      onPointerMove={(e) => {
+        const el = ref.current
+        if (!el) return
+        const rect = el.getBoundingClientRect()
+        el.style.setProperty('--mx', `${e.clientX - rect.left}px`)
+        el.style.setProperty('--my', `${e.clientY - rect.top}px`)
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* ScrollProgress — hairline gradient bar tracking page scroll         */
+/* ------------------------------------------------------------------ */
+
+export function ScrollProgress() {
+  const { scrollYProgress } = useScroll()
+  const scaleX = useSpring(scrollYProgress, { stiffness: 140, damping: 26, mass: 0.35 })
+  return (
+    <motion.div
+      aria-hidden
+      className="site-progress fixed inset-x-0 top-0 z-50 h-[2.5px] bg-gradient-to-r from-[#f5a623] via-[#ff5a5f] to-[#ff2a68]"
+      style={{ scaleX }}
+    />
   )
 }
 
