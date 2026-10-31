@@ -41,11 +41,15 @@ async function pollinationsOnce(prompt: string, w: number, h: number, timeoutMs:
 }
 
 /** Generate one image with automatic 429/5xx retry + backoff.
- *  `onRetry` lets live pipelines surface progress ("rate limited — retrying"). */
+ *  `onRetry` lets live pipelines surface progress ("rate limited — retrying").
+ *  FINAL FALLBACK — the Z.ai gateway engine (same one behind /api/image):
+ *  when the anonymous Pollinations tier is quota-drained (402/503 storms)
+ *  the Z.ai engine keeps the video pipeline alive. Returns the engine used
+ *  via `engineOut` when provided. */
 export async function pollinationsImage(
   prompt: string,
   size: string,
-  opts?: { timeoutMs?: number; onRetry?: (attempt: number, delayMs: number, reason: string) => void }
+  opts?: { timeoutMs?: number; onRetry?: (attempt: number, delayMs: number, reason: string) => void; engineOut?: (engine: string) => void }
 ): Promise<Buffer> {
   const [w, h] = size.split('x').map(Number)
   const timeoutMs = opts?.timeoutMs ?? 90_000
@@ -58,18 +62,41 @@ export async function pollinationsImage(
       await sleep(delay)
     }
     try {
-      return await pollinationsOnce(prompt, w, h, timeoutMs)
+      const buf = await pollinationsOnce(prompt, w, h, timeoutMs)
+      opts?.engineOut?.('pollinations')
+      return buf
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err))
       const msg = lastErr.message
-      const rateLimited = msg.includes('429') || msg.includes('502') || msg.includes('503')
+      const rateLimited = msg.includes('429') || msg.includes('502') || msg.includes('503') || msg.includes('402')
       const abort = msg.includes('aborted') || msg.includes('timeout')
       // Retry rate limits + transient failures; give up on the last attempt.
       if (!rateLimited && !abort && attempt < RETRY_DELAYS_MS.length) continue
       if (!rateLimited && !abort) throw lastErr
     }
   }
-  throw lastErr
+
+  /* Z.ai fallback — quota-free in the sandbox, key-free, proven engine. */
+  try {
+    opts?.onRetry?.(RETRY_DELAYS_MS.length, 0, 'free tier drained — switching to the Z.ai engine')
+    const { getZAI } = await import('@/lib/zai')
+    const zai = await getZAI()
+    // Z.ai requires 512–2880px per side in 32px multiples (max 2^22 px total).
+    const snap = (n: number) => Math.min(2880, Math.max(512, Math.round((n || 1024) / 32) * 32))
+    const data = await zai.images.generations.create({
+      prompt: `${prompt}, high quality, detailed, professional, sharp focus, beautiful lighting`,
+      size: `${snap(w)}x${snap(h)}`,
+    })
+    const b64 = data?.data?.[0]?.base64
+    if (!b64 || b64.length < 1000) throw new Error('Z.ai engine returned no image data')
+    const buf = Buffer.from(b64, 'base64')
+    opts?.engineOut?.('zai')
+    return buf
+  } catch (zaiErr) {
+    throw new Error(
+      `${lastErr.message} (Z.ai fallback also failed: ${zaiErr instanceof Error ? zaiErr.message : String(zaiErr)})`
+    )
+  }
 }
 
 /** Fires scene requests SEQUENTIALLY (one at a time) with a pause between

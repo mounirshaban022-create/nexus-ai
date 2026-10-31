@@ -23,8 +23,21 @@ A full-stack AI super app — 13 abilities, 27 live connectors, a real code sand
 
 | | |
 |---|---|
+| 🛡️ **Reliability pass** — the dev process now caps V8 heap (2GB) + Turbopack memory (1.5GB), so the sandbox's OOM-killer can no longer terminate mid-request (the real cause of "Network error" + every feature appearing broken). Mic Permissions-Policy opened for the embedded preview so voice calls get real audio. | 🔊 **Voice chain repaired** — Microsoft's free Edge TTS now 403s from cloud IPs, so TTS/ASR/video-narration fall through to the always-available gateway engine (chat → LLM → speech verified end-to-end), with Kokoro (82M, OSS) still available in-browser. |
+| 🖼️ **Vision + image cascade** — image understanding gained a key-free gateway engine (glm-4.5v class); image generation tries the millisecond gateway FIRST (sizes snapped to the engine's 32px grid), then Gemini/Grok/HF/Pollinations as before. | 🎬 **Video pipeline hardened** — scene art and narration each fall back to the gateway engine when the anonymous tiers drain (402/503 storms), so a 2-scene cinematic MP4 renders end-to-end instead of dying mid-job. |
 | 📚 **Knowledge Base (RAG)** — chat with your documents, AnythingLLM/Open WebUI style: upload PDF, DOCX, TXT, MD or CSV → sentence-aware chunking with overlap → BM25-style retrieval → grounded answers with numbered citation chips that map back to the source file and chunk. Private per-user libraries, zero external vector DB. | 📞 **AI Voice Call** — a true real-time phone call with NEXUS: socket.io streaming pipeline (ASR → LLM → TTS), animated call screen with timer, mute & barge-in interruption, live captions, and a captions-mode fallback when the mic is unavailable. |
-| 🪄 **AI Photo Studio** — edit any photo with a sentence (remove background, restore & colorize old photos, cinematic grade, headshots…) powered by the free built-in image-edit engine, plus **Stock Photos** search across the open web (Z.ai engine with an Openverse fallback — always source-attributed). | 🎬 **Video Intelligence** — upload or link a video and NEXUS *watches* it: scene-by-scene breakdown, objects & people, on-screen text, mood & pacing — then answers your follow-up questions with timestamps. |
+
+### 🛠️ What was actually broken (and how it was fixed)
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| "Network error — try again" on sign-in/features | Linux OOM-killer terminated `next-server` at ~1.6GB RSS mid-request | `NODE_OPTIONS=--max-old-space-size=2048` + `turbopackMemoryLimit: 1536` |
+| Sign-in "doesn't work" | Same OOM death (auth itself was healthy — bcrypt+JWT verified 200/201) | Server survives; signup/signin re-verified through the gateway |
+| Voice call silent | Server dead + Edge TTS 403 + ASR chain never fell back | Gateway ASR/TTS fallbacks; socket.io call verified live with replies |
+| Speech Studio 500 | Edge TTS DRM (Sec-MS-GEC) blocks cloud IPs | Z.ai gateway engine fallback returns 24kHz WAV |
+| Vision "no engine configured" | Cascade only had keyed engines | Key-free gateway vision engine appended |
+| Video jobs died at 38% | Free image tier drained (402/503) + no narration fallback | Per-scene gateway image fallback + gateway narration TTS → real MP4 verified |
+| Images took 70–120s | Cascade burned minutes on drained free tiers first | Gateway engine leads the cascade in the sandbox (~15–30s)
 
 ### 📚 Knowledge Base — powered by the open-source RAG pattern
 

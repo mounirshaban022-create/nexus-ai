@@ -280,10 +280,37 @@ export async function geminiImageEdit(
  * Full premium cascade. Engines with missing keys are skipped; failures
  * are recorded and cascade onward. Pollinations/openrouter fallbacks stay
  * in the calling route (they are the existing free paths there).
+ *
+ * The Z.ai gateway engine leads the cascade wherever the gateway is
+ * reachable (sandbox/local dev): it is key-free and answers in seconds,
+ * versus the anonymous free tiers that drain under load. On Vercel the
+ * gateway is unreachable — getZAI() throws, the failure is recorded in
+ * `attempts`, and the cascade continues with the keyed engines.
  */
 export async function premiumImageCascade(prompt: string, size: string): Promise<PremiumImageResult> {
   const attempts: { engine: string; error: string }[] = []
   const engines = premiumImageEngines()
+
+  /* ---- 0. Z.ai gateway (sandbox-first, key-free, millisecond-fast) ---- */
+  try {
+    const { getZAI } = await import('@/lib/zai')
+    const zai = await getZAI()
+    const [w, h] = size.split('x').map(Number)
+    // Z.ai requires 512–2880px per side in 32px multiples (max 2^22 px total).
+    const snap = (n: number) => Math.min(2880, Math.max(512, Math.round((n || 1024) / 32) * 32))
+    const data = await zai.images.generations.create({
+      prompt: `${prompt}, ultra high quality, detailed, professional, sharp focus, beautiful lighting`,
+      size: `${snap(w)}x${snap(h)}`,
+    })
+    const b64 = data?.data?.[0]?.base64
+    const buf = b64 ? Buffer.from(b64, 'base64') : null
+    if (buf && buf.length > 1000) {
+      return { buffer: buf, engine: 'zai', attempts }
+    }
+    attempts.push({ engine: 'zai', error: 'gateway returned no image data' })
+  } catch (err) {
+    attempts.push({ engine: 'zai', error: err instanceof Error ? err.message : String(err) })
+  }
 
   if (engines.gemini) {
     try {

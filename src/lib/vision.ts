@@ -218,9 +218,42 @@ function groqEngine(): VisionEngine {
   }
 }
 
+/* --------------------------- 4. Z.ai gateway ----------------------- *
+ * The sandbox's built-in engine (same gateway that powers chat, TTS,
+ * ASR and image generation — proven reliable). It needs no API key, so
+ * this slot makes vision work out-of-the-box in the sandbox; on hosts
+ * without the gateway getZAI() throws and the cascade reports it like
+ * any other engine failure. */
+
+function zaiEngine(): VisionEngine {
+  return {
+    id: 'zai-vision',
+    configured: () => true,
+    run: async (base64, mimeType, question) => {
+      const { getZAI } = await import('@/lib/zai')
+      const zai = await getZAI()
+      const data = await zai.chat.completions.createVision({
+        model: 'glm-4.5v',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: question },
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+            ],
+          },
+        ],
+      })
+      const text = data?.choices?.[0]?.message?.content ?? ''
+      if (!text.trim()) throw new Error('empty response')
+      return text.trim()
+    },
+  }
+}
+
 /* --------------------------- Cascade ------------------------------- */
 
-const ENGINES: VisionEngine[] = [geminiEngine(), openRouterEngine(), groqEngine()]
+const ENGINES: VisionEngine[] = [geminiEngine(), openRouterEngine(), groqEngine(), zaiEngine()]
 
 /** Analyze an image (data URL or bare base64) through the engine cascade. */
 export async function analyzeImage(

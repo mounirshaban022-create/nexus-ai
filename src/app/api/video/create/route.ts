@@ -57,15 +57,38 @@ const PLANNER_PROMPT = `You are the video director of NEXUS AI. Plan a short vid
 Rules: 3-6 scenes, each scene is a distinct visual beat with smooth visual continuity from the previous scene (same setting/world, progressing action). Style is specified by the user. Write narrations in the SAME LANGUAGE as the request. Image prompts: cinematic camera language (shot type, lens, lighting, color palette), describe composition precisely — no text in images.`
 
 async function edgeTtsToFile(text: string, voice: string, outPath: string) {
-  const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
-  const tts = new MsEdgeTTS()
-  // 96kbps (was 48kbps mono) — doubles narration clarity, half the cost of
-  // the upscale in ffmpeg bitrate that used to mask the thin source audio.
-  await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
-  const { audioStream } = tts.toStream(text)
-  const chunks: Buffer[] = []
-  for await (const chunk of audioStream) chunks.push(chunk as Buffer)
-  await writeFile(outPath, Buffer.concat(chunks))
+  try {
+    const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts')
+    const tts = new MsEdgeTTS()
+    // 96kbps (was 48kbps mono) — doubles narration clarity, half the cost of
+    // the upscale in ffmpeg bitrate that used to mask the thin source audio.
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
+    const { audioStream } = tts.toStream(text)
+    const chunks: Buffer[] = []
+    for await (const chunk of audioStream) chunks.push(chunk as Buffer)
+    const buf = Buffer.concat(chunks)
+    if (buf.length < 100) throw new Error('edge tts returned no audio')
+    await writeFile(outPath, buf)
+    return
+  } catch (edgeErr) {
+    // Edge TTS 403s from cloud IPs (Sec-MS-GEC DRM) — fall through to the
+    // Z.ai gateway engine (same one the voice-call service uses). ffmpeg
+    // sniffs the container by content, so a .mp3-named WAV works fine.
+    console.warn('[video] edge tts failed, using Z.ai engine:', edgeErr instanceof Error ? edgeErr.message : edgeErr)
+    const { getZAI } = await import('@/lib/zai')
+    const zai = await getZAI()
+    const res = await zai.audio.tts.create({
+      input: text.slice(0, 1200),
+      voice: 'tongtong',
+      speed: 1.0,
+      response_format: 'wav',
+      stream: false,
+    })
+    const bytes = await res.arrayBuffer()
+    const buf = Buffer.from(new Uint8Array(bytes))
+    if (buf.length < 100) throw new Error('Z.ai narration TTS returned no audio.')
+    await writeFile(outPath, buf)
+  }
 }
 
 async function audioDuration(file: string): Promise<number> {

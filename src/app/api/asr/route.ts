@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { hfAsr, hfConfigured } from '@/lib/hf-ai'
+import { getZAI } from '@/lib/zai'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 
 const requestSchema = z.object({
@@ -60,8 +61,24 @@ export async function POST(req: NextRequest) {
           engine: 'hf-whisper',
         })
       } catch (hfErr) {
-        console.warn('[api/asr] HF Whisper failed, trying Groq Whisper:', hfErr instanceof Error ? hfErr.message : hfErr)
+        console.warn('[api/asr] HF Whisper failed, trying Z.ai ASR:', hfErr instanceof Error ? hfErr.message : hfErr)
       }
+    }
+
+    /* FALLBACK — Z.ai gateway ASR (Whisper-class engine, same one the
+     * voice-call mini-service uses — proven reliable in the sandbox). */
+    try {
+      const zai = await getZAI()
+      const result = await zai.audio.asr.create({ file_base64: base64Audio })
+      const transcript = result?.text?.trim() ?? ''
+      if (transcript) return NextResponse.json({ transcript, engine: 'zai-asr' })
+      return NextResponse.json({
+        transcript: '',
+        note: 'No speech detected in this audio.',
+        engine: 'zai-asr',
+      })
+    } catch (zaiErr) {
+      console.warn('[api/asr] Z.ai ASR failed, trying Groq Whisper:', zaiErr instanceof Error ? zaiErr.message : zaiErr)
     }
 
     // Fallback 1 — Groq Whisper-large-v3 (OpenAI-compatible, fast + cheap).

@@ -3,6 +3,43 @@ import { requireVerifiedSession } from '@/lib/auth'
 import { z } from 'zod'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { DEFAULT_VOICE, edgeFallbackFor, isEdgeVoice, pickVoiceForLanguage } from '@/lib/voices'
+import { getZAI } from '@/lib/zai'
+
+/**
+ * Z.ai SDK TTS — the always-available fallback engine. Microsoft's free Edge
+ * TTS started returning 403 from cloud IPs (Sec-MS-GEC DRM requirement), so
+ * every Edge failure now falls through to this open SDK pipeline — the same
+ * engine the voice-call mini-service uses (proven reliable in-sandbox).
+ */
+async function zaiTts(text: string, voice: string, speed: number): Promise<Buffer> {
+  const zai = await getZAI()
+  const res = await zai.audio.tts.create({
+    input: text.slice(0, 1200),
+    voice: VOICE_MAP[voice] ?? 'tongtong',
+    speed: Math.min(Math.max(speed, 0.5), 2),
+    response_format: 'wav',
+    stream: false,
+  })
+  const bytes = await res.arrayBuffer()
+  const buffer = Buffer.from(new Uint8Array(bytes))
+  if (buffer.length < 100) throw new Error('Z.ai TTS returned no audio.')
+  return buffer
+}
+
+/** NEXUS / Edge voice ids → Z.ai neural voice ids. */
+const VOICE_MAP: Record<string, string> = {
+  tongtong: 'tongtong',
+  'en-US-AvaMultilingualNeural': 'tongtong',
+  'en-US-EmmaMultilingualNeural': 'tongtong',
+  'en-US-AriaNeural': 'tongtong',
+  'en-US-JennyNeural': 'tongtong',
+  'en-US-GuyNeural': 'tongtong',
+  'en-US-ChristopherNeural': 'tongtong',
+  'en-US-MichelleNeural': 'tongtong',
+  'en-US-RogerNeural': 'tongtong',
+  'ar-EG-SalmaNeural': 'tongtong',
+  'ar-SA-ZariyahNeural': 'tongtong',
+}
 
 const requestSchema = z.object({
   text: z.string().min(1).max(6000),
@@ -131,16 +168,21 @@ export async function POST(req: NextRequest) {
     /* ---------- Provider: free Microsoft neural voices ---------- */
     if (isEdgeVoice(effectiveVoice)) {
       // Bug G: synthesize every chunk in parallel (was sequential for-loop).
-      const buffers = await Promise.all(chunks.map((c) => edgeTts(c, effectiveVoice, speed)))
-      const merged = Buffer.concat(buffers)
-      return new NextResponse(new Uint8Array(merged), {
-        status: 200,
-        headers: {
-          'Content-Type': 'audio/mpeg',
-          'Content-Length': merged.length.toString(),
-          'Cache-Control': 'no-cache',
-        },
-      })
+      try {
+        const buffers = await Promise.all(chunks.map((c) => edgeTts(c, effectiveVoice, speed)))
+        const merged = Buffer.concat(buffers)
+        return new NextResponse(new Uint8Array(merged), {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': merged.length.toString(),
+            'Cache-Control': 'no-cache',
+          },
+        })
+      } catch (edgeErr) {
+        // Edge TTS 403s from cloud IPs — fall through to the Z.ai engine.
+        console.warn(`[api/tts] Edge failed (${edgeErr instanceof Error ? edgeErr.message : edgeErr}), using Z.ai engine`)
+      }
     }
 
     /* ---------- Provider: NEXUS voices → free neural equivalents ----------
@@ -152,20 +194,60 @@ export async function POST(req: NextRequest) {
       if (freeVoice !== effectiveVoice) {
         console.warn(`[api/tts] premium voice ${effectiveVoice} → free Edge voice ${freeVoice}`)
       }
-      const buffers = await Promise.all(chunks.map((c) => edgeTts(c, freeVoice, speed)))
-      const merged = Buffer.concat(buffers)
+      try {
+        const buffers = await Promise.all(chunks.map((c) => edgeTts(c, freeVoice, speed)))
+        const merged = Buffer.concat(buffers)
+        return new NextResponse(new Uint8Array(merged), {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': merged.length.toString(),
+            'Cache-Control': 'no-cache',
+          },
+        })
+      } catch (edgeErr) {
+        console.warn(`[api/tts] Edge failed (${edgeErr instanceof Error ? edgeErr.message : edgeErr}), using Z.ai engine`)
+      }
+
+      /* ---------- Final engine: Z.ai SDK (open SDK, no key needed) ----------
+       * Synthesized per ≤1200-char chunk then concatenated — the client's
+       * <audio> element plays a seamless sequence of WAV frames. */
+      const wavBuffers: Buffer[] = []
+      for (const chunk of chunks) {
+        wavBuffers.push(await zaiTts(chunk, effectiveVoice, speed))
+      }
+      const merged = Buffer.concat(wavBuffers)
       return new NextResponse(new Uint8Array(merged), {
         status: 200,
         headers: {
-          'Content-Type': 'audio/mpeg',
+          'Content-Type': 'audio/wav',
           'Content-Length': merged.length.toString(),
           'Cache-Control': 'no-cache',
         },
       })
     }
   } catch (error) {
-    // Last-resort fail-soft: if ANYTHING above blew up, synthesize with a
-    // free Edge voice so the caller still gets audio instead of a 500.
+    // Last-resort fail-soft: if ANYTHING above blew up, try the Z.ai engine
+    // (and only then Edge) so the caller still gets audio instead of a 500.
+    try {
+      if (parsedData?.text) {
+        const merged = Buffer.concat(
+          splitTextIntoChunks(parsedData.text.trim()).map((c) => {
+            return zaiTts(c, parsedData?.voice ?? DEFAULT_VOICE, parsedData?.speed ?? 1.0)
+          })
+        )
+        return new NextResponse(new Uint8Array(merged), {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/wav',
+            'Content-Length': merged.length.toString(),
+            'Cache-Control': 'no-cache',
+          },
+        })
+      }
+    } catch {
+      /* try Edge below */
+    }
     try {
       if (parsedData?.text) {
         const freeVoice = edgeFallbackFor(parsedData.voice ?? DEFAULT_VOICE)
