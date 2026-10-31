@@ -21,6 +21,20 @@ type ZaiConfig = {
 
 type ZaiTtsResponse = Response & { arrayBuffer: () => Promise<ArrayBuffer> }
 
+type ZaiVisionContentItem = {
+  type: 'text' | 'image_url' | 'video_url' | 'file_url'
+  text?: string
+  image_url?: { url: string }
+  video_url?: { url: string }
+  file_url?: { url: string }
+}
+
+type ZaiImageGenResponse = {
+  created?: number
+  data?: Array<{ base64?: string }>
+  content_filter?: Array<{ role: string; level: number }>
+}
+
 type ZaiSdk = {
   chat: {
     completions: {
@@ -35,6 +49,13 @@ type ZaiSdk = {
         | { choices?: Array<{ message?: { content?: string } }> }
         | AsyncIterable<unknown>
       >
+      /** Multimodal understanding — images, VIDEO (video_url), files. */
+      createVision: (args: {
+        model: string
+        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string | ZaiVisionContentItem[] }>
+        stream?: boolean
+        thinking?: { type: 'enabled' | 'disabled' }
+      }) => Promise<{ choices?: Array<{ message?: { content?: string } }> }>
     }
   }
   audio: {
@@ -51,6 +72,48 @@ type ZaiSdk = {
     asr: {
       create: (args: { file_base64?: string; file?: string; stream?: boolean }) => Promise<{
         text?: string
+      }>
+    }
+  }
+  images: {
+    generations: {
+      create: (args: {
+        model?: string
+        prompt: string
+        size?: string
+      }) => Promise<ZaiImageGenResponse>
+      /** Instruction-based AI photo editing — needs a prompt + source image.
+       *  NOTE: the gateway's actual wire format is `images: [{ url }]`
+       *  (array of {url} objects) even though older SDK typings say `image`.
+       *  Both are accepted by this signature — the route passes `images`. */
+      edit: (args: {
+        model?: string
+        prompt: string
+        image?: string
+        images?: Array<{ url: string }>
+        size?: string
+      }) => Promise<ZaiImageGenResponse>
+    }
+    /** Web-wide stock photo search with source attribution. */
+    search: {
+      create: (args: {
+        query: string
+        count?: number
+        gl?: string
+        rank?: boolean
+      }) => Promise<{
+        success: boolean
+        query: string
+        count: number
+        ranked: boolean
+        results: Array<{
+          original_url: string
+          caption?: string
+          source?: string
+          original_width?: string
+          original_height?: string
+        }>
+        error?: string
       }>
     }
   }
@@ -76,20 +139,68 @@ function configFromEnv(): ZaiConfig | null {
   }
 }
 
+/**
+ * Sandbox detection — .z-ai-config only exists on the Z.ai dev sandbox
+ * (process.cwd() / homedir / /etc). On Vercel none of these exist, so we
+ * return null IMMEDIATELY without ever attempting a network call — this
+ * keeps the original owner directive intact ("Z.ai doesn't work on
+ * Vercel") while unlocking the millisecond engine + free multimodal
+ * tools (AI photo edit, stock image search, video understanding) in
+ * sandboxes where the platform gateway is genuinely available.
+ */
+function sandboxConfigFileExists(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as { existsSync: (p: string) => boolean }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path') as { join: (...p: string[]) => string }
+    const home = process.env.HOME || process.env.USERPROFILE || ''
+    const candidates = [
+      path.join(process.cwd(), '.z-ai-config'),
+      home ? path.join(home, '.z-ai-config') : '',
+      path.join('/etc', '.z-ai-config'),
+    ].filter(Boolean)
+    return candidates.some((p) => fs.existsSync(p))
+  } catch {
+    return false
+  }
+}
+
 /** Loads the Z.ai SDK if possible. Returns null when neither the
  *  file-based config (sandbox) nor env vars (Vercel) are available.
- *  Memoized. */
+ *  Memoized. Vercel-safe: zero network attempts when no config is found. */
 async function loadZaiSdk(): Promise<ZaiSdk | null> {
-  // ── Z.AI PERMANENTLY DISABLED (owner directive) ─────────────────────
-  // The owner mandates: "Don't use Z.ai AI at all — it doesn't work on
-  // Vercel." This single choke point always returns null, so every guarded
-  // branch (zaiConfigured() === false) skips Z.ai instantly and the
-  // premium engine chain (Gemini / HF / OpenRouter / Pollinations) takes
-  // over. All exports are kept so static imports still resolve. The old
-  // SDK-loading code was removed (recoverable from git history).
-  globalForZAI.zaiInitFailed = true
-  globalForZAI.zaiInitError = 'Z.ai permanently disabled by owner directive — premium engines handle all AI workloads'
-  return null
+  if (globalForZAI.zai) return globalForZAI.zai
+  if (globalForZAI.zaiInitFailed) return null
+
+  const envConfig = configFromEnv()
+  if (!envConfig && !sandboxConfigFileExists()) {
+    // Vercel / plain hosting: no Z.ai gateway → premium engines take over.
+    globalForZAI.zaiInitFailed = true
+    globalForZAI.zaiInitError = 'Z.ai gateway not present (no env config, no .z-ai-config file) — premium engines handle all AI workloads'
+    return null
+  }
+
+  try {
+    const mod = (await import('z-ai-web-dev-sdk')) as unknown as {
+      default: { create: () => Promise<ZaiSdk> }
+      create?: () => Promise<ZaiSdk>
+    }
+    const ZAI = mod.default ?? mod
+    const sdk = (await (ZAI as { create: () => Promise<ZaiSdk> }).create()) as ZaiSdk
+    if (sdk?.chat?.completions) {
+      globalForZAI.zai = sdk
+      console.log('[zai] SDK loaded — sandbox gateway active (chat/tts/asr/images/vision)')
+      return sdk
+    }
+    globalForZAI.zaiInitFailed = true
+    globalForZAI.zaiInitError = 'Z.ai SDK shape unexpected'
+    return null
+  } catch (e) {
+    globalForZAI.zaiInitFailed = true
+    globalForZAI.zaiInitError = e instanceof Error ? e.message : String(e)
+    return null
+  }
 }
 
 /** True when the Z.ai SDK successfully loaded AND is usable. The

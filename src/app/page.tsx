@@ -27,6 +27,9 @@ import { FramedPanel } from '@/components/nexus/framed-panel'
 import { WhatsAppMode } from '@/components/omni/whatsapp-mode'
 import { NexusSettingsMode } from '@/components/nexus/settings-mode'
 import { SkillsMode } from '@/components/omni/skills-mode'
+import { PhotoStudioMode } from '@/components/omni/photo-studio-mode'
+import { VideoIntelMode } from '@/components/omni/video-intel-mode'
+import { VoiceCallMode } from '@/components/nexus/voice-call'
 import { translate } from '@/lib/i18n'
 
 export default function Page() {
@@ -233,6 +236,45 @@ export default function Page() {
                 wrapper resolves them to dark values on the dark framed panel. */}
             <div className="dark flex h-full min-h-0 flex-1 flex-col">
               <WhatsAppMode />
+            </div>
+          </FramedPanel>
+        )}
+
+        {view.type === 'photo-studio' && (
+          <FramedPanel
+            fill
+            dark
+            title="AI Photo Studio"
+            description="Edit photos with a sentence — retouch, restore, restyle — and search the open web for stock imagery."
+          >
+            <div className="dark flex h-full min-h-0 flex-1 flex-col">
+              <PhotoStudioMode />
+            </div>
+          </FramedPanel>
+        )}
+
+        {view.type === 'video-intel' && (
+          <FramedPanel
+            fill
+            dark
+            title="Video Intelligence"
+            description="Upload or link a video — NEXUS watches it and delivers a scene-by-scene analysis, then answers your questions."
+          >
+            <div className="dark flex h-full min-h-0 flex-1 flex-col">
+              <VideoIntelMode />
+            </div>
+          </FramedPanel>
+        )}
+
+        {view.type === 'call' && (
+          <FramedPanel
+            fill
+            dark
+            title="AI Voice Call"
+            description="Talk to NEXUS in real time — a live phone call with instant speech, interruptions welcome."
+          >
+            <div className="dark flex h-full min-h-0 flex-1 flex-col">
+              <VoiceCallMode onExit={() => setView({ type: 'chat' })} />
             </div>
           </FramedPanel>
         )}

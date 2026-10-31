@@ -45,6 +45,9 @@ export type View =
   | { type: 'whatsapp' }
   | { type: 'skills' }
   | { type: 'settings' }
+  | { type: 'photo-studio' }
+  | { type: 'video-intel' }
+  | { type: 'call' }
 
 /* ------------------------------------------------------------------ */
 /* Catalog (static import — instant client-side search over 255)       */

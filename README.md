@@ -19,6 +19,13 @@ A full-stack AI super app — 13 abilities, 27 live connectors, a real code sand
 | 📄 **Office Studio** — real Word/Excel/PowerPoint with premium templates | 👁️ **Vision** — image understanding | 🔍 **Web Search** — live results + AI digest |
 | 📖 **Page Reader** — clean extraction | 🗣️ **Voice Studio** — 40+ neural voices, TTS + ASR | 🧠 **AI Models** — bring your own free API keys |
 
+## 🆕 Latest Upgrades
+
+| | |
+|---|---|
+| 📞 **AI Voice Call** — a true real-time phone call with NEXUS: socket.io streaming pipeline (ASR → LLM → TTS), animated call screen with timer, mute & barge-in interruption, live captions, and a captions-mode fallback when the mic is unavailable. | 🪄 **AI Photo Studio** — edit any photo with a sentence (remove background, restore & colorize old photos, cinematic grade, headshots…) powered by the free built-in image-edit engine, plus **Stock Photos** search across the open web (Z.ai engine with an Openverse fallback — always source-attributed). |
+| 🎬 **Video Intelligence** — upload or link a video and NEXUS *watches* it: scene-by-scene breakdown, objects & people, on-screen text, mood & pacing — then answers your follow-up questions with timestamps. | ⚡ **Z.ai gateway re-enabled (Vercel-safe)** — the millisecond sandbox engine is back via config-file detection: zero network attempts on Vercel (premium engines take over), full multimodal power (chat, TTS, ASR, vision, image edit/search) in the sandbox. |
+
 ## 🔌 27 Live Connectors
 
 **Web & Data**: Web Search · Read Page · Weather · Forecast · Rocket Launches · World News (BBC) · Steam Games

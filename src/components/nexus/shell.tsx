@@ -14,10 +14,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Clapperboard,
   LogOut,
   Menu,
   MessageCircle,
   MessageSquare,
+  Phone,
   Pin,
   Plus,
   Puzzle,
@@ -26,6 +28,7 @@ import {
   Settings2,
   Trash2,
   Users,
+  Wand2,
   type LucideIcon,
 } from 'lucide-react'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -367,6 +370,27 @@ function SidebarContent({
             iconClassName="text-emerald-600 dark:text-emerald-400"
           />
           <NavItem
+            icon={Phone}
+            label="Voice Call"
+            active={view.type === 'call'}
+            onClick={() => go({ type: 'call' })}
+            iconClassName="text-rose-500 dark:text-rose-400"
+          />
+          <NavItem
+            icon={Wand2}
+            label="Photo Studio"
+            active={view.type === 'photo-studio'}
+            onClick={() => go({ type: 'photo-studio' })}
+            iconClassName="text-amber-500 dark:text-amber-400"
+          />
+          <NavItem
+            icon={Clapperboard}
+            label="Video Intelligence"
+            active={view.type === 'video-intel'}
+            onClick={() => go({ type: 'video-intel' })}
+            iconClassName="text-violet-500 dark:text-violet-400"
+          />
+          <NavItem
             icon={Puzzle}
             label={t('nav.skills')}
             badge="79"
@@ -517,17 +541,19 @@ export function NexusShell(props: NexusShellProps) {
   }
 
   /* Bottom tab bar → same view switch as the desktop nav. */
-  const goTab = (type: 'chat' | 'agents' | 'skills' | 'settings') => {
+  const goTab = (type: 'chat' | 'agents' | 'call' | 'skills' | 'settings') => {
     if (type === 'chat') setView({ type: 'chat' })
     else if (type === 'agents') setView({ type: 'agents' })
+    else if (type === 'call') setView({ type: 'call' })
     else if (type === 'skills') setView({ type: 'skills' })
     else setView({ type: 'settings' })
     setMobileOpen(false)
   }
 
-  const tabs: { type: 'chat' | 'agents' | 'skills' | 'settings'; icon: LucideIcon; label: string }[] = [
+  const tabs: { type: 'chat' | 'agents' | 'call' | 'skills' | 'settings'; icon: LucideIcon; label: string }[] = [
     { type: 'chat', icon: MessageSquare, label: t('nav.chat') },
     { type: 'agents', icon: Users, label: t('nav.agents') },
+    { type: 'call', icon: Phone, label: 'Call' },
     { type: 'skills', icon: Puzzle, label: t('nav.skills') },
     { type: 'settings', icon: Settings2, label: t('nav.settings') },
   ]

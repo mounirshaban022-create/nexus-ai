@@ -89,3 +89,5 @@ p3_ui_cookies.txt
 /test-*.ts
 /voice-overlay-fixed.png
 smoke-audit.db*
+mini-services/voice-call/node_modules/
+*.log

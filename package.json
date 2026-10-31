@@ -99,6 +99,8 @@
     "recharts": "^2.15.4",
     "remark-gfm": "^4.0.1",
     "sharp": "^0.34.3",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
