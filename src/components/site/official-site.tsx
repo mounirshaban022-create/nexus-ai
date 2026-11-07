@@ -1,21 +1,19 @@
 'use client'
 
 /**
- * NEXUS Official Site v3 — the front door of the product.
+ * NEXUS Official Site v4 — the front door of the product.
  *
  * A full marketing website that TALKS with its visitors: an AI concierge
  * widget floats on every screen, a live demo chat sits mid-page, and a
  * "Launch NEXUS" CTA hands off into the real app (auth/guest flow owned
  * by page.tsx).
  *
- * Elite open-source stack: Framer Motion (29k★) orchestration ·
- * Three.js + R3F (105k★/29k★) WebGL core · Lenis (10k★) buttery scroll ·
- * Tailwind 4 + shadcn/ui · Lucide. Zero GSAP pinning — the v2 void bug
- * is gone by design.
+ * Performance build: native scrolling (Lenis scroll-hijacking removed),
+ * no WebGL, no full-page overlays — Framer Motion (29k★) one-shot reveals,
+ * Tailwind 4 + shadcn/ui · Lucide only.
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import Lenis from 'lenis'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, Bot, Menu, MessagesSquare, Sparkles, X } from 'lucide-react'
 import { BrandLockup } from '@/components/nexus/shared'
@@ -35,45 +33,11 @@ import {
 } from './sections'
 
 /* ------------------------------------------------------------------ */
-/* Lenis smooth scroll                                                 */
+/* Native smooth scrolling (CSS scroll-behavior) — no JS scroll loop    */
 /* ------------------------------------------------------------------ */
 
-declare global {
-  interface Window {
-    __lenis?: Lenis
-  }
-}
-
-function SmoothScroll() {
-  useEffect(() => {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reduce) return
-    const lenis = new Lenis({ lerp: 0.11, wheelMultiplier: 1 })
-    window.__lenis = lenis
-    let raf = 0
-    const loop = (time: number) => {
-      lenis.raf(time)
-      raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-    return () => {
-      cancelAnimationFrame(raf)
-      lenis.destroy()
-      window.__lenis = undefined
-    }
-  }, [])
-  return null
-}
-
 function scrollToId(id: string) {
-  const el = document.getElementById(id)
-  if (!el) return
-  const lenis = window.__lenis
-  if (lenis) {
-    lenis.scrollTo(el, { offset: -88, duration: 1.2 })
-  } else {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 const NAV_LINKS = [
@@ -183,10 +147,8 @@ export function OfficialSite({
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-x-clip bg-background text-foreground">
-      {/* Cinematic grain + scroll progress hairline */}
-      <div aria-hidden className="site-grain" />
+      {/* Scroll progress hairline */}
       <ScrollProgress />
-      <SmoothScroll />
 
       {/* ---------------- Floating glass pill nav ---------------- */}
       <header className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-3 sm:top-4">
@@ -194,7 +156,7 @@ export function OfficialSite({
           <div className="flex h-14 items-center justify-between gap-2 rounded-full border border-border/70 bg-background/70 pl-4 pr-2 shadow-lg shadow-black/30 backdrop-blur-xl sm:pl-5">
             <button
               type="button"
-              onClick={() => window.__lenis?.scrollTo(0, { duration: 1.1 }) ?? window.scrollTo({ top: 0, behavior: 'smooth' })}
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               aria-label="Back to top"
               className="shrink-0"
             >

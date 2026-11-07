@@ -1,25 +1,18 @@
 'use client'
 
 /**
- * NEXUS Official Site — hero v3.
+ * NEXUS Official Site — hero (performance build).
  *
- * Composition rules fixed vs v2: type never sits on the WebGL core —
- * the orb lives in its own masked zone below the copy, flanked by
- * floating glass chat cards that show the product talking. Line-level
- * blur/stagger reveal (Framer Motion 29k★), ember→violet aurora,
- * blueprint grid with a radial mask, and scroll parallax on exit.
+ * The Three.js WebGL core was replaced by a pure-CSS orb — the same
+ * visual drama with zero canvas, zero GPU compute and ~600 KB less
+ * JavaScript. Entrance motion is one-shot (plays once), scroll-linked
+ * parallax is gone, and the only infinite animations left are cheap
+ * transform-only keyframes (orb ring, floating glass chat cards).
  */
 
-import { Suspense, useRef } from 'react'
-import dynamic from 'next/dynamic'
-import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { ArrowRight, MessagesSquare, Sparkles } from 'lucide-react'
-import { AuroraBackdrop, Magnetic } from './fx'
-
-const OrbField = dynamic(() => import('./orb-field'), {
-  ssr: false,
-  loading: () => <div className="h-full w-full" />,
-})
+import { AuroraBackdrop } from './fx'
 
 const EASE = [0.21, 1.02, 0.73, 1] as const
 
@@ -36,9 +29,9 @@ function RevealLine({
     <span className={`block overflow-visible ${className ?? ''}`}>
       <motion.span
         className="block"
-        initial={{ opacity: 0, y: 34, filter: 'blur(12px)' }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-        transition={{ duration: 0.9, delay, ease: EASE }}
+        initial={{ opacity: 0, y: 26 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.7, delay, ease: EASE }}
       >
         {children}
       </motion.span>
@@ -49,20 +42,17 @@ function RevealLine({
 /** Small glass chat card that floats beside the orb. */
 function ChatCard({
   side,
-  offset,
   children,
 }: {
   side: 'left' | 'right'
-  offset: string
   children: React.ReactNode
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 26, scale: 0.94 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.8, delay: 1.15, ease: EASE }}
-      className={`absolute top-1/2 ${side === 'left' ? 'left-2 -translate-y-1/2' : 'right-2 -translate-y-1/2'} hidden md:block`}
-      style={{ [side === 'left' ? 'left' : 'right']: offset } as React.CSSProperties}
+      transition={{ duration: 0.8, delay: 1.05, ease: EASE }}
+      className={`absolute top-1/2 -translate-y-1/2 ${side === 'left' ? 'left-0' : 'right-0'} hidden md:block`}
     >
       <div
         className={`nx-glow-card w-60 rounded-2xl border border-border/70 bg-background/60 p-3.5 backdrop-blur-xl ${
@@ -84,23 +74,12 @@ export function Hero({
   onGuest: () => void
   onTalk: () => void
 }) {
-  const sectionRef = useRef<HTMLElement | null>(null)
-  const reduce = useReducedMotion()
-  const { scrollYProgress } = useScroll({
-    target: sectionRef,
-    offset: ['start start', 'end start'],
-  })
-  const orbY = useTransform(scrollYProgress, [0, 1], ['0%', '18%'])
-  const copyOpacity = useTransform(scrollYProgress, [0, 0.55], [1, 0])
-  const copyY = useTransform(scrollYProgress, [0, 0.55], [0, -46])
-
   return (
     <section
-      ref={sectionRef}
       aria-label="NEXUS — one AI, every superpower"
       className="relative flex min-h-[100svh] flex-col overflow-clip"
     >
-      {/* ── Backdrop: aurora + blueprint grid ─────────────────────── */}
+      {/* ── Backdrop: static aurora + blueprint grid ──────────────── */}
       <AuroraBackdrop />
       <div
         aria-hidden
@@ -112,10 +91,7 @@ export function Hero({
       />
 
       {/* ── Copy ───────────────────────────────────────────────────── */}
-      <motion.div
-        style={reduce ? undefined : { opacity: copyOpacity, y: copyY }}
-        className="relative z-10 mx-auto w-full max-w-5xl px-4 pt-32 text-center sm:px-6 sm:pt-36"
-      >
+      <div className="relative z-10 mx-auto w-full max-w-5xl px-4 pt-32 text-center sm:px-6 sm:pt-36">
         {/* Announcement pill */}
         <motion.button
           type="button"
@@ -132,7 +108,7 @@ export function Hero({
           <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden />
         </motion.button>
 
-        {/* Headline — line-level blur reveal, serif-italic accent */}
+        {/* Headline — one-shot rise, serif-italic accent */}
         <h1 className="font-display mt-7 text-[2.85rem] font-bold leading-[1.04] tracking-[-0.035em] sm:text-6xl lg:text-7xl">
           <RevealLine delay={0.2}>One AI.</RevealLine>
           <RevealLine delay={0.32}>
@@ -157,16 +133,14 @@ export function Hero({
           transition={{ duration: 0.8, delay: 0.6, ease: EASE }}
           className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row"
         >
-          <Magnetic strength={0.18}>
-            <button
-              type="button"
-              onClick={onJoin}
-              className="nx-gradient-surface flex min-h-[52px] items-center gap-2 rounded-full px-8 text-sm font-semibold shadow-[0_10px_44px_-10px_rgba(255,90,95,0.55)]"
-            >
-              Launch NEXUS
-              <ArrowRight className="h-4 w-4" aria-hidden />
-            </button>
-          </Magnetic>
+          <button
+            type="button"
+            onClick={onJoin}
+            className="nx-gradient-surface flex min-h-[52px] items-center gap-2 rounded-full px-8 text-sm font-semibold shadow-[0_10px_44px_-10px_rgba(255,90,95,0.55)]"
+          >
+            Launch NEXUS
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </button>
           <button
             type="button"
             onClick={onTalk}
@@ -194,20 +168,15 @@ export function Hero({
             or explore as a guest
           </button>
         </motion.div>
-      </motion.div>
+      </div>
 
-      {/* ── Orb zone (own stage — masked, never behind the copy) ──── */}
-      <motion.div
-        style={reduce ? undefined : { y: orbY }}
-        className="relative z-0 mx-auto -mt-2 w-full max-w-6xl flex-1 px-4 sm:px-6"
-      >
-        <div className="relative mx-auto h-[46svh] min-h-[360px] max-h-[520px] w-full">
-          <Suspense fallback={null}>
-            <OrbField className="absolute inset-0 [mask-image:radial-gradient(ellipse_72%_72%_at_50%_50%,black_52%,transparent_76%)]" />
-          </Suspense>
+      {/* ── Orb zone — pure-CSS NEXUS core, flanked by glass cards ── */}
+      <div className="relative z-0 mx-auto -mt-2 w-full max-w-6xl flex-1 px-4 sm:px-6">
+        <div className="relative mx-auto flex h-[46svh] min-h-[360px] max-h-[520px] w-full items-center justify-center">
+          <div className="nx-orb" role="img" aria-label="The glowing NEXUS core" />
 
           {/* Floating glass chat cards — the product, talking */}
-          <ChatCard side="left" offset="max-md:hidden">
+          <ChatCard side="left">
             <p className="text-[11px] font-medium leading-snug text-foreground/90">
               “Design a launch logo, then draft the announcement email.”
             </p>
@@ -219,7 +188,7 @@ export function Hero({
             </div>
           </ChatCard>
 
-          <ChatCard side="right" offset="max-md:hidden">
+          <ChatCard side="right">
             <p className="text-[11px] font-medium leading-snug text-foreground/90">
               “Voice: order my usual coffee.”
             </p>
@@ -235,7 +204,7 @@ export function Hero({
             </div>
           </ChatCard>
         </div>
-      </motion.div>
+      </div>
 
       {/* Fade into the page canvas */}
       <div aria-hidden className="pointer-events-none relative z-10 h-24 bg-gradient-to-b from-transparent to-background" />

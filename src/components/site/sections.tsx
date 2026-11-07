@@ -1,16 +1,16 @@
 'use client'
 
 /**
- * NEXUS Official Site v3 — content sections.
+ * NEXUS Official Site v4 — content sections (performance build).
  *
  * Design language: 2025 award-tier dark editorial — star-powered OSS
  * marquees, spotlight bento grid, snap-scroll agency gallery, CSS-sticky
- * stacking workflow deck, parallax showcase gallery, triple vertical
- * testimonial marquees, and a giant cropped footer wordmark.
+ * stacking workflow deck, showcase gallery, tidy testimonial grid, and a
+ * giant cropped footer wordmark.
  *
- * Reliability rule: zero GSAP pinning/spacers (that is what created the
- * black-void bug in v2). Scroll choreography = CSS sticky/masks/keyframes
- * + Framer Motion whileInView only.
+ * Performance rule: every continuous animation is transform-only CSS;
+ * no vertical marquees, no animated box-shadows, no blurred moving
+ * layers. Reveals are one-shot via Framer Motion whileInView.
  */
 
 import Image from 'next/image'
@@ -67,16 +67,13 @@ import { cn } from '@/lib/utils'
 const OSS_STARS: Array<{ name: string; stars: string }> = [
   { name: 'React', stars: '230k' },
   { name: 'Next.js', stars: '128k' },
-  { name: 'Three.js', stars: '105k' },
   { name: 'TypeScript', stars: '102k' },
   { name: 'Tailwind CSS', stars: '88k' },
   { name: 'shadcn/ui', stars: '80k' },
   { name: 'Prisma', stars: '42k' },
   { name: 'Framer Motion', stars: '29k' },
-  { name: 'GSAP', stars: '20k' },
   { name: 'Radix UI', stars: '17k' },
   { name: 'Lucide', stars: '12k' },
-  { name: 'Lenis', stars: '10k' },
 ]
 
 const CAPABILITY_CHIPS = [
@@ -93,7 +90,7 @@ function OssRow({ items, reverse = false }: { items: Array<{ name: string; stars
         {row.map((item, i) => (
           <span
             key={`${item.name}-${i}`}
-            className="flex shrink-0 items-center gap-2 rounded-full border border-border/70 bg-background/40 px-4 py-2 text-[13px] font-medium text-muted-foreground backdrop-blur"
+            className="flex shrink-0 items-center gap-2 rounded-full border border-border/70 bg-background/40 px-4 py-2 text-[13px] font-medium text-muted-foreground"
           >
             <Github className="h-3.5 w-3.5" aria-hidden />
             {item.name}
@@ -149,11 +146,10 @@ const AGENT_CHIPS = [
 function AgentsVisual() {
   return (
     <div className="mt-6 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-      {AGENT_CHIPS.map((chip, i) => (
+      {AGENT_CHIPS.map((chip) => (
         <div
           key={chip.name}
-          className="site-chip-pulse flex items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 py-2.5 text-xs font-medium text-foreground/85 backdrop-blur"
-          style={{ animationDelay: `${i * 0.45}s` }}
+          className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/50 px-3 py-2.5 text-xs font-medium text-foreground/85 transition-colors hover:border-[#ff5a5f]/35"
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: chip.dot }} aria-hidden />
           <span className="truncate">{chip.name}</span>
@@ -655,11 +651,6 @@ function TestimonialCard({ t }: { t: (typeof TESTIMONIALS)[number] }) {
 }
 
 export function Testimonials() {
-  const columns = [
-    TESTIMONIALS.slice(0, 3),
-    TESTIMONIALS.slice(3, 6),
-    TESTIMONIALS.slice(6, 9),
-  ]
   return (
     <section aria-labelledby="testimonials-title" className="relative py-20 sm:py-24">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
@@ -672,31 +663,13 @@ export function Testimonials() {
             </>
           }
         />
-        <Reveal delay={0.1}>
-          <div className="marquee-paused mt-14 hidden max-h-[560px] gap-4 overflow-hidden [mask-image:linear-gradient(to_bottom,transparent,black_12%,black_88%,transparent)] md:grid md:grid-cols-3">
-            {columns.map((col, ci) => (
-              <div
-                key={ci}
-                className={cn(
-                  'flex flex-col gap-4',
-                  ci === 0 && 'site-marquee-y',
-                  ci === 1 && 'site-marquee-y-reverse',
-                  ci === 2 && 'site-marquee-y-slow',
-                )}
-              >
-                {[...col, ...col].map((t, i) => (
-                  <TestimonialCard key={`${t.name}-${i}`} t={t} />
-                ))}
-              </div>
-            ))}
-          </div>
-          {/* Mobile: static grid (vertical marquees need height control) */}
-          <div className="mt-12 grid gap-4 md:hidden">
-            {TESTIMONIALS.slice(0, 3).map((t) => (
-              <TestimonialCard key={t.name} t={t} />
-            ))}
-          </div>
-        </Reveal>
+        <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {TESTIMONIALS.slice(0, 6).map((t, i) => (
+            <Reveal key={t.name} delay={0.05 * i} className="h-full">
+              <TestimonialCard t={t} />
+            </Reveal>
+          ))}
+        </div>
       </div>
     </section>
   )
@@ -729,7 +702,7 @@ const FAQS: Array<{ q: string; a: string }> = [
   },
   {
     q: 'Is it built on open source?',
-    a: 'Extensively: Next.js, React, Three.js, Tailwind, shadcn/ui, Framer Motion, Radix, Lucide, Lenis, Prisma and more. The credits below link every star count.',
+    a: 'Extensively: Next.js, React, TypeScript, Tailwind, shadcn/ui, Framer Motion, Radix, Lucide, Prisma and more. The credits below link every star count.',
   },
 ]
 
@@ -852,7 +825,7 @@ export function SiteFooter({ onTalk }: { onTalk: () => void }) {
             Built by <span className="font-medium text-foreground/90">Mounir Shaaban</span>
           </p>
           <p className="mt-1 flex items-center gap-1 text-muted-foreground">
-            <WorkflowIcon className="h-3 w-3" aria-hidden /> React · Next.js · Three.js · Framer Motion · Lenis
+            <WorkflowIcon className="h-3 w-3" aria-hidden /> React · Next.js · Tailwind · Framer Motion
           </p>
           <p className="mt-4 text-muted-foreground/70">© {year} NEXUS. All rights reserved.</p>
         </div>

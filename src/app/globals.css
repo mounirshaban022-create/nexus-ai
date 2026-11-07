@@ -1359,18 +1359,6 @@ html:not(.dark) .nx-skeleton {
   letter-spacing: -0.01em;
 }
 
-/* Film grain — fixed SVG turbulence veil over the whole site */
-.site-grain {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
-  opacity: 0.05;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 240px 240px;
-}
-
 /* Spotlight card — pointer-tracked glow via --mx / --my CSS vars */
 .site-spotlight {
   position: relative;
@@ -1496,26 +1484,6 @@ html:not(.dark) .nx-skeleton {
   -webkit-mask-image: linear-gradient(to right, transparent, black 7%, black 93%, transparent);
 }
 
-/* Vertical marquees — testimonials columns */
-@keyframes site-marquee-y {
-  from { transform: translateY(0); }
-  to   { transform: translateY(-50%); }
-}
-.site-marquee-y {
-  animation: site-marquee-y 30s linear infinite;
-}
-.site-marquee-y-reverse {
-  animation: site-marquee-y 36s linear infinite reverse;
-}
-.site-marquee-y-slow {
-  animation: site-marquee-y 44s linear infinite;
-}
-.marquee-paused:hover .site-marquee-y,
-.marquee-paused:hover .site-marquee-y-reverse,
-.marquee-paused:hover .site-marquee-y-slow {
-  animation-play-state: paused;
-}
-
 /* Gentle floating glass cards (hero chat bubbles) */
 @keyframes site-float {
   0%, 100% { transform: translateY(0); }
@@ -1531,29 +1499,6 @@ html:not(.dark) .nx-skeleton {
 }
 .site-caret { animation: site-caret 1.1s steps(1) infinite; }
 
-/* Agent chips — staggered "taking over" pulse */
-@keyframes site-chip-pulse {
-  0%, 100% {
-    border-color: var(--border);
-    background-color: color-mix(in oklab, var(--background) 50%, transparent);
-    box-shadow: none;
-  }
-  12% {
-    border-color: color-mix(in oklab, var(--nx-2) 55%, var(--border));
-    background-color: color-mix(in oklab, var(--nx-2) 8%, var(--background));
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--nx-2) 22%, transparent),
-      0 4px 22px -6px color-mix(in oklab, var(--nx-2) 40%, transparent);
-  }
-  28% {
-    border-color: var(--border);
-    background-color: color-mix(in oklab, var(--background) 50%, transparent);
-    box-shadow: none;
-  }
-}
-.site-chip-pulse {
-  animation: site-chip-pulse 4.2s ease-in-out infinite;
-}
-
 /* Mini terminal panel */
 .site-terminal {
   border-radius: 0.75rem;
@@ -1564,13 +1509,81 @@ html:not(.dark) .nx-skeleton {
 
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .site-marquee-y,
-  .site-marquee-y-reverse,
-  .site-marquee-y-slow,
   .site-float,
   .site-float-delay,
-  .site-chip-pulse,
-  .site-caret {
+  .site-caret,
+  .nx-orb,
+  .nx-orb::before {
     animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Official site v4 — pure-CSS NEXUS core (replaces the WebGL orb)
+   Zero canvas, zero GPU compute — static gradients + one transform spin.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.nx-orb {
+  position: relative;
+  width: min(56vw, 330px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 30% 26%,
+    rgba(255, 224, 170, 0.95),
+    rgba(255, 138, 76, 0.75) 20%,
+    rgba(255, 90, 95, 0.62) 44%,
+    rgba(139, 92, 246, 0.4) 72%,
+    rgba(28, 20, 40, 0.95) 100%
+  );
+  box-shadow:
+    0 0 90px rgba(255, 90, 95, 0.32),
+    0 0 220px rgba(255, 42, 104, 0.16),
+    inset 0 0 70px rgba(255, 255, 255, 0.1);
+  animation: nx-orb-float 8s ease-in-out infinite;
+}
+
+/* Rotating conic hairline ring — compositor-only transform */
+.nx-orb::before {
+  content: '';
+  position: absolute;
+  inset: -16px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 90, 95, 0.85) 70deg,
+    rgba(245, 166, 35, 0.7) 130deg,
+    transparent 200deg,
+    rgba(139, 92, 246, 0.75) 280deg,
+    transparent 340deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.5px));
+  animation: nx-orb-spin 16s linear infinite;
+}
+
+/* Static halo wash behind the core */
+.nx-orb::after {
+  content: '';
+  position: absolute;
+  inset: -38%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 90, 95, 0.2), rgba(139, 92, 246, 0.1) 55%, transparent 78%);
+  z-index: -1;
+}
+
+@keyframes nx-orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes nx-orb-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
   }
 }
