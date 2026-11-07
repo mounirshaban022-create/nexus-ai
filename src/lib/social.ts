@@ -811,17 +811,31 @@ export async function runAutopilotTick(userId?: string | null, origin = 'http://
     take: 12,
   })
 
-  const due = accounts
-    .filter((a) => {
-      if (!a.lastAutoPostAt) return true
-      return now.getTime() - a.lastAutoPostAt.getTime() >= Math.max(5, a.autopilotCadenceMinutes) * 60_000
-    })
-    .slice(0, cap)
-
   const report: AutopilotTickReport = { ranAt: now.toISOString(), processed: 0, results: [] }
 
-  for (const row of due) {
+  for (const row of accounts) {
     const rec = toRecord(row)
+    if (!row.lastAutoPostAt) {
+      /* never posted — due */
+    } else if (now.getTime() - row.lastAutoPostAt.getTime() < Math.max(5, rec.autopilotCadenceMinutes) * 60_000) {
+      continue
+    }
+    if (report.processed >= cap) break
+
+    // ATOMIC CLAIM — the browser heartbeat, the "Run now" button and the
+    // server-side clock can all fire ticks concurrently. Only the tick
+    // whose update matches the lastAutoPostAt it READ wins the right to
+    // post; every other concurrent tick gets count=0 and skips. Without
+    // this the same account gets three duplicate posts in a minute.
+    const claimed = await db.socialAccount.updateMany({
+      where: {
+        id: rec.id,
+        OR: [{ lastAutoPostAt: null }, { lastAutoPostAt: row.lastAutoPostAt ?? undefined }],
+      },
+      data: { lastAutoPostAt: new Date() },
+    })
+    if (claimed.count === 0) continue
+
     report.processed += 1
     try {
       let token = ''
@@ -862,7 +876,6 @@ export async function runAutopilotTick(userId?: string | null, origin = 'http://
           origin: 'autopilot',
         },
       })
-      await db.socialAccount.update({ where: { id: rec.id }, data: { lastAutoPostAt: new Date() } })
       await logActivity(
         row.userId,
         rec.id,
@@ -871,13 +884,144 @@ export async function runAutopilotTick(userId?: string | null, origin = 'http://
           ? `🤖 Autopilot posted to ${SOCIAL_PLATFORMS[rec.platform].label} — ${result.message}`
           : `Autopilot publish failed: ${result.message}`,
       )
+      if (!result.ok) {
+        // Transient failure — retry in ~15 minutes instead of waiting a
+        // whole cadence, but never hammer the platform every minute.
+        await db.socialAccount
+          .update({
+            where: { id: rec.id },
+            data: { lastAutoPostAt: new Date(Date.now() - rec.autopilotCadenceMinutes * 60_000 + 15 * 60_000) },
+          })
+          .catch(() => {})
+      }
       report.results.push({ account: rec.displayName || rec.platform, platform: rec.platform, ok: result.ok, mode: result.mode, message: result.message })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'autopilot error'
       await logActivity(row.userId, rec.id, 'fail', `Autopilot error: ${msg}`)
+      await db.socialAccount
+        .update({
+          where: { id: rec.id },
+          data: { lastAutoPostAt: new Date(Date.now() - rec.autopilotCadenceMinutes * 60_000 + 15 * 60_000) },
+        })
+        .catch(() => {})
       report.results.push({ account: rec.displayName || rec.platform, platform: rec.platform, ok: false, mode: 'error', message: msg })
     }
   }
 
   return report
+}
+
+/* ------------------------------------------------------------------ */
+/* Scheduled posts — a post the user (or an agent) queued for a later  */
+/* time. Before this tick existed the rows were saved and forgotten;   */
+/* now the automation clock publishes them the moment they are due —   */
+/* no human and no open browser tab required.                          */
+/* ------------------------------------------------------------------ */
+
+export interface ScheduledRunReport {
+  ranAt: string
+  published: number
+  results: Array<{ post: string; platform: string; ok: boolean; mode: string; message: string }>
+}
+
+export async function publishDueScheduledPosts(origin = 'http://localhost:3000', cap = 5): Promise<ScheduledRunReport> {
+  const now = new Date()
+  const report: ScheduledRunReport = { ranAt: now.toISOString(), published: 0, results: [] }
+
+  const due = await db.socialPost.findMany({
+    where: { status: 'scheduled', scheduledFor: { lte: now } },
+    orderBy: { scheduledFor: 'asc' },
+    take: cap,
+  })
+
+  for (const row of due) {
+    try {
+      const accRow = await db.socialAccount.findUnique({ where: { id: row.accountId } })
+      if (!accRow) {
+        await db.socialPost.update({
+          where: { id: row.id },
+          data: { status: 'failed', error: 'The connected account was deleted before this post could go out.' },
+        })
+        report.results.push({ post: row.id, platform: row.platform, ok: false, mode: 'error', message: 'Account deleted' })
+        continue
+      }
+      const rec = toRecord(accRow)
+      let token = ''
+      try {
+        token = decryptSecret(accRow.accessTokenEnc)
+      } catch {
+        /* simulation mode */
+      }
+
+      // ATOMIC CLAIM — flip the status first with a guarded update so two
+      // concurrent ticks can never publish the same scheduled post twice.
+      const claimed = await db.socialPost.updateMany({
+        where: { id: row.id, status: 'scheduled' },
+        data: { status: 'publishing' },
+      })
+      if (claimed.count === 0) continue
+
+      const mediaUrls = (() => {
+        try {
+          return JSON.parse(row.mediaUrls || '[]') as string[]
+        } catch {
+          return []
+        }
+      })()
+
+      const result = await publishToPlatform({
+        platform: rec.platform,
+        token,
+        externalId: rec.externalId,
+        caption: row.caption,
+        mediaUrls,
+        mediaKind: row.mediaKind,
+        origin,
+      })
+
+      await db.socialPost.update({
+        where: { id: row.id },
+        data: {
+          status: result.ok ? (result.mode === 'live' ? 'published' : 'simulated') : 'failed',
+          publishedAt: result.ok ? new Date() : null,
+          result: result.permalink ? `${result.message} ${result.permalink}` : result.message,
+          externalId: result.externalId,
+          error: result.ok ? '' : result.message,
+        },
+      })
+      await logActivity(
+        row.userId,
+        rec.id,
+        result.ok ? 'publish' : 'fail',
+        result.ok
+          ? `⏰ Scheduled post went out on ${SOCIAL_PLATFORMS[rec.platform].label} — ${result.message}`
+          : `Scheduled publish failed: ${result.message}`,
+      )
+      report.published += 1
+      report.results.push({ post: row.id, platform: rec.platform, ok: result.ok, mode: result.mode, message: result.message })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'scheduled publish error'
+      await db.socialPost.update({ where: { id: row.id }, data: { status: 'failed', error: msg } }).catch(() => {})
+      report.results.push({ post: row.id, platform: row.platform, ok: false, mode: 'error', message: msg })
+    }
+  }
+
+  return report
+}
+
+/* ------------------------------------------------------------------ */
+/* The automation clock — one entry point the scheduler calls every    */
+/* minute: 1) agent-made autopilot posts for due accounts, 2) user/    */
+/* agent scheduled posts whose moment has arrived. Hands-free.         */
+/* ------------------------------------------------------------------ */
+
+export async function automationTick(origin = 'http://localhost:3000'): Promise<{
+  autopilot: AutopilotTickReport
+  scheduled: ScheduledRunReport
+}> {
+  const [autopilot, scheduled] = await Promise.all([
+    runAutopilotTick(null, origin, 3).catch(() => ({ ranAt: '', processed: 0, results: [] })),
+    publishDueScheduledPosts(origin, 5).catch(() => ({ ranAt: '', published: 0, results: [] })),
+  ])
+  return { autopilot, scheduled }
 }

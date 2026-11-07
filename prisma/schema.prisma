@@ -400,7 +400,7 @@ model SocialAccount {
   // ---- Autopilot: the agent posts without any human action ----
   autopilot      Boolean   @default(false)
   autopilotTopic String    @default("")        // what to post about (brand, niche…)
-  autopilotCadenceMinutes Int @default(720)   // default: every 12 hours
+  autopilotCadenceMinutes Int @default(1440)   // default: daily
   lastAutoPostAt DateTime?
   status         String    @default("pending") // pending | connected | error
   statusMessage  String    @default("")

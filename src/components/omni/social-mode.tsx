@@ -32,6 +32,7 @@ import {
   Activity,
   Calendar,
   CheckCircle2,
+  ChevronDown,
   CircleDashed,
   Clock,
   ExternalLink,
@@ -199,11 +200,13 @@ function ConnectDialog({
   const [creds, setCreds] = useState<Record<string, string>>({})
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
 
   useEffect(() => {
     if (open) {
       setCreds({})
       setName('')
+      setAdvanced(false)
     }
   }, [open, platform])
 
@@ -222,12 +225,12 @@ function ConnectDialog({
         const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
         if (!res.ok || !data.account) throw new Error(data.error || 'Connection failed')
         toast({
-          title: rehearsal ? `${meta.label} saved for rehearsal ✓` : `${meta.label} connected ✓`,
+          title: rehearsal ? `${meta.label} connected ✓` : `${meta.label} connected ✓`,
           description: rehearsal
-            ? 'The agents will run the full pipeline (caption → visual → publish) in simulation until you add a live token.'
+            ? 'You are in! The agent is ready — flip Autopilot on, or hit “Run autopilot now”. Posts are marked Rehearsed until you add real credentials.'
             : data.account.status === 'connected'
-              ? 'Verified with the live API — you can start publishing.'
-              : 'Saved — the platform is unreachable from here, publishing will be simulated until it is.',
+              ? 'Verified with the live API — posts go on-air for real.'
+              : 'Saved — publishing will run in rehearsal until the platform is reachable.',
         })
         onOpenChange(false)
         onConnected()
@@ -249,40 +252,58 @@ function ConnectDialog({
             Connect {meta?.label}
           </DialogTitle>
           <DialogDescription>
-            Paste the platform credentials — they are encrypted (AES-256-GCM) and never leave your workspace.{' '}
-            <span className="text-muted-foreground">Docs: {meta?.docs}</span>
+            One click and the agent takes over — no passwords, no tokens. You can go live with real credentials anytime later.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="acc-name">Display name (optional)</Label>
-            <Input id="acc-name" placeholder="My brand" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          {meta?.fields.map((f) => (
-            <div key={f.key} className="space-y-1.5">
-              <Label htmlFor={`f-${f.key}`}>{f.label}</Label>
-              <Input
-                id={`f-${f.key}`}
-                type="password"
-                placeholder={f.hint}
-                value={creds[f.key] ?? ''}
-                onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
-                className="font-mono text-xs"
-              />
-              <p className="text-[11px] leading-snug text-muted-foreground">{f.hint}</p>
+        <div className="space-y-3">
+          {/* THE easy path — zero fields, works for everyone */}
+          <Button onClick={() => void submit(true)} disabled={busy || !platform} className="h-12 w-full text-sm font-semibold">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Wand2 className="h-4 w-4" aria-hidden />}
+            {busy ? 'Connecting…' : `Quick connect ${meta?.label ?? ''} — one click`}
+          </Button>
+          <p className="-mt-1.5 text-center text-[11px] leading-snug text-muted-foreground">
+            The full pipeline starts immediately: the agent writes the caption, designs the visual and publishes. Posts are marked{' '}
+            <span className="text-sky-400">Rehearsed</span> until real credentials are added.
+          </p>
+
+          {/* Advanced — go live with real credentials */}
+          <button
+            type="button"
+            onClick={() => setAdvanced((v) => !v)}
+            className="mx-auto flex min-h-[32px] items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
+          >
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', advanced && 'rotate-180')} aria-hidden />
+            Go live with your own credentials (advanced)
+          </button>
+          {advanced && meta && (
+            <div className="space-y-4 rounded-xl border border-border/60 bg-background/40 p-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="acc-name">Display name (optional)</Label>
+                <Input id="acc-name" placeholder="My brand" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              {meta.fields.map((f) => (
+                <div key={f.key} className="space-y-1.5">
+                  <Label htmlFor={`f-${f.key}`}>{f.label}</Label>
+                  <Input
+                    id={`f-${f.key}`}
+                    type="password"
+                    placeholder={f.hint}
+                    value={creds[f.key] ?? ''}
+                    onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    {f.hint} · <span className="text-muted-foreground/70">Docs: {meta.docs}</span>
+                  </p>
+                </div>
+              ))}
+              <Button onClick={() => void submit(false)} disabled={busy} className="w-full min-h-[44px]">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlugZap className="h-4 w-4" aria-hidden />}
+                {busy ? 'Verifying with the platform…' : 'Verify & go live'}
+              </Button>
             </div>
-          ))}
-          <div className="flex flex-col gap-2">
-            <Button onClick={() => void submit(false)} disabled={busy || !platform} className="w-full min-h-[44px]">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlugZap className="h-4 w-4" aria-hidden />}
-              {busy ? 'Verifying with the platform…' : `Connect ${meta?.label ?? ''} — verify & go live`}
-            </Button>
-            <Button variant="outline" onClick={() => void submit(true)} disabled={busy || !platform} className="w-full min-h-[40px] text-xs">
-              <Wand2 className="h-3.5 w-3.5" aria-hidden />
-              Save for rehearsal (test the full agent flow without live credentials)
-            </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -306,13 +327,13 @@ function AutopilotDialog({
 }) {
   const { toast } = useToast()
   const [topic, setTopic] = useState('')
-  const [cadence, setCadence] = useState(720)
+  const [cadence, setCadence] = useState(1440)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (account && open) {
       setTopic(account.autopilotTopic || '')
-      setCadence(account.autopilotCadenceMinutes || 720)
+      setCadence(account.autopilotCadenceMinutes || 1440)
     }
   }, [account, open])
 
@@ -359,12 +380,14 @@ function AutopilotDialog({
             Autopilot — {account?.platformLabel}
           </DialogTitle>
           <DialogDescription>
-            The agent picks the moment, writes the post, generates the visual and publishes — no human needed.
+            One switch: the agent picks the moment, writes the post, generates the visual and publishes — even while the app is closed.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="ap-topic">What should it post about?</Label>
+            <Label htmlFor="ap-topic">
+              What should it post about? <span className="font-normal text-muted-foreground">(optional — the agent decides if empty)</span>
+            </Label>
             <Textarea
               id="ap-topic"
               rows={3}
@@ -429,6 +452,7 @@ export function SocialMode() {
   const [loading, setLoading] = useState(true)
   const [connectPlatform, setConnectPlatform] = useState<Platform | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
+  const [quickBusy, setQuickBusy] = useState<Platform | null>(null)
   const [autopilotFor, setAutopilotFor] = useState<Account | null>(null)
   const [autopilotOpen, setAutopilotOpen] = useState(false)
   const [autopilotBusy, setAutopilotBusy] = useState(false)
@@ -660,6 +684,32 @@ export function SocialMode() {
     setTimeout(() => composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
   }, [])
 
+  /** Zero-friction connect: one click, no fields, no dialog. */
+  const quickConnect = useCallback(
+    async (platform: Platform) => {
+      setQuickBusy(platform)
+      try {
+        const res = await fetch('/api/social/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform, credentials: {}, rehearsal: true }),
+        })
+        const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
+        if (!res.ok || !data.account) throw new Error(data.error || 'Connection failed')
+        toast({
+          title: `${PLATFORMS[platform].label} connected ✓`,
+          description: 'Now flip the Autopilot switch — or press “Run autopilot now” to see the agent post instantly.',
+        })
+        await load(false)
+      } catch (err) {
+        toast({ title: 'Could not connect', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
+      } finally {
+        setQuickBusy(null)
+      }
+    },
+    [toast, load],
+  )
+
   /* ---------------- Render ---------------- */
 
   return (
@@ -722,6 +772,40 @@ export function SocialMode() {
               </div>
             ) : (
               <>
+                {/* First-run welcome — three steps, zero jargon */}
+                {accounts.length === 0 && (
+                  <div className="rounded-2xl border border-amber-400/25 bg-gradient-to-b from-amber-400/10 to-transparent p-5 sm:p-6">
+                    <p className="text-sm font-semibold">Your agents can run your social media — hands-free.</p>
+                    <ol className="mt-3 space-y-2 text-[13px] text-foreground/80">
+                      {[
+                        'Connect an account — one click, no passwords or tokens needed',
+                        'Tell the agent what to post about (one sentence)',
+                        'Flip the Autopilot switch — it writes, designs and publishes on its own',
+                      ].map((s, i) => (
+                        <li key={s} className="flex items-start gap-2.5">
+                          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-amber-400/40 bg-amber-400/10 text-[10px] font-bold text-amber-300">
+                            {i + 1}
+                          </span>
+                          {s}
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button onClick={() => void quickConnect('instagram')} disabled={quickBusy !== null} className="min-h-[44px] flex-1 sm:flex-none">
+                        {quickBusy === 'instagram' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Instagram className="h-4 w-4" aria-hidden />}
+                        {quickBusy === 'instagram' ? 'Connecting…' : 'Connect Instagram — 1 click'}
+                      </Button>
+                      <Button variant="outline" onClick={() => void quickConnect('linkedin')} disabled={quickBusy !== null} className="min-h-[44px] flex-1 sm:flex-none">
+                        {quickBusy === 'linkedin' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Linkedin className="h-4 w-4" aria-hidden />}
+                        {quickBusy === 'linkedin' ? 'Connecting…' : 'Connect LinkedIn — 1 click'}
+                      </Button>
+                    </div>
+                    <p className="mt-2.5 text-[11px] text-muted-foreground">
+                      Starts in rehearsal mode — the whole agent pipeline runs and posts are marked <span className="text-sky-400">Rehearsed</span>. Add real credentials anytime to go on-air.
+                    </p>
+                  </div>
+                )}
+
                 {accounts.length > 0 && (
                   <div className="space-y-3">
                     {accounts.map((a) => (
@@ -1032,6 +1116,7 @@ export function SocialMode() {
           <p className="mb-1 font-semibold text-foreground/80">How publishing works</p>
           With live credentials and a public media URL, posts go out through the platform&apos;s real API (Instagram Graph, LinkedIn UGC, X v2, Facebook Pages) — marked <span className="text-emerald-400">Published</span> with a link.
           When the platform isn&apos;t reachable from this environment, the full agent flow still runs and the run is marked <span className="text-sky-400">Rehearsed</span> so you can test the entire pipeline risk-free.
+          The automation clock runs on the server — autopilot and scheduled posts go out on time even when the app is closed.
         </div>
       </div>
 
