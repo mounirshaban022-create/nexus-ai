@@ -7,8 +7,10 @@
  *  1. ZERO-KNOWLEDGE CONNECT: the main path is one tap. No passwords,
  *     no tokens, no developer consoles — the agent starts in rehearsal
  *     mode and everything works end-to-end.
- *  2. GOING LIVE IS OPTIONAL and hidden under a collapsed "Go live"
- *     section with a plain 2–3 step human guide per platform.
+ *  2. GOING LIVE IS ONE TAP TOO: "Continue with {platform}" opens the
+ *     platform's own sign-in window — the user signs in, approves, done.
+ *     Nothing to copy, nothing to paste. If the deployment hasn't been
+ *     switched on for that platform yet, a calm human note says so.
  *  3. CALM SCREEN: one Autopilot card, one row of account chips, three
  *     tabs (Queue / Inbox / Activity). No jargon on the default path.
  *
@@ -67,15 +69,9 @@ import {
 
 type Platform = 'instagram' | 'linkedin' | 'x' | 'facebook'
 
-interface GoLiveField {
-  key: string
-  label: string
-  placeholder: string
-}
-
 const PLATFORMS: Record<
   Platform,
-  { label: string; blurb: string; color: string; tile: string; icon: typeof Instagram; steps: string[]; fields: GoLiveField[] }
+  { label: string; blurb: string; color: string; tile: string; icon: typeof Instagram }
 > = {
   instagram: {
     label: 'Instagram',
@@ -83,15 +79,6 @@ const PLATFORMS: Record<
     color: '#e1306c',
     tile: 'bg-gradient-to-br from-fuchsia-500/20 to-amber-500/20',
     icon: Instagram,
-    steps: [
-      'Make your account a free Creator account: Instagram → Settings → Account type → Creator.',
-      'Create a free Meta developer account, connect Instagram in your app and copy the Access Token.',
-      'Paste the token below — publishing goes on-air instantly.',
-    ],
-    fields: [
-      { key: 'accessToken', label: 'Access Token', placeholder: 'EAAG…' },
-      { key: 'externalId', label: 'Business Account ID (optional)', placeholder: '1784…' },
-    ],
   },
   linkedin: {
     label: 'LinkedIn',
@@ -99,15 +86,6 @@ const PLATFORMS: Record<
     color: '#0a66c2',
     tile: 'bg-sky-500/15',
     icon: Linkedin,
-    steps: [
-      'Create a free app at developer.linkedin.com and request the “Share on LinkedIn” product.',
-      'Generate an OAuth 2.0 access token with the w_member_social scope.',
-      'Paste it below — publishing goes on-air instantly.',
-    ],
-    fields: [
-      { key: 'accessToken', label: 'Access Token', placeholder: 'AQX…' },
-      { key: 'authorUrn', label: 'Author URN (optional — empty posts as you)', placeholder: 'urn:li:person:…' },
-    ],
   },
   x: {
     label: 'X (Twitter)',
@@ -115,12 +93,6 @@ const PLATFORMS: Record<
     color: '#e7e9ea',
     tile: 'bg-zinc-500/15',
     icon: Twitter,
-    steps: [
-      'Sign up free at developer.x.com and create a project + app.',
-      'Generate an OAuth 2.0 user token with tweet.write permission.',
-      'Paste it below — publishing goes on-air instantly.',
-    ],
-    fields: [{ key: 'accessToken', label: 'Access Token', placeholder: '…' }],
   },
   facebook: {
     label: 'Facebook',
@@ -128,15 +100,6 @@ const PLATFORMS: Record<
     color: '#1877f2',
     tile: 'bg-blue-500/15',
     icon: FacebookIcon,
-    steps: [
-      'Create a free Meta app and add the Pages product.',
-      'Copy your Page Access Token and Page ID.',
-      'Paste them below — publishing goes on-air instantly.',
-    ],
-    fields: [
-      { key: 'accessToken', label: 'Page Access Token', placeholder: 'EAAB…' },
-      { key: 'externalId', label: 'Page ID', placeholder: '1022…' },
-    ],
   },
 }
 
@@ -307,12 +270,13 @@ function ConnectDialog({
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [goLive, setGoLive] = useState(false)
-  const [creds, setCreds] = useState<Record<string, string>>({})
+  const [liveBusy, setLiveBusy] = useState(false)
+  const [liveHint, setLiveHint] = useState('')
 
   useEffect(() => {
     if (open) {
-      setCreds({})
       setGoLive(false)
+      setLiveHint('')
     }
   }, [open, platform])
 
@@ -326,7 +290,7 @@ function ConnectDialog({
         const res = await fetch('/api/social/accounts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ platform, credentials: creds, rehearsal }),
+          body: JSON.stringify({ platform, credentials: {}, rehearsal }),
         })
         const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
         if (!res.ok || !data.account) throw new Error(data.error || 'Connection failed')
@@ -344,8 +308,30 @@ function ConnectDialog({
         setBusy(false)
       }
     },
-    [platform, meta, creds, toast, onOpenChange, onConnected],
+    [platform, meta, toast, onOpenChange, onConnected],
   )
+
+  // ZERO-KNOWLEDGE go-live: the platform's own sign-in window does all
+  // the technical work. The user signs in, approves, done.
+  const goLiveNow = useCallback(async () => {
+    if (!platform || !meta) return
+    setLiveBusy(true)
+    try {
+      const res = await fetch(`/api/social/oauth/start?platform=${platform}`)
+      const data = (await res.json().catch(() => ({}))) as { available?: boolean; url?: string; hint?: string }
+      if (data.available && data.url) {
+        setLiveHint('')
+        const win = window.open(data.url, 'nexus-social-oauth', 'width=620,height=760')
+        if (!win) window.location.href = data.url
+      } else {
+        setLiveHint(data.hint ?? 'The official connection isn’t switched on for this deployment yet — nothing for you to prepare. Your agent keeps rehearsing meanwhile.')
+      }
+    } catch {
+      setLiveHint('The connection service didn’t answer. Your agent keeps rehearsing meanwhile — try again in a moment.')
+    } finally {
+      setLiveBusy(false)
+    }
+  }, [platform, meta])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -380,7 +366,7 @@ function ConnectDialog({
             Rehearsed. Go live whenever you’re ready.
           </p>
 
-          {/* Optional: go live, collapsed, plain guide */}
+          {/* Optional: go live — also one tap, on the platform's own page */}
           <div className={cn('rounded-xl border border-border/60', goLive ? 'bg-background/40 p-3.5' : '')}>
             <button
               type="button"
@@ -393,34 +379,16 @@ function ConnectDialog({
             </button>
             {goLive && meta && (
               <div className="mt-3 space-y-3">
-                <ol className="space-y-1.5">
-                  {meta.steps.map((s, i) => (
-                    <li key={i} className="flex gap-2 text-[11px] leading-relaxed text-muted-foreground">
-                      <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary/15 text-[9px] font-bold text-foreground">
-                        {i + 1}
-                      </span>
-                      {s}
-                    </li>
-                  ))}
-                </ol>
-                {meta.fields.map((f) => (
-                  <div key={f.key} className="space-y-1">
-                    <Label htmlFor={`gl-${f.key}`} className="text-xs">
-                      {f.label}
-                    </Label>
-                    <Input
-                      id={`gl-${f.key}`}
-                      value={creds[f.key] ?? ''}
-                      onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
-                      placeholder={f.placeholder}
-                      className="h-9 text-xs"
-                      autoComplete="off"
-                    />
-                  </div>
-                ))}
-                <Button variant="secondary" onClick={() => void connect(false)} disabled={busy || !platform} className="h-10 w-full text-xs">
-                  Save live credentials
+                <Button variant="secondary" onClick={() => void goLiveNow()} disabled={liveBusy} className="h-11 w-full text-xs font-semibold">
+                  {liveBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />}
+                  Continue with {meta.label}
                 </Button>
+                <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+                  A {meta.label} window opens — sign in, approve, done. Nothing to copy, nothing to paste.
+                </p>
+                {liveHint && (
+                  <p className="rounded-lg border border-amber-400/25 bg-amber-400/5 p-2.5 text-[11px] leading-relaxed text-amber-200/90">{liveHint}</p>
+                )}
               </div>
             )}
           </div>
@@ -728,6 +696,32 @@ export function SocialMode() {
     const t = setInterval(() => void loadQueue(), 20_000)
     return () => clearInterval(t)
   }, [loadAccounts, loadQueue, loadComments])
+
+  // ZERO-KNOWLEDGE go-live handshake finish: the OAuth popup posts
+  // "nexus-social-oauth" when the platform's own sign-in page is done.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return
+      const d = e.data as { type?: string; ok?: boolean; platform?: string }
+      if (d?.type !== 'nexus-social-oauth') return
+      void loadAccounts()
+      void loadQueue()
+      setConnectOpen(false)
+      toast(
+        d.ok
+          ? {
+              title: `${d.platform ?? 'The account'} is live ✓`,
+              description: 'Connected for real — posts now go on-air. The agents take it from here.',
+            }
+          : {
+              title: `${d.platform ?? 'Connection'} wasn't finished`,
+              description: 'No problem — the agent keeps rehearsing. You can try again any time.',
+            },
+      )
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [loadAccounts, loadQueue, toast])
 
   // Sync the autopilot inputs whenever the active account changes.
   useEffect(() => {

@@ -137,6 +137,45 @@ export async function signToken(payload: { userId: string }): Promise<string> {
     .sign(await getSecretKey())
 }
 
+/* ------------------------------------------------------------------ */
+/* OAuth "state" tokens — the zero-knowledge go-live handshake.        */
+/* The user taps "Continue with {platform}"; we hand the platform a    */
+/* short-lived signed state that pins WHO is connecting and WHICH      */
+/* platform, so the callback can never be forged or replayed.          */
+/* ------------------------------------------------------------------ */
+
+export interface OAuthStatePayload {
+  userId: string
+  platform: string
+  // X (Twitter) PKCE: the code_verifier rides inside the signed state so
+  // no server-side session storage is needed.
+  verifier?: string
+}
+
+/** Sign a short-lived OAuth state JWT (HS256, 10-minute expiry). */
+export async function signOAuthState(payload: OAuthStatePayload): Promise<string> {
+  return new SignJWT({ ...payload, purpose: 'social-oauth' })
+    .setProtectedHeader({ alg: ALG })
+    .setIssuedAt()
+    .setExpirationTime('10m')
+    .sign(await getSecretKey())
+}
+
+/** Verify an OAuth state JWT. null when invalid, expired or wrong purpose. */
+export async function verifyOAuthState(token: string): Promise<OAuthStatePayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, await getSecretKey(), { algorithms: [ALG] })
+    if (payload.purpose !== 'social-oauth') return null
+    const userId = typeof payload.userId === 'string' ? payload.userId : ''
+    const platform = typeof payload.platform === 'string' ? payload.platform : ''
+    const verifier = typeof payload.verifier === 'string' ? payload.verifier : undefined
+    if (!userId || !platform) return null
+    return { userId, platform, verifier }
+  } catch {
+    return null
+  }
+}
+
 /** Verify a JWT session token and return the user id, or null if invalid/expired. */
 export async function verifyToken(token: string): Promise<{ userId: string } | null> {
   try {
