@@ -228,10 +228,9 @@ export async function GET(req: NextRequest) {
 
     const platform = payload.platform
     const label = SOCIAL_PLATFORMS[platform].label
-    const origin =
-      (req.headers.get('x-forwarded-proto') && req.headers.get('x-forwarded-host'))
-        ? `${req.headers.get('x-forwarded-proto').split(',')[0].trim()}://${req.headers.get('x-forwarded-host')}`
-        : req.nextUrl.origin
+    const proto = req.headers.get('x-forwarded-proto')?.split(',')[0].trim()
+    const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+    const origin = proto && host ? `${proto}://${host}` : req.nextUrl.origin
     const redirectUri = `${origin}/api/social/oauth/callback`
 
     let profile: { externalId: string; handle: string; displayName: string; token: string; avatarUrl: string }

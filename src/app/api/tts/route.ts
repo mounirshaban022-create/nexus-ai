@@ -232,9 +232,11 @@ export async function POST(req: NextRequest) {
     try {
       if (parsedData?.text) {
         const merged = Buffer.concat(
-          splitTextIntoChunks(parsedData.text.trim()).map((c) => {
-            return zaiTts(c, parsedData?.voice ?? DEFAULT_VOICE, parsedData?.speed ?? 1.0)
-          })
+          await Promise.all(
+            splitTextIntoChunks(parsedData.text.trim()).map((c) => {
+              return zaiTts(c, parsedData?.voice ?? DEFAULT_VOICE, parsedData?.speed ?? 1.0)
+            })
+          )
         )
         return new NextResponse(new Uint8Array(merged), {
           status: 200,

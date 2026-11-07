@@ -674,7 +674,10 @@ export function VoiceCallMode({ onExit }: { onExit: () => void }) {
       speakHandleRef.current = handle
       await done
       speakHandleRef.current = null
-      if (phaseRef.current === 'ended') return
+      // Re-read AFTER the await: the user may have ended the call while the
+      // assistant was speaking. (The cast defeats TS's stale narrowing from
+      // the pre-await guard — at runtime the phase CAN be 'ended' here.)
+      if ((phaseRef.current as CallPhase) === 'ended') return
       goPhase('listening')
       startBrowserDictation()
     },
