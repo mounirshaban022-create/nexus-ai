@@ -797,7 +797,12 @@ export interface AutopilotTickReport {
   results: Array<{ account: string; platform: string; ok: boolean; mode: string; message: string }>
 }
 
-export async function runAutopilotTick(userId?: string | null, origin = 'http://localhost:3000', cap = 3): Promise<AutopilotTickReport> {
+export async function runAutopilotTick(
+  userId?: string | null,
+  origin = 'http://localhost:3000',
+  cap = 3,
+  force = false,
+): Promise<AutopilotTickReport> {
   const now = new Date()
   const accounts = await db.socialAccount.findMany({
     where: {
@@ -806,7 +811,12 @@ export async function runAutopilotTick(userId?: string | null, origin = 'http://
       // run simulated, which is exactly what a rehearsal account is for).
       status: { in: ['connected', 'pending'] },
       ...(userId ? { userId } : {}),
-      OR: [{ lastAutoPostAt: null }, { lastAutoPostAt: { lte: new Date(now.getTime() - 5 * 60_000) } }],
+      // force=true (the explicit "Run autopilot now" button) ignores the
+      // 5-minute anti-spam guard so the user always sees the agent act NOW.
+      // The atomic claim below still prevents concurrent duplicate posts.
+      ...(force
+        ? {}
+        : { OR: [{ lastAutoPostAt: null }, { lastAutoPostAt: { lte: new Date(now.getTime() - 5 * 60_000) } }] }),
     },
     take: 12,
   })
@@ -815,10 +825,11 @@ export async function runAutopilotTick(userId?: string | null, origin = 'http://
 
   for (const row of accounts) {
     const rec = toRecord(row)
-    if (!row.lastAutoPostAt) {
-      /* never posted — due */
-    } else if (now.getTime() - row.lastAutoPostAt.getTime() < Math.max(5, rec.autopilotCadenceMinutes) * 60_000) {
-      continue
+    if (!force && row.lastAutoPostAt) {
+      // Normal heartbeat: respect the cadence. "Run now" (force) bypasses it.
+      if (now.getTime() - row.lastAutoPostAt.getTime() < Math.max(5, rec.autopilotCadenceMinutes) * 60_000) {
+        continue
+      }
     }
     if (report.processed >= cap) break
 

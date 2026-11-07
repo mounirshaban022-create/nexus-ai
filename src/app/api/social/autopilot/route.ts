@@ -17,8 +17,11 @@ export async function POST(req: NextRequest) {
   if (!limit.ok) return NextResponse.json({ error: 'Autopilot already ran recently — wait a minute.' }, { status: 429 })
 
   try {
+    // body { force: true } = the explicit "Run autopilot now" button — the
+    // agent acts immediately even if the account was not due on its cadence.
+    const body = (await req.json().catch(() => ({}))) as { force?: boolean }
     const origin = req.headers.get('origin') || new URL(req.url).origin
-    const report = await runAutopilotTick(session.userId, origin, 5)
+    const report = await runAutopilotTick(session.userId, origin, 5, body.force === true)
     return NextResponse.json(report)
   } catch (error) {
     console.error('[api/social/autopilot] POST error:', error)

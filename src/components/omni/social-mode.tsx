@@ -522,13 +522,21 @@ export function SocialMode() {
   const runAutopilot = useCallback(async () => {
     setAutopilotBusy(true)
     try {
-      const res = await fetch('/api/social/autopilot', { method: 'POST' })
+      // force=true — the user pressed "Run now", so the agent acts right
+      // away instead of replying "not due yet" (which felt like a dead end).
+      const res = await fetch('/api/social/autopilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      })
       const data = (await res.json().catch(() => ({}))) as { processed?: number; results?: { ok: boolean; message: string }[]; error?: string }
       if (!res.ok) throw new Error(data.error || 'Autopilot failed')
       const okCount = (data.results ?? []).filter((r) => r.ok).length
       toast({
-        title: data.processed ? `🤖 ${okCount}/${data.processed} autopilot post(s) done` : 'No accounts are due yet',
-        description: data.processed ? (data.results ?? []).map((r) => r.message).join(' · ') : 'Everything is on schedule.',
+        title: data.processed ? `🤖 ${okCount}/${data.processed} autopilot post(s) done` : 'Turn Autopilot on first',
+        description: data.processed
+          ? (data.results ?? []).map((r) => r.message).join(' · ')
+          : 'Go to Accounts, flip the Autopilot switch on a connected account, and the agent starts posting for you.',
       })
       void load(false)
     } catch (err) {
@@ -994,8 +1002,9 @@ export function SocialMode() {
                     {mediaUrls.length > 0 && (
                       <div className="flex flex-wrap gap-2 pt-1">
                         {mediaUrls.map((u) => (
-                          <span key={u} className="flex max-w-full items-center gap-1.5 rounded-full border border-border/70 bg-background/60 py-1 pl-3 pr-1.5 text-[11px] text-muted-foreground">
-                            <span className="max-w-[220px] truncate font-mono">{u.split('/').pop()}</span>
+                          <span key={u} className="flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-background/60 py-1 pl-1.5 pr-1.5 text-[11px] text-muted-foreground">
+                            <img src={u} alt="" loading="lazy" decoding="async" className="h-7 w-7 shrink-0 rounded-full object-cover" />
+                            <span className="max-w-[200px] truncate font-mono">{u.split('/').pop()}</span>
                             <button type="button" onClick={() => setMediaUrls((m) => m.filter((x) => x !== u))} aria-label="Remove media" className="grid h-5 w-5 place-items-center rounded-full hover:bg-accent/60">
                               <X className="h-3 w-3" aria-hidden />
                             </button>
@@ -1068,12 +1077,31 @@ export function SocialMode() {
                   </div>
                   <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/85">{p.caption}</p>
                   {p.mediaUrls?.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {p.mediaUrls.map((u) => (
-                        <span key={u} className="rounded-full border border-border/60 bg-background/50 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                          {p.mediaKind === 'video' ? '🎬' : '🖼'} {u.split('/').pop()?.slice(0, 28)}
-                        </span>
-                      ))}
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      {p.mediaUrls.map((u) =>
+                        p.mediaKind === 'video' ? (
+                          <span key={u} className="grid h-20 w-32 place-items-center rounded-xl border border-border/70 bg-background/60 text-xl" aria-label="Video attachment">
+                            🎬
+                          </span>
+                        ) : (
+                          <a
+                            key={u}
+                            href={u}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group block overflow-hidden rounded-xl border border-border/70 transition hover:border-border"
+                            aria-label="Open media in a new tab"
+                          >
+                            <img
+                              src={u}
+                              alt="AI-generated post media"
+                              loading="lazy"
+                              decoding="async"
+                              className="h-24 w-36 object-cover transition-transform duration-200 group-hover:scale-[1.04]"
+                            />
+                          </a>
+                        ),
+                      )}
                     </div>
                   )}
                   {p.result && (
