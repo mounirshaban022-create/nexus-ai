@@ -24,6 +24,7 @@ import {
   Pin,
   Plus,
   Puzzle,
+  Radio,
   Search,
   Settings,
   Settings2,
@@ -369,6 +370,13 @@ function SidebarContent({
             active={view.type === 'whatsapp'}
             onClick={() => go({ type: 'whatsapp' })}
             iconClassName="text-emerald-600 dark:text-emerald-400"
+          />
+          <NavItem
+            icon={Radio}
+            label={t('nav.social')}
+            active={view.type === 'social'}
+            onClick={() => go({ type: 'social' })}
+            iconClassName="text-amber-500 dark:text-amber-400"
           />
           <NavItem
             icon={Phone}

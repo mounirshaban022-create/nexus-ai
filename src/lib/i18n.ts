@@ -31,6 +31,7 @@ export const STRINGS = {
     conversations: { en: 'Conversations', ar: 'المحادثات' },
     agents: { en: 'Agents', ar: 'الوكلاء' },
     whatsapp: { en: 'WhatsApp', ar: 'واتساب' },
+    social: { en: 'Social Pilot', ar: 'سوشيال بايلوت' },
     skills: { en: 'Skills', ar: 'المهارات' },
     settings: { en: 'Settings', ar: 'الإعدادات' },
     profile: { en: 'Profile', ar: 'الملف الشخصي' },

@@ -102,6 +102,20 @@ export const CHAT_TOOL_DEFS: Array<{
     params: 'to (required: phone number), message (required: text to send)',
   },
   {
+    id: 'social_generate',
+    description:
+      "The agent drafts social-media content: writes a platform-native caption AND generates a matching AI visual. Use when the user wants to create (not yet publish) a post, or asks 'write me an Instagram post about…'.",
+    params:
+      "platform (required: instagram | linkedin | x | facebook), topic (required: what the post is about), tone (optional: voice/tone hints), with_image (optional: default true)",
+  },
+  {
+    id: 'social_post',
+    description:
+      "Publish a post to the user's connected social media account for real (Instagram / LinkedIn / X / Facebook — via Social Pilot). The agent can post photos, videos (Instagram REELS / Facebook), carousels and text. Use for real automation: the user says 'post this to Instagram', 'schedule a LinkedIn post', or asks the agent to run their socials. Requires a connected account (Social Pilot in the sidebar).",
+    params:
+      'caption (required: the full post text — write it for the user if they gave a topic), platform (optional: instagram | linkedin | x | facebook, defaults to first connected), image_url (optional: URL of the photo/video to attach — use an image from generate_image), schedule_at (optional: ISO datetime to schedule instead of publishing now)',
+  },
+  {
     id: 'run_command',
     description:
       'Run a shell command in the NEXUS CLI sandbox (bash — 20s timeout, 90s for package installs) — for file operations, git, curl, data processing, installing and running CLI-Anything skill CLIs, and system tasks. Dangerous operations are blocked. Use run_code for JavaScript/Python.',

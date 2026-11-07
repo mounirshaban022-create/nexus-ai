@@ -25,6 +25,7 @@ import { AgentsDirectory, AgentsDirectoryPage } from '@/components/nexus/agents-
 import { VoiceOverlay } from '@/components/nexus/voice-overlay'
 import { FramedPanel } from '@/components/nexus/framed-panel'
 import { WhatsAppMode } from '@/components/omni/whatsapp-mode'
+import { SocialMode } from '@/components/omni/social-mode'
 import { NexusSettingsMode } from '@/components/nexus/settings-mode'
 import { SkillsMode } from '@/components/omni/skills-mode'
 import { PhotoStudioMode } from '@/components/omni/photo-studio-mode'
@@ -237,6 +238,19 @@ export default function Page() {
                 wrapper resolves them to dark values on the dark framed panel. */}
             <div className="dark flex h-full min-h-0 flex-1 flex-col">
               <WhatsAppMode />
+            </div>
+          </FramedPanel>
+        )}
+
+        {view.type === 'social' && (
+          <FramedPanel
+            fill
+            dark
+            title="Social Pilot — hands-free social media"
+            description="Connect Instagram, LinkedIn, X and Facebook — the agents write, design and publish on their own, or go full autopilot."
+          >
+            <div className="dark flex h-full min-h-0 flex-1 flex-col">
+              <SocialMode />
             </div>
           </FramedPanel>
         )}

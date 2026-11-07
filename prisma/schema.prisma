@@ -170,6 +170,9 @@ model User {
   aiProviders   AiProvider[]   // SECURITY: private connected AI provider keys
   whatsappAccounts WhatsAppAccount[] // SECURITY: private WhatsApp connections
   knowledgeDocs KnowledgeDoc[]  // KNOWLEDGE BASE: private RAG document library
+  socialAccounts  SocialAccount[] // SECURITY: private social media connections
+  socialPosts     SocialPost[]    // SECURITY: private scheduled/published posts
+  socialActivity  SocialActivity[] // SECURITY: private automation activity feed
 }
 
 model EmailAccount {
@@ -374,4 +377,77 @@ model WhatsAppMessage {
   @@unique([waMessageId, direction])
   @@index([accountId, createdAt])
   @@index([fromNumber, createdAt])
+}
+
+/* ==================================================================
+   SOCIAL AUTOMATION — real work, zero human babysitting.
+   Connect Instagram / LinkedIn / X / Facebook Pages, then the NEXUS
+   agents write, generate media and publish on a schedule or fully
+   hands-free (autopilot). Mirrors the WhatsAppAccount conventions.
+   ================================================================== */
+
+model SocialAccount {
+  id             String    @id @default(cuid())
+  // SECURITY: every social connection is PRIVATE to the user who linked it.
+  // null = legacy/global row (pre-migration); queries MUST filter by userId.
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform       String    // instagram | linkedin | x | facebook
+  displayName    String    @default("")        // human label, e.g. "@mybrand"
+  externalId     String    @default("")        // ig-user-id / LinkedIn URN / X user id
+  accessTokenEnc String    @default("")        // AES-256-GCM encrypted bearer token
+  meta           String    @default("{}")      // platform-specific JSON (username, avatar, pageId…)
+  // ---- Autopilot: the agent posts without any human action ----
+  autopilot      Boolean   @default(false)
+  autopilotTopic String    @default("")        // what to post about (brand, niche…)
+  autopilotCadenceMinutes Int @default(720)   // default: every 12 hours
+  lastAutoPostAt DateTime?
+  status         String    @default("pending") // pending | connected | error
+  statusMessage  String    @default("")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  posts          SocialPost[]
+
+  @@index([userId, createdAt])
+  @@index([autopilot, lastAutoPostAt])
+}
+
+model SocialPost {
+  id           String    @id @default(cuid())
+  // SECURITY: every post is PRIVATE to the user who created it.
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  accountId    String
+  account      SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  platform     String                       // denormalized for fast lists
+  caption      String    @default("")
+  mediaUrls    String    @default("[]")     // JSON array of media URLs
+  mediaKind    String    @default("image")  // image | video | carousel | text
+  // ---- lifecycle ----
+  status       String    @default("queued") // queued | scheduled | publishing | published | failed | simulated
+  scheduledFor DateTime?
+  publishedAt  DateTime?
+  result       String    @default("")       // platform response summary / permalink
+  externalId   String    @default("")       // platform post id
+  origin       String    @default("manual") // manual | autopilot | agent
+  error        String    @default("")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([accountId, status])
+  @@index([status, scheduledFor])
+}
+
+model SocialActivity {
+  id        String   @id @default(cuid())
+  // SECURITY: every activity row is PRIVATE to the user who caused it.
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId String   @default("")
+  kind      String   // connected | disconnected | autopilot_on | autopilot_off | publish | schedule | fail | generate
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

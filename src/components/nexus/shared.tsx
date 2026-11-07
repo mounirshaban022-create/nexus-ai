@@ -49,6 +49,7 @@ export type View =
   | { type: 'video-intel' }
   | { type: 'call' }
   | { type: 'knowledge' }
+  | { type: 'social' }
 
 /* ------------------------------------------------------------------ */
 /* Catalog (static import — instant client-side search over 255)       */
@@ -266,6 +267,8 @@ export const TOOL_META: Record<string, { label: string; emoji?: string; color?: 
   browser_action: { label: 'Driving browser', emoji: '🧭', color: '#38bdf8' },
   send_email: { label: 'Sending email', emoji: '✉️', color: '#60a5fa' },
   send_whatsapp: { label: 'Sending WhatsApp', emoji: '💬', color: '#34d399' },
+  social_post: { label: 'Posting to social media', emoji: '🚀', color: '#fb923c' },
+  social_generate: { label: 'Drafting social content', emoji: '✨', color: '#e1306c' },
   use_skill: { label: 'Loading skill', emoji: '🧩', color: '#a78bfa' },
   email_organize: { label: 'Organizing inbox', emoji: '🗂️', color: '#60a5fa' },
   email_folders: { label: 'Listing folders', emoji: '📁', color: '#60a5fa' },

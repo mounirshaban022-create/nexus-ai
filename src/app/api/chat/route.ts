@@ -1405,6 +1405,77 @@ async function executeChatTool(
     return { result: { account: account.email, folders, note: 'Use a folder name as targetFolder with email_organize "move".' } }
   }
 
+  /* ---- social_post: publish to the user's connected social accounts ---- */
+  if (toolId === 'social_post') {
+    const { listSocialAccounts, publishSocialPost, SOCIAL_PLATFORMS, isSocialPlatform } = await import('@/lib/social')
+    const accounts = await listSocialAccounts(userId ?? '')
+    if (!accounts.length) {
+      return { result: { error: 'No social account connected. Ask the user to open Social Pilot (sidebar) and connect Instagram, LinkedIn, X or Facebook first.' } }
+    }
+    const platformArg = String(args.platform ?? '').toLowerCase()
+    let account = accounts[0]
+    if (platformArg && isSocialPlatform(platformArg)) {
+      account = accounts.find((a) => a.platform === platformArg) ?? account
+    }
+    const caption = String(args.caption ?? args.message ?? '').trim()
+    if (!caption) throw new Error('caption required — write the post text for the user')
+    const imageUrl = String(args.image_url ?? args.imageUrl ?? '').trim()
+    const scheduleAt = String(args.schedule_at ?? '').trim()
+    const { post, result } = await publishSocialPost({
+      userId: userId ?? '',
+      accountId: account.id,
+      caption,
+      mediaUrls: imageUrl ? [imageUrl] : [],
+      mediaKind: imageUrl ? 'image' : 'text',
+      origin,
+      originKind: 'agent',
+      scheduledFor: scheduleAt ? new Date(scheduleAt) : null,
+    })
+    if (!result.ok) throw new Error(result.message)
+    return {
+      result: {
+        posted: true,
+        platform: SOCIAL_PLATFORMS[account.platform].label,
+        status: post.status,
+        message: result.message,
+        note:
+          result.mode === 'live'
+            ? `Published LIVE to ${SOCIAL_PLATFORMS[account.platform].label}. Confirm to the user with the result message.`
+            : `The full publish flow ran in rehearsal mode (platform unreachable from this environment). Confirm to the user honestly: the post is saved and marked "Rehearsed" — it will go LIVE once real platform credentials/network are available.`,
+      },
+      ...(post.status === 'published' && post.result
+        ? { attachment: { type: 'link', url: String(post.result), title: `${SOCIAL_PLATFORMS[account.platform].label} post` } }
+        : {}),
+    }
+  }
+
+  /* ---- social_generate: agent drafts a caption + visual (no publish) ---- */
+  if (toolId === 'social_generate') {
+    const { generatePostDraft, isSocialPlatform, SOCIAL_PLATFORMS } = await import('@/lib/social')
+    const platformArg = String(args.platform ?? 'instagram').toLowerCase()
+    if (!isSocialPlatform(platformArg)) throw new Error('platform must be instagram | linkedin | x | facebook')
+    const topic = String(args.topic ?? '').trim()
+    if (!topic) throw new Error('topic required — what should the post be about?')
+    if (!userId) throw new Error('Sign in to generate social content')
+    const draft = await generatePostDraft({
+      userId,
+      platform: platformArg as 'instagram' | 'linkedin' | 'x' | 'facebook',
+      topic,
+      tone: String(args.tone ?? ''),
+      withImage: args.with_image !== false,
+    })
+    return {
+      result: {
+        platform: SOCIAL_PLATFORMS[platformArg].label,
+        caption: draft.caption,
+        imageUrl: draft.imageUrl || null,
+        hashtags: draft.hashtags,
+        note: 'Draft ready. Show the caption, offer the image, and offer to publish it now with social_post (pass image_url).',
+      },
+      ...(draft.imageUrl ? { attachment: { type: 'image', url: draft.imageUrl, title: 'Generated visual' } } : {}),
+    }
+  }
+
   // Data connectors pass through
   const connector = CONNECTOR_MAP.get(toolId)
   if (!connector) return { result: { error: `Unknown tool "${toolId}"` } }
