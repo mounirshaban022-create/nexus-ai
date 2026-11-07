@@ -30,9 +30,10 @@ export async function register() {
       const report = await automationTick(origin)
       const posts =
         (report.autopilot?.processed ?? 0) + (report.scheduled?.published ?? 0)
-      if (posts > 0) {
+      const replies = report.engagement?.results?.reduce((n, r) => n + (r.replied || 0), 0) ?? 0
+      if (posts > 0 || replies > 0) {
         console.log(
-          `[automation-clock] tick → ${report.autopilot.processed} autopilot post(s), ${report.scheduled.published} scheduled post(s) published`,
+          `[automation-clock] tick → ${report.autopilot.processed} autopilot post(s), ${report.scheduled.published} scheduled post(s) published, ${replies} reply(ies) drafted`,
         )
       }
     } catch (err) {

@@ -4,6 +4,7 @@ import path from 'path'
 import { db } from '@/lib/db'
 import { encryptSecret, decryptSecret } from '@/lib/email'
 import { smartChat } from '@/lib/smart-chat'
+import { freeWebSearch } from '@/lib/web-access'
 
 /* ------------------------------------------------------------------ */
 /* SOCIAL AUTOMATION ENGINE — real work, zero human babysitting.       */
@@ -109,6 +110,16 @@ export interface SocialAccountRecord {
   autopilotTopic: string
   autopilotCadenceMinutes: number
   lastAutoPostAt: Date | null
+  // page brain / trend radar / engagement
+  pageNiche: string
+  pageAudience: string
+  pageTone: string
+  pageGoal: string
+  pageLanguage: string
+  pageStrategy: string
+  trendBrain: string
+  trendAt: Date | null
+  autoReply: boolean
   status: string
   statusMessage: string
 }
@@ -124,6 +135,14 @@ export interface PublicSocialAccount {
   autopilotTopic: string
   autopilotCadenceMinutes: number
   lastAutoPostAt: string | null
+  pageNiche: string
+  pageAudience: string
+  pageTone: string
+  pageGoal: string
+  pageLanguage: string
+  strategy: PageStrategy | null
+  trends: TrendBrain | null
+  autoReply: boolean
   status: string
   statusMessage: string
   tokenPreview: string
@@ -142,6 +161,15 @@ export function toRecord(row: {
   autopilotTopic: string
   autopilotCadenceMinutes: number
   lastAutoPostAt: Date | null
+  pageNiche?: string | null
+  pageAudience?: string | null
+  pageTone?: string | null
+  pageGoal?: string | null
+  pageLanguage?: string | null
+  pageStrategy?: string | null
+  trendBrain?: string | null
+  trendAt?: Date | null
+  autoReply?: boolean | null
   status: string
   statusMessage: string
 }): SocialAccountRecord {
@@ -162,6 +190,15 @@ export function toRecord(row: {
     autopilotTopic: row.autopilotTopic,
     autopilotCadenceMinutes: row.autopilotCadenceMinutes,
     lastAutoPostAt: row.lastAutoPostAt,
+    pageNiche: row.pageNiche ?? '',
+    pageAudience: row.pageAudience ?? '',
+    pageTone: row.pageTone ?? '',
+    pageGoal: row.pageGoal ?? '',
+    pageLanguage: row.pageLanguage ?? '',
+    pageStrategy: row.pageStrategy ?? '',
+    trendBrain: row.trendBrain ?? '',
+    trendAt: row.trendAt ?? null,
+    autoReply: row.autoReply ?? false,
     status: row.status,
     statusMessage: row.statusMessage,
   }
@@ -186,6 +223,14 @@ export function toPublicAccount(rec: SocialAccountRecord, token: string): Public
     autopilotTopic: rec.autopilotTopic,
     autopilotCadenceMinutes: rec.autopilotCadenceMinutes,
     lastAutoPostAt: rec.lastAutoPostAt ? rec.lastAutoPostAt.toISOString() : null,
+    pageNiche: rec.pageNiche,
+    pageAudience: rec.pageAudience,
+    pageTone: rec.pageTone,
+    pageGoal: rec.pageGoal,
+    pageLanguage: rec.pageLanguage,
+    strategy: safeJson<PageStrategy | null>(rec.pageStrategy, null),
+    trends: safeJson<TrendBrain | null>(rec.trendBrain, null),
+    autoReply: rec.autoReply,
     status: rec.status,
     statusMessage: rec.statusMessage,
     tokenPreview: maskToken(token),
@@ -224,6 +269,325 @@ export async function getSocialAccount(userId: string, id: string): Promise<{ re
 
 export async function logActivity(userId: string | null, accountId: string, kind: string, message: string) {
   await db.socialActivity.create({ data: { userId, accountId, kind, message } }).catch(() => {})
+}
+
+/* ================================================================== */
+/* PAGE BRAIN — the agent actually KNOWS this page before it acts.     */
+/* Every prompt (post, visual brief, reply) is injected with the page  */
+/* brain + the latest trend research, so the output is on-brand,       */
+/* audience-aware and informed by what is working RIGHT NOW.           */
+/* ================================================================== */
+
+/** Tolerant JSON parse for LLM output (handles ``` fences + prose). */
+function safeJson<T>(raw: string, fallback: T): T {
+  if (!raw || !raw.trim()) return fallback
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    /* keep trying */
+  }
+  const s = raw.indexOf('{')
+  const e = raw.lastIndexOf('}')
+  if (s >= 0 && e > s) {
+    try {
+      return JSON.parse(raw.slice(s, e + 1)) as T
+    } catch {
+      /* fall through */
+    }
+  }
+  return fallback
+}
+
+export interface PageStrategy {
+  voice: string
+  pillars: string[]
+  hooks: string[]
+  dos: string[]
+  donts: string[]
+  hashtags: string[]
+}
+
+export interface TrendBrain {
+  summary: string
+  topics: string[]
+  hooks: string[]
+  formats: string[]
+  hashtags: string[]
+  sources: { title: string; url: string }[]
+  fetchedAt: string
+  researched: boolean // true = live web research, false = model knowledge fallback
+}
+
+const STRATEGY_TTL_HOURS = 6
+
+function pageBrainRows(row: {
+  pageNiche?: string | null
+  pageAudience?: string | null
+  pageTone?: string | null
+  pageGoal?: string | null
+  pageLanguage?: string | null
+  autopilotTopic?: string | null
+}) {
+  return {
+    niche: (row.pageNiche || row.autopilotTopic || '').trim(),
+    audience: (row.pageAudience || '').trim(),
+    tone: (row.pageTone || '').trim(),
+    goal: (row.pageGoal || '').trim(),
+    language: (row.pageLanguage || '').trim(),
+  }
+}
+
+/** Assembles the PAGE context block injected into every agent prompt. */
+export function pageBrainContextOf(row: SocialAccountRecord): string {
+  const p = pageBrainRows(row)
+  const parts: string[] = []
+  if (p.niche) parts.push(`Page niche: ${p.niche}`)
+  if (p.audience) parts.push(`Audience: ${p.audience}`)
+  if (p.tone) parts.push(`Brand voice: ${p.tone}`)
+  if (p.goal) parts.push(`Goal: ${p.goal}`)
+  if (p.language) parts.push(`Content language: ${p.language}`)
+  const strategy = safeJson<PageStrategy | null>(row.pageStrategy, null)
+  if (strategy) {
+    if (strategy.voice) parts.push(`Documented voice: ${strategy.voice}`)
+    if (strategy.pillars?.length) parts.push(`Content pillars: ${strategy.pillars.slice(0, 6).join('; ')}`)
+    if (strategy.dos?.length) parts.push(`Always: ${strategy.dos.slice(0, 5).join('; ')}`)
+    if (strategy.donts?.length) parts.push(`Never: ${strategy.donts.slice(0, 5).join('; ')}`)
+    if (strategy.hashtags?.length) parts.push(`Brand hashtags: ${strategy.hashtags.slice(0, 8).join(' ')}`)
+  }
+  return parts.join('\n')
+}
+
+/** Assembles the TREND context block — what is attracting people now. */
+export function trendContextOf(row: SocialAccountRecord): string {
+  const t = safeJson<TrendBrain | null>(row.trendBrain, null)
+  if (!t) return ''
+  const parts: string[] = []
+  if (t.summary) parts.push(`What is working now: ${t.summary}`)
+  if (t.topics?.length) parts.push(`Hot topics: ${t.topics.slice(0, 6).join('; ')}`)
+  if (t.hooks?.length) parts.push(`Proven hooks to model (never copy verbatim): ${t.hooks.slice(0, 6).join(' | ')}`)
+  if (t.formats?.length) parts.push(`Formats that attract: ${t.formats.slice(0, 4).join('; ')}`)
+  if (t.hashtags?.length) parts.push(`Trending hashtags: ${t.hashtags.slice(0, 8).join(' ')}`)
+  if (t.sources?.length) parts.push(`Sources seen: ${t.sources.slice(0, 5).map((s) => s.url).join(', ')}`)
+  return parts.join('\n')
+}
+
+/** Builds (or refreshes) the AI page strategy: pillars, voice, hooks, rules. */
+export async function buildPageStrategy(userId: string, accountId: string): Promise<{ strategy: PageStrategy }> {
+  const row = await db.socialAccount.findFirst({ where: { id: accountId, userId } })
+  if (!row) throw new Error('Account not found')
+  const rec = toRecord(row)
+  const p = pageBrainRows(row)
+
+  const system =
+    'You are a senior social media strategist. From the page description alone, define its content strategy. Output ONLY a JSON object with keys: voice (one vivid sentence), pillars (array of 4-5 content pillar ideas), hooks (array of 5 opening lines proven to stop the scroll, in the page language), dos (array of 4 style rules), donts (array of 4 things to avoid), hashtags (array of 6-8 hashtags starting with #). No markdown, no commentary.'
+  const user = [
+    `Platform: ${rec.platform}.`,
+    p.niche ? `The page is about: ${p.niche}` : 'The page is a small growing brand.',
+    p.audience ? `Audience: ${p.audience}` : '',
+    p.tone ? `Desired tone: ${p.tone}` : '',
+    p.goal ? `Business goal: ${p.goal}` : '',
+    p.language ? `Content language: ${p.language} (write hooks in this language).` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const raw = await smartChat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { maxTokens: 800, temperature: 0.6, task: 'reasoning', userId },
+  )
+  const strategy = safeJson<PageStrategy>(raw, { voice: '', pillars: [], hooks: [], dos: [], donts: [], hashtags: [] })
+  const clean: PageStrategy = {
+    voice: String(strategy.voice ?? ''),
+    pillars: (Array.isArray(strategy.pillars) ? strategy.pillars : []).map(String).slice(0, 6),
+    hooks: (Array.isArray(strategy.hooks) ? strategy.hooks : []).map(String).slice(0, 8),
+    dos: (Array.isArray(strategy.dos) ? strategy.dos : []).map(String).slice(0, 6),
+    donts: (Array.isArray(strategy.donts) ? strategy.donts : []).map(String).slice(0, 6),
+    hashtags: (Array.isArray(strategy.hashtags) ? strategy.hashtags : []).map(String).slice(0, 10),
+  }
+  await db.socialAccount.update({ where: { id: accountId }, data: { pageStrategy: JSON.stringify(clean) } })
+  await logActivity(userId, accountId, 'brain', `🧠 The agent studied the page and built a content strategy (${clean.pillars.length} pillars, ${clean.hooks.length} hooks)`)
+  return { strategy: clean }
+}
+
+/** TRUE trend research: live web search → AI distills what attracts people. */
+export async function researchTrends(
+  userId: string,
+  accountId: string,
+  opts: { force?: boolean } = {},
+): Promise<{ trends: TrendBrain; cached: boolean }> {
+  const row = await db.socialAccount.findFirst({ where: { id: accountId, userId } })
+  if (!row) throw new Error('Account not found')
+  const rec = toRecord(row)
+
+  if (!opts.force && row.trendAt) {
+    const ageH = (Date.now() - row.trendAt.getTime()) / 3_600_000
+    const cached = safeJson<TrendBrain | null>(row.trendBrain, null)
+    if (cached && ageH < STRATEGY_TTL_HOURS) return { trends: cached, cached: true }
+  }
+
+  const p = pageBrainRows(row)
+  const niche = p.niche || rec.autopilotTopic || 'small business growth'
+  const platform = SOCIAL_PLATFORMS[rec.platform].label
+  const year = new Date().getFullYear()
+  const queries = [
+    `top performing ${niche} ${platform} posts ${year}`,
+    `viral ${niche} content ideas what works`,
+    `${niche} trending topics hashtags this month`,
+  ]
+
+  const searchBatches = await Promise.all(
+    queries.map((q) => freeWebSearch(q, 6).catch(() => [] as Awaited<ReturnType<typeof freeWebSearch>>)),
+  )
+  const results = searchBatches.flat().slice(0, 18)
+  const researched = results.length > 0
+  const sourceList = results.map((r) => ({ title: (r.title || '').slice(0, 120), url: r.url }))
+  const evidence = results
+    .slice(0, 14)
+    .map((r, i) => `${i + 1}. ${r.title} — ${r.snippet?.slice(0, 160) ?? ''}`)
+    .join('\n')
+
+  const system =
+    'You are a viral-content analyst. Using ONLY the search evidence when provided (otherwise your own expertise), distill what is attracting attention in this niche right now. Output ONLY JSON: {"summary": "2-3 sentence brief", "topics": ["6 hot topics"], "hooks": ["5 scroll-stopping opening lines in the page content language"], "formats": ["3-4 content formats that work"], "hashtags": ["8 hashtags starting with #"]}. No markdown, no commentary.'
+  const user = [
+    `Niche: ${niche}. Platform: ${platform}.`,
+    p.language ? `Content language: ${p.language} (hooks in this language).` : '',
+    p.audience ? `Audience: ${p.audience}.` : '',
+    researched ? `LIVE search evidence:\n${evidence}` : 'No live search results were reachable — use your knowledge of what performs well in this niche.',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const raw = await smartChat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { maxTokens: 800, temperature: 0.5, task: 'reasoning', userId },
+  )
+  const parsed = safeJson<{ summary?: string; topics?: string[]; hooks?: string[]; formats?: string[]; hashtags?: string[] }>(raw, {})
+  const trends: TrendBrain = {
+    summary: String(parsed.summary ?? ''),
+    topics: (Array.isArray(parsed.topics) ? parsed.topics : []).map(String).slice(0, 8),
+    hooks: (Array.isArray(parsed.hooks) ? parsed.hooks : []).map(String).slice(0, 8),
+    formats: (Array.isArray(parsed.formats) ? parsed.formats : []).map(String).slice(0, 6),
+    hashtags: (Array.isArray(parsed.hashtags) ? parsed.hashtags : []).map(String).slice(0, 10),
+    sources: sourceList.slice(0, 10),
+    fetchedAt: new Date().toISOString(),
+    researched,
+  }
+  await db.socialAccount.update({ where: { id: accountId }, data: { trendBrain: JSON.stringify(trends), trendAt: new Date() } })
+  await logActivity(
+    userId,
+    accountId,
+    'research',
+    researched
+      ? `🛰 Trend Radar scanned ${sourceList.length} live sources on ${platform} — ${trends.topics.length} hot topics, ${trends.hooks.length} proven hooks captured`
+      : '🛰 Trend Radar mapped what works in this niche from the agent knowledge base (live search was unreachable)',
+  )
+  return { trends, cached: false }
+}
+
+/** Fresh-enough trend brain for the autopilot pipeline (auto-refresh ≥6h). */
+export async function ensureFreshTrendsFor(userId: string, accountId: string): Promise<string> {
+  try {
+    const { trends } = await researchTrends(userId, accountId, { force: false })
+    return JSON.stringify(trends)
+  } catch {
+    return '' // research failing must never block posting
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* ENGAGEMENT — the agent answers people like a warm, savvy human.     */
+/* ------------------------------------------------------------------ */
+
+export interface CommentReplyResult {
+  sentiment: string
+  reply: string
+}
+
+/** Drafts one human-quality reply to one comment (page-brain aware, language-matched). */
+export async function draftCommentReply(userId: string, commentId: string): Promise<CommentReplyResult> {
+  const comment = await db.socialComment.findFirst({ where: { id: commentId, userId } })
+  if (!comment) throw new Error('Comment not found')
+  const accRow = await db.socialAccount.findUnique({ where: { id: comment.accountId } })
+  if (!accRow) throw new Error('Account not found')
+  const rec = toRecord(accRow)
+  const p = pageBrainRows(accRow)
+
+  const system = [
+    'You are the community manager of the page described below. Reply to the commenter like a warm, smart human — never like a bot.',
+    'Rules: match the commenter language EXACTLY (Arabic comment → Arabic reply); mirror their energy; be specific to what they said; ask a small follow-up question when it feels natural; keep it 1-3 sentences.',
+    'CRITICAL — never invent facts: prices, delivery areas, availability, dates or promises are OFF LIMITS unless they appear in the page description below. If the commenter asks for something you do not know, say warmly that you will confirm the exact details in DM — that is what a real human community manager does.',
+    'If it is spam or abuse, output a polite minimal reply.',
+    'Output ONLY JSON: {"sentiment": "positive|question|complaint|lead|spam|neutral", "reply": "your reply"}. No markdown, no commentary.',
+  ].join(' ')
+
+  const user = [
+    `PLATFORM: ${rec.platform}`,
+    pageBrainContextOf(rec),
+    `COMMENTER: ${comment.author || 'a follower'}`,
+    `COMMENT: "${comment.text.slice(0, 600)}"`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const raw = await smartChat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { maxTokens: 400, temperature: 0.85, task: 'chat', userId },
+  )
+  const parsed = safeJson<{ sentiment?: string; reply?: string }>(raw, {})
+  const reply = String(parsed.reply ?? '').trim()
+  const sentiment = String(parsed.sentiment ?? 'neutral').toLowerCase()
+  if (!reply) throw new Error('The agent could not draft a reply — try again.')
+  await db.socialComment.update({
+    where: { id: commentId },
+    data: { aiReply: reply.slice(0, 2000), sentiment, status: 'replied', repliedAt: new Date() },
+  })
+  return { sentiment, reply }
+}
+
+/** Autopilot for the inbox: draft replies for every pending comment. */
+export async function processAutoReplies(
+  userId?: string | null,
+  cap = 8,
+): Promise<{ processed: number; results: Array<{ account: string; replied: number; ok: boolean; message: string }> }> {
+  const accounts = await db.socialAccount.findMany({
+    where: { autoReply: true, status: { in: ['connected', 'pending'] }, ...(userId ? { userId } : {}) },
+    take: 6,
+  })
+  const report = { processed: 0, results: [] as Array<{ account: string; replied: number; ok: boolean; message: string }> }
+
+  for (const accRow of accounts) {
+    const pending = await db.socialComment.findMany({
+      where: { accountId: accRow.id, status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: cap,
+    })
+    if (!pending.length) continue
+    const rec = toRecord(accRow)
+    let replied = 0
+    for (const c of pending) {
+      try {
+        await draftCommentReply(accRow.userId ?? '', c.id)
+        replied += 1
+      } catch {
+        /* one bad comment never blocks the rest */
+      }
+    }
+    if (replied > 0) {
+      report.processed += 1
+      report.results.push({ account: rec.displayName || rec.platform, replied, ok: true, message: `${replied} reply(ies) drafted` })
+      await logActivity(accRow.userId, rec.id, 'reply', `💬 The agent drafted ${replied} human-quality repl${replied === 1 ? 'y' : 'ies'} on ${SOCIAL_PLATFORMS[rec.platform].label}`)
+    }
+  }
+  return report
 }
 
 /* ------------------------------------------------------------------ */
@@ -656,21 +1020,29 @@ export async function generatePostDraft(opts: {
   tone?: string
   withImage?: boolean
   extraContext?: string
+  // PAGE BRAIN + TREND RADAR — deep page knowledge + what works now
+  pageContext?: string
+  trendContext?: string
 }): Promise<PostDraft> {
-  const { userId, platform, topic, tone, withImage = true, extraContext } = opts
+  const { userId, platform, topic, tone, withImage = true, extraContext, pageContext, trendContext } = opts
   const cap =
     platform === 'x' ? 'at most 260 characters' : platform === 'instagram' ? 'at most 800 characters' : 'at most 1200 characters'
 
-  const system =
-    'You are an elite social media manager. Write scroll-stopping, authentic posts. Output ONLY the caption text — no preamble, no quotes around it, no markdown headers.'
+  const system = [
+    'You are an elite social media manager who deeply knows the page you write for.',
+    'Write scroll-stopping, authentic posts that attract real engagement — model your opening on hooks proven to work in this niche, adapted to this page voice.',
+    'Output ONLY the caption text — no preamble, no quotes around it, no markdown headers.',
+  ].join(' ')
   const user = [
     `Write a ${platform} post about: ${topic}.`,
     tone ? `Voice/tone: ${tone}.` : '',
+    pageContext ? `PAGE KNOWLEDGE (respect it exactly):\n${pageContext}` : '',
+    trendContext ? `WHAT IS WORKING NOW (live research — model your hook on these, never copy verbatim):\n${trendContext}` : '',
     `Length: ${cap}. ${platform === 'x' ? 'No hashtags needed unless essential.' : 'End with 3-5 relevant hashtags.'}`,
     extraContext ? `Extra context: ${extraContext}` : '',
   ]
     .filter(Boolean)
-    .join(' ')
+    .join('\n\n')
 
   const reply = await smartChat(
     [
@@ -855,12 +1227,22 @@ export async function runAutopilotTick(
       } catch {
         /* simulation mode */
       }
+      // RESEARCH FIRST — the agent scans what is working in this niche
+      // before writing a single word (auto-refreshes at most every 6h,
+      // and a failed scan never blocks posting).
+      const recFresh = toRecord(row)
+      const trendRaw = await ensureFreshTrendsFor(row.userId ?? '', rec.id)
+      const pageCtx = pageBrainContextOf(recFresh)
+      const trendCtx = trendContextOf({ ...recFresh, trendBrain: trendRaw || recFresh.trendBrain })
+      const brain = pageBrainRows(row)
       const draft = await generatePostDraft({
         userId: row.userId ?? '',
         platform: rec.platform,
-        topic: rec.autopilotTopic || 'our latest updates, behind-the-scenes and tips',
-        tone: 'on-brand, warm and confident',
+        topic: rec.autopilotTopic || brain.niche || 'our latest updates, behind-the-scenes and tips',
+        tone: brain.tone || 'on-brand, warm and confident',
         withImage: true,
+        pageContext: pageCtx,
+        trendContext: trendCtx,
       })
       const result = await publishToPlatform({
         platform: rec.platform,
@@ -1029,10 +1411,14 @@ export async function publishDueScheduledPosts(origin = 'http://localhost:3000',
 export async function automationTick(origin = 'http://localhost:3000'): Promise<{
   autopilot: AutopilotTickReport
   scheduled: ScheduledRunReport
+  engagement: { processed: number; results: Array<{ account: string; replied: number; ok: boolean; message: string }> }
 }> {
-  const [autopilot, scheduled] = await Promise.all([
+  const [autopilot, scheduled, engagement] = await Promise.all([
     runAutopilotTick(null, origin, 3).catch(() => ({ ranAt: '', processed: 0, results: [] })),
     publishDueScheduledPosts(origin, 5).catch(() => ({ ranAt: '', published: 0, results: [] })),
+    // The inbox gets the same hands-free treatment: every account with
+    // auto-reply on gets human-quality answers drafted automatically.
+    processAutoReplies(null, 6).catch(() => ({ processed: 0, results: [] })),
   ])
-  return { autopilot, scheduled }
+  return { autopilot, scheduled, engagement }
 }

@@ -30,6 +30,7 @@ import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
   Activity,
+  Brain,
   Calendar,
   CheckCircle2,
   ChevronDown,
@@ -41,6 +42,7 @@ import {
   Link2,
   Linkedin,
   Loader2,
+  MessageCircle,
   PlugZap,
   Radio,
   RefreshCw,
@@ -54,6 +56,8 @@ import {
   Zap,
   Facebook as FacebookIcon,
 } from 'lucide-react'
+import { BrainTab, InboxTab } from './social-brain'
+import type { SocialAccountView } from './social-types'
 
 /* ------------------------------------------------------------------ */
 /* Platform registry (mirrors src/lib/social.ts)                       */
@@ -113,20 +117,7 @@ const PLATFORM_ORDER: Platform[] = ['instagram', 'linkedin', 'x', 'facebook']
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
-interface Account {
-  id: string
-  platform: Platform
-  platformLabel: string
-  displayName: string
-  handle: string
-  autopilot: boolean
-  autopilotTopic: string
-  autopilotCadenceMinutes: number
-  lastAutoPostAt: string | null
-  status: string
-  statusMessage: string
-  tokenPreview: string
-}
+type Account = SocialAccountView
 
 interface Post {
   id: string
@@ -328,12 +319,14 @@ function AutopilotDialog({
   const { toast } = useToast()
   const [topic, setTopic] = useState('')
   const [cadence, setCadence] = useState(1440)
+  const [autoReply, setAutoReply] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (account && open) {
       setTopic(account.autopilotTopic || '')
       setCadence(account.autopilotCadenceMinutes || 1440)
+      setAutoReply(account.autoReply || false)
     }
   }, [account, open])
 
@@ -350,6 +343,7 @@ function AutopilotDialog({
             autopilot: enable,
             autopilotTopic: topic,
             autopilotCadenceMinutes: cadence,
+            autoReply,
           }),
         })
         const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
@@ -423,6 +417,13 @@ function AutopilotDialog({
             </div>
             <input id="ap-cadence" type="number" min={15} max={20160} value={cadence} onChange={(e) => setCadence(Number(e.target.value) || 720)} className="sr-only" />
           </div>
+          <div className="flex items-center justify-between rounded-xl border border-emerald-400/25 bg-emerald-400/5 px-3.5 py-3">
+            <div className="min-w-0 pr-3">
+              <p className="text-xs font-semibold">Also reply to people automatically</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">The agent answers comments like a warm human — in the commenter&apos;s own language.</p>
+            </div>
+            <Switch checked={autoReply} onCheckedChange={setAutoReply} aria-label="Auto-reply to comments" />
+          </div>
           <div className="flex gap-2">
             <Button onClick={() => save(true)} disabled={busy} className="min-h-[44px] flex-1">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Zap className="h-4 w-4" aria-hidden />}
@@ -460,6 +461,8 @@ export function SocialMode() {
   // Composer state
   const [tab, setTab] = useState('accounts')
   const [composeAccountId, setComposeAccountId] = useState('')
+  const [brainAccountId, setBrainAccountId] = useState('')
+  const [inboxAccountId, setInboxAccountId] = useState('')
   const [caption, setCaption] = useState('')
   const [mediaUrls, setMediaUrls] = useState<string[]>([])
   const [mediaKind, setMediaKind] = useState<'image' | 'video' | 'text'>('image')
@@ -499,6 +502,8 @@ export function SocialMode() {
           const accData = (await accRes.json().catch(() => ({}))) as { accounts?: Account[] }
           setAccounts(accData.accounts ?? [])
           setComposeAccountId((cur) => cur || accData.accounts?.[0]?.id || '')
+          setBrainAccountId((cur) => cur || accData.accounts?.[0]?.id || '')
+          setInboxAccountId((cur) => cur || accData.accounts?.[0]?.id || '')
         }
       } catch {
         /* non-fatal */
@@ -598,8 +603,9 @@ export function SocialMode() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          accountId: account.id,
           platform: account.platform,
-          topic: genTopic || account.autopilotTopic || `something valuable for ${account.displayName || 'the audience'}`,
+          topic: genTopic || account.autopilotTopic || account.pageNiche || `something valuable for ${account.displayName || 'the audience'}`,
           withImage: mediaKind === 'image',
         }),
       })
@@ -610,7 +616,10 @@ export function SocialMode() {
         setMediaUrls((m) => (m.includes(data.imageUrl!) ? m : [...m, data.imageUrl!]))
         setMediaKind('image')
       }
-      toast({ title: 'Draft ready ✨', description: 'Caption written' + (data.imageUrl ? ' and visual generated.' : '.') })
+      toast({
+        title: 'Draft ready ✨',
+        description: 'Written with your page brain' + (account.trends ? ' + live trend research' : '') + (data.imageUrl ? ' + a generated visual.' : '.'),
+      })
     } catch (err) {
       toast({ title: 'Generation failed', description: err instanceof Error ? err.message : '', variant: 'destructive' })
     } finally {
@@ -740,7 +749,7 @@ export function SocialMode() {
               )}
             </h1>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Connect once — the agents write, design and publish on their own.
+              Connect once — the agents research trends, write, design, publish and reply to people on their own.
             </p>
           </div>
           <div className="flex gap-2">
@@ -762,6 +771,19 @@ export function SocialMode() {
             </TabsTrigger>
             <TabsTrigger value="composer" className="gap-1.5">
               <Wand2 className="h-3.5 w-3.5" aria-hidden /> Composer
+            </TabsTrigger>
+            <TabsTrigger value="brain" className="gap-1.5">
+              <Brain className="h-3.5 w-3.5" aria-hidden /> Brain
+              {accounts.some((a) => a.pageNiche) && <span className="rounded-full bg-violet-400/15 px-1.5 text-[10px] text-violet-300">✓</span>}
+            </TabsTrigger>
+            <TabsTrigger value="inbox" className="gap-1.5">
+              <MessageCircle className="h-3.5 w-3.5" aria-hidden /> Inbox
+              {accounts.some((a) => a.autoReply) && (
+                <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="queue" className="gap-1.5">
               <Clock className="h-3.5 w-3.5" aria-hidden /> Queue
@@ -787,8 +809,8 @@ export function SocialMode() {
                     <ol className="mt-3 space-y-2 text-[13px] text-foreground/80">
                       {[
                         'Connect an account — one click, no passwords or tokens needed',
-                        'Tell the agent what to post about (one sentence)',
-                        'Flip the Autopilot switch — it writes, designs and publishes on its own',
+                        'Teach the agent about your page in the Brain tab (1 minute) — it studies your niche and scans what works',
+                        'Flip Autopilot on — it researches, writes, designs, publishes AND replies to comments hands-free',
                       ].map((s, i) => (
                         <li key={s} className="flex items-start gap-2.5">
                           <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-amber-400/40 bg-amber-400/10 text-[10px] font-bold text-amber-300">
@@ -860,6 +882,25 @@ export function SocialMode() {
                           <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[11px] text-amber-200/80">
                             🤖 Posts about: {a.autopilotTopic}
                           </p>
+                        )}
+                        {(a.pageNiche || a.trends || a.autoReply) && (
+                          <div className="mt-2.5 flex flex-wrap gap-1.5">
+                            {a.pageNiche && (
+                              <Badge variant="outline" className="border-violet-400/40 text-[10px] text-violet-300">
+                                🧠 knows the page
+                              </Badge>
+                            )}
+                            {a.trends && (
+                              <Badge variant="outline" className="border-amber-400/40 text-[10px] text-amber-300">
+                                🛰 trends scanned
+                              </Badge>
+                            )}
+                            {a.autoReply && (
+                              <Badge variant="outline" className="border-emerald-400/40 text-[10px] text-emerald-300">
+                                💬 auto-replies
+                              </Badge>
+                            )}
+                          </div>
                         )}
                         {a.statusMessage && (
                           <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{a.statusMessage}</p>
@@ -1041,6 +1082,16 @@ export function SocialMode() {
             </div>
           </TabsContent>
 
+          {/* ---------------- Brain (page understanding + trends) ---------------- */}
+          <TabsContent value="brain">
+            <BrainTab accounts={accounts} selectedId={brainAccountId} onSelect={setBrainAccountId} onChanged={() => void load(false)} />
+          </TabsContent>
+
+          {/* ---------------- Inbox (engagement) ---------------- */}
+          <TabsContent value="inbox">
+            <InboxTab accounts={accounts} selectedId={inboxAccountId} onSelect={setInboxAccountId} onChanged={() => void load(false)} />
+          </TabsContent>
+
           {/* ---------------- Queue ---------------- */}
           <TabsContent value="queue" className="space-y-3">
             {loading ? (
@@ -1125,7 +1176,7 @@ export function SocialMode() {
                   {activity.map((a) => (
                     <li key={a.id} className="flex items-start gap-3 rounded-xl px-3 py-2.5 transition hover:bg-accent/30">
                       <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-border/60 bg-background/60 text-[11px]">
-                        {a.kind === 'publish' ? '🚀' : a.kind === 'autopilot' || a.kind === 'autopilot_on' ? '🤖' : a.kind === 'fail' ? '⚠️' : a.kind === 'connected' ? '🔗' : a.kind === 'generate' ? '✨' : '•'}
+                        {a.kind === 'publish' ? '🚀' : a.kind === 'autopilot' || a.kind === 'autopilot_on' ? '🤖' : a.kind === 'fail' ? '⚠️' : a.kind === 'connected' ? '🔗' : a.kind === 'generate' ? '✨' : a.kind === 'research' ? '🛰' : a.kind === 'brain' ? '🧠' : a.kind === 'reply' ? '💬' : '•'}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-[13px] leading-snug text-foreground/85">{a.message}</p>
@@ -1141,10 +1192,9 @@ export function SocialMode() {
 
         {/* Live/simulated explainer */}
         <div className="rounded-2xl border border-border/60 bg-card/40 p-4 text-[11px] leading-relaxed text-muted-foreground">
-          <p className="mb-1 font-semibold text-foreground/80">How publishing works</p>
-          With live credentials and a public media URL, posts go out through the platform&apos;s real API (Instagram Graph, LinkedIn UGC, X v2, Facebook Pages) — marked <span className="text-emerald-400">Published</span> with a link.
-          When the platform isn&apos;t reachable from this environment, the full agent flow still runs and the run is marked <span className="text-sky-400">Rehearsed</span> so you can test the entire pipeline risk-free.
-          The automation clock runs on the server — autopilot and scheduled posts go out on time even when the app is closed.
+          <p className="mb-1 font-semibold text-foreground/80">How the agent works</p>
+          Before writing anything it scans the live web for the best-performing content in your niche (Trend Radar) and studies your page (Brain) — then writes the caption, designs the visual and publishes through the platform&apos;s real API (Instagram Graph, LinkedIn UGC, X v2, Facebook Pages), marked <span className="text-emerald-400">Published</span> with a link. When the platform isn&apos;t reachable from this environment, the full agent flow still runs and the run is marked <span className="text-sky-400">Rehearsed</span>.
+          With auto-reply on, the agent also answers comments in the commenter&apos;s own language. The automation clock runs on the server — research, posts and replies keep going even when the app is closed.
         </div>
       </div>
 

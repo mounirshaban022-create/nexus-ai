@@ -107,6 +107,14 @@ const patchSchema = z.object({
   autopilot: z.boolean().optional(),
   autopilotTopic: z.string().max(400).optional(),
   autopilotCadenceMinutes: z.coerce.number().int().min(15).max(20160).optional(),
+  // engagement
+  autoReply: z.boolean().optional(),
+  // page brain quick-edit
+  pageNiche: z.string().max(600).optional(),
+  pageAudience: z.string().max(600).optional(),
+  pageTone: z.string().max(300).optional(),
+  pageGoal: z.string().max(300).optional(),
+  pageLanguage: z.string().max(40).optional(),
   recheck: z.boolean().optional(),
 })
 
@@ -141,6 +149,12 @@ export async function PATCH(req: NextRequest) {
         ...(fields.autopilot !== undefined ? { autopilot: fields.autopilot } : {}),
         ...(fields.autopilotTopic !== undefined ? { autopilotTopic: fields.autopilotTopic } : {}),
         ...(fields.autopilotCadenceMinutes !== undefined ? { autopilotCadenceMinutes: fields.autopilotCadenceMinutes } : {}),
+        ...(fields.autoReply !== undefined ? { autoReply: fields.autoReply } : {}),
+        ...(fields.pageNiche !== undefined ? { pageNiche: fields.pageNiche } : {}),
+        ...(fields.pageAudience !== undefined ? { pageAudience: fields.pageAudience } : {}),
+        ...(fields.pageTone !== undefined ? { pageTone: fields.pageTone } : {}),
+        ...(fields.pageGoal !== undefined ? { pageGoal: fields.pageGoal } : {}),
+        ...(fields.pageLanguage !== undefined ? { pageLanguage: fields.pageLanguage } : {}),
         status,
         statusMessage,
       },
@@ -149,6 +163,11 @@ export async function PATCH(req: NextRequest) {
       await logActivity(session.userId, id, 'autopilot_on', `Autopilot ENABLED — the agent will post to ${SOCIAL_PLATFORMS[rec.platform].label} every ${row.autopilotCadenceMinutes} minutes about "${row.autopilotTopic || 'brand updates'}"`)
     } else if (fields.autopilot === false) {
       await logActivity(session.userId, id, 'autopilot_off', 'Autopilot disabled')
+    }
+    if (fields.autoReply === true) {
+      await logActivity(session.userId, id, 'reply', `💬 Auto-reply ENABLED — the agent will answer comments on ${SOCIAL_PLATFORMS[rec.platform].label} hands-free`)
+    } else if (fields.autoReply === false) {
+      await logActivity(session.userId, id, 'reply', 'Auto-reply disabled')
     }
     return NextResponse.json({ account: toPublicAccount(toRecord(row), token) })
   } catch (error) {

@@ -173,6 +173,7 @@ model User {
   socialAccounts  SocialAccount[] // SECURITY: private social media connections
   socialPosts     SocialPost[]    // SECURITY: private scheduled/published posts
   socialActivity  SocialActivity[] // SECURITY: private automation activity feed
+  socialComments  SocialComment[] // SECURITY: private engagement inbox
 }
 
 model EmailAccount {
@@ -402,11 +403,24 @@ model SocialAccount {
   autopilotTopic String    @default("")        // what to post about (brand, niche…)
   autopilotCadenceMinutes Int @default(1440)   // default: daily
   lastAutoPostAt DateTime?
+  // ---- Page Brain: deep understanding of THIS page (feeds every prompt) ----
+  pageNiche      String    @default("")        // what the page is about
+  pageAudience   String    @default("")        // who follows the page
+  pageTone       String    @default("")        // how the page sounds (voice)
+  pageGoal       String    @default("")        // grow | sales | community | authority
+  pageLanguage   String    @default("")        // primary content language (ar, en, …)
+  pageStrategy   String    @default("")        // AI-built JSON: voice, pillars, hooks, dos/donts, hashtags
+  // ---- Trend Radar: live research on what is working RIGHT NOW ----
+  trendBrain     String    @default("")        // AI-distilled JSON: summary, topics, hooks, formats, hashtags, sources
+  trendAt        DateTime?
+  // ---- Engagement: the agent answers people like a savvy human ----
+  autoReply      Boolean   @default(false)
   status         String    @default("pending") // pending | connected | error
   statusMessage  String    @default("")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   posts          SocialPost[]
+  comments       SocialComment[]
 
   @@index([userId, createdAt])
   @@index([autopilot, lastAutoPostAt])
@@ -445,9 +459,33 @@ model SocialActivity {
   userId    String?
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   accountId String   @default("")
-  kind      String   // connected | disconnected | autopilot_on | autopilot_off | publish | schedule | fail | generate
+  kind      String   // connected | disconnected | autopilot_on | autopilot_off | publish | schedule | fail | generate | research | brain | reply
   message   String
   createdAt DateTime @default(now())
 
+  @@index([userId, createdAt])
+}
+
+// Engagement inbox — comments people leave on the page; the agent drafts
+// human-quality replies (auto mode drafts them hands-free).
+model SocialComment {
+  id         String   @id @default(cuid())
+  // SECURITY: every comment is PRIVATE to the user who added it.
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  platform   String
+  author     String   @default("")        // commenter name/handle (optional)
+  text       String                      // the comment itself
+  sentiment  String   @default("neutral")// positive | question | complaint | lead | spam | neutral
+  aiReply    String   @default("")       // the agent's human-quality reply
+  status     String   @default("pending")// pending | replied | dismissed
+  replyNote  String   @default("")
+  repliedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([accountId, status])
   @@index([userId, createdAt])
 }
