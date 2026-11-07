@@ -22,6 +22,7 @@ import {
   Bot,
   Brain,
   Camera,
+  ChevronDown,
   ChevronRight,
   ExternalLink,
   FileText,
@@ -318,6 +319,9 @@ function EmailConnectDialog({
   const [smtpHost, setSmtpHost] = useState('smtp.gmail.com')
   const [smtpPort, setSmtpPort] = useState('465')
   const [smtpSecure, setSmtpSecure] = useState(true)
+  // Server host/port are prefilled by the provider preset — most people never
+  // need to see them, so they live behind an "Advanced" disclosure.
+  const [serverAdvanced, setServerAdvanced] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -332,6 +336,7 @@ function EmailConnectDialog({
     setSmtpHost('smtp.gmail.com')
     setSmtpPort('465')
     setSmtpSecure(true)
+    setServerAdvanced(false)
     setError(null)
   }, [open])
 
@@ -340,6 +345,8 @@ function EmailConnectDialog({
   const applyPreset = (p: EmailPresetRow) => {
     setPresetId(p.id)
     setError(null)
+    // Custom IMAP is exactly the case where people DO know their servers.
+    setServerAdvanced(p.id === 'custom')
     if (p.id === 'custom') return
     setImapHost(p.imapHost)
     setImapPort(String(p.imapPort))
@@ -506,52 +513,69 @@ function EmailConnectDialog({
             {selectedPreset?.hint ?? GMAIL_DEFAULT_HINT}
           </p>
 
-          {/* Server settings */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_5.5rem]">
-            <label className="block">
-              <span className={fieldLabelClass}>{t('settings.imapHost')}</span>
-              <input
-                type="text"
-                value={imapHost}
-                onChange={(e) => setImapHost(e.target.value)}
-                placeholder="imap.gmail.com"
-                spellCheck={false}
-                className={inputClass}
-              />
-            </label>
-            <label className="block">
-              <span className={fieldLabelClass}>{t('settings.port')}</span>
-              <input
-                type="number"
-                value={imapPort}
-                onChange={(e) => setImapPort(e.target.value)}
-                min={1}
-                max={65535}
-                className={inputClass}
-              />
-            </label>
-            <label className="block">
-              <span className={fieldLabelClass}>{t('settings.smtpHost')}</span>
-              <input
-                type="text"
-                value={smtpHost}
-                onChange={(e) => setSmtpHost(e.target.value)}
-                placeholder="smtp.gmail.com"
-                spellCheck={false}
-                className={inputClass}
-              />
-            </label>
-            <label className="block">
-              <span className={fieldLabelClass}>{t('settings.port')}</span>
-              <input
-                type="number"
-                value={smtpPort}
-                onChange={(e) => setSmtpPort(e.target.value)}
-                min={1}
-                max={65535}
-                className={inputClass}
-              />
-            </label>
+          {/* Server settings — prefilled by the preset, hidden by default */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setServerAdvanced((v) => !v)}
+              aria-expanded={serverAdvanced}
+              className="flex min-h-[36px] items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
+            >
+              {serverAdvanced ? (
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+              )}
+              Advanced server settings (filled in for you)
+            </button>
+            {serverAdvanced && (
+              <div className="mt-2.5 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_5.5rem]">
+                <label className="block">
+                  <span className={fieldLabelClass}>{t('settings.imapHost')}</span>
+                  <input
+                    type="text"
+                    value={imapHost}
+                    onChange={(e) => setImapHost(e.target.value)}
+                    placeholder="imap.gmail.com"
+                    spellCheck={false}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="block">
+                  <span className={fieldLabelClass}>{t('settings.port')}</span>
+                  <input
+                    type="number"
+                    value={imapPort}
+                    onChange={(e) => setImapPort(e.target.value)}
+                    min={1}
+                    max={65535}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="block">
+                  <span className={fieldLabelClass}>{t('settings.smtpHost')}</span>
+                  <input
+                    type="text"
+                    value={smtpHost}
+                    onChange={(e) => setSmtpHost(e.target.value)}
+                    placeholder="smtp.gmail.com"
+                    spellCheck={false}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="block">
+                  <span className={fieldLabelClass}>{t('settings.port')}</span>
+                  <input
+                    type="number"
+                    value={smtpPort}
+                    onChange={(e) => setSmtpPort(e.target.value)}
+                    min={1}
+                    max={65535}
+                    className={inputClass}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           {error && (

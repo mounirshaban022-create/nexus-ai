@@ -51,12 +51,23 @@ export async function GET(req: NextRequest) {
 /* ------------------------------ POST ------------------------------ */
 
 const createSchema = z.object({
-  phoneNumberId: z.string().regex(/^\d{5,25}$/, 'Phone Number ID must be numeric.'),
-  accessToken: z.string().min(20).max(2000),
+  // In rehearsal mode these two are auto-filled with demo values by the server.
+  // '' is allowed so the one-tap connect can send nothing at all.
+  phoneNumberId: z
+    .union([z.string().min(4).max(40), z.literal('')])
+    .optional()
+    .default(''),
+  accessToken: z.string().max(2000).optional().default(''),
   displayPhone: z.string().max(25).optional().default(''),
   businessName: z.string().min(1).max(60).optional().default('NEXUS Assistant'),
   agentPrompt: z.string().max(4000).optional().default(''),
+  // rehearsal: connect with ZERO credentials — the full agent pipeline runs,
+  // but sending/receiving is simulated until live credentials are added.
+  rehearsal: z.boolean().optional().default(false),
 })
+
+const REHEARSAL_STATUS_MESSAGE =
+  'Rehearsal mode — the agent works end-to-end on simulated chats. Add live credentials anytime to go on-air.'
 
 export async function POST(req: NextRequest) {
   const session = await getVerifiedSession(req)
@@ -77,6 +88,51 @@ export async function POST(req: NextRequest) {
     )
   }
   const data = parsed.data
+
+  /* REHEARSAL — the one-tap path. No Meta call at all: the owner connects
+     with zero credentials, the agent pipeline still runs end-to-end, and
+     sending/receiving is simulated until live credentials are added. */
+  if (data.rehearsal) {
+    await ensurePerUserColumns()
+    const existing = await getWhatsAppAccount(session.userId)
+    const account = existing
+      ? await db.whatsAppAccount.update({
+          where: { id: existing.id },
+          data: {
+            phoneNumberId: data.phoneNumberId || '000000000000',
+            accessTokenEnc: data.accessToken ? encryptSecret(data.accessToken) : '',
+            displayPhone: data.displayPhone || '',
+            businessName: data.businessName,
+            agentPrompt: data.agentPrompt,
+            status: 'pending',
+            statusMessage: REHEARSAL_STATUS_MESSAGE,
+            webhookVerified: false,
+          },
+        })
+      : await db.whatsAppAccount.create({
+          data: {
+            userId: session.userId,
+            phoneNumberId: data.phoneNumberId || '000000000000',
+            accessTokenEnc: data.accessToken ? encryptSecret(data.accessToken) : '',
+            verifyToken: generateVerifyToken(),
+            displayPhone: data.displayPhone || '',
+            businessName: data.businessName,
+            agentPrompt: data.agentPrompt,
+            status: 'pending',
+            statusMessage: REHEARSAL_STATUS_MESSAGE,
+          },
+        })
+
+    return NextResponse.json({ account: toPublicAccount(account) })
+  }
+
+  // LIVE — an access token is required to go on-air.
+  if (!data.accessToken.trim()) {
+    return NextResponse.json(
+      { error: 'An access token is required to go live.' },
+      { status: 400 }
+    )
+  }
 
   // Validate credentials against Meta BEFORE saving: GET the phone number
   // node — a bad token or phone-number-id returns an auth error here.

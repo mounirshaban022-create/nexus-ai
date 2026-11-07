@@ -1,17 +1,24 @@
 'use client'
 
 /**
- * Social Pilot — NEXUS social media automation center.
+ * Social Autopilot — connect once, the agents do the actual work.
  *
- * Connect Instagram / LinkedIn / X / Facebook Pages, then the agents
- * do the actual work: they write the copy, generate the visuals,
- * publish on schedule — or fully hands-free with Autopilot (no human
- * in the loop). Publishing uses each platform's REAL API; when the
- * environment can't reach the platform the run is marked `simulated`
- * so users always know what went on-air vs rehearsed.
+ * Design contract (learned from the owner, a non-technical user):
+ *  1. ZERO-KNOWLEDGE CONNECT: the main path is one tap. No passwords,
+ *     no tokens, no developer consoles — the agent starts in rehearsal
+ *     mode and everything works end-to-end.
+ *  2. GOING LIVE IS OPTIONAL and hidden under a collapsed "Go live"
+ *     section with a plain 2–3 step human guide per platform.
+ *  3. CALM SCREEN: one Autopilot card, one row of account chips, three
+ *     tabs (Queue / Inbox / Activity). No jargon on the default path.
+ *
+ * The pipeline behind the calm surface: Trend Radar (research what
+ * attracts people right now) → Page Brain (understands THIS page) →
+ * Creator (writes + shoots the visual) → Publisher (schedule or on-air)
+ * → Community Manager (replies to people like a savvy human).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,95 +36,165 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  Activity,
+  Activity as ActivityIcon,
   Brain,
   Calendar,
   CheckCircle2,
   ChevronDown,
-  CircleDashed,
-  Clock,
-  ExternalLink,
-  Instagram,
+  Facebook as FacebookIcon,
   Image as ImageIcon,
-  Link2,
+  Inbox,
+  Instagram,
   Linkedin,
+  Link2,
   Loader2,
   MessageCircle,
-  PlugZap,
   Radio,
   RefreshCw,
+  Search,
   Send,
   Sparkles,
   Trash2,
+  TrendingUp,
   Twitter,
-  Users,
   Wand2,
-  X,
   Zap,
-  Facebook as FacebookIcon,
 } from 'lucide-react'
-import { BrainTab, InboxTab } from './social-brain'
-import type { SocialAccountView } from './social-types'
 
 /* ------------------------------------------------------------------ */
-/* Platform registry (mirrors src/lib/social.ts)                       */
+/* Platform registry                                                   */
 /* ------------------------------------------------------------------ */
 
 type Platform = 'instagram' | 'linkedin' | 'x' | 'facebook'
 
-interface PlatformField {
+interface GoLiveField {
   key: string
   label: string
-  hint: string
+  placeholder: string
 }
 
-const PLATFORMS: Record<Platform, { label: string; color: string; icon: typeof Instagram; fields: PlatformField[]; docs: string }> = {
+const PLATFORMS: Record<
+  Platform,
+  { label: string; blurb: string; color: string; tile: string; icon: typeof Instagram; steps: string[]; fields: GoLiveField[] }
+> = {
   instagram: {
     label: 'Instagram',
+    blurb: 'Photos, Reels & Stories',
     color: '#e1306c',
+    tile: 'bg-gradient-to-br from-fuchsia-500/20 to-amber-500/20',
     icon: Instagram,
-    fields: [
-      { key: 'accessToken', label: 'Access Token', hint: 'Meta app token with instagram_content_publish' },
-      { key: 'externalId', label: 'Business Account ID', hint: 'The ig-user-id from Meta App Dashboard' },
+    steps: [
+      'Make your account a free Creator account: Instagram → Settings → Account type → Creator.',
+      'Create a free Meta developer account, connect Instagram in your app and copy the Access Token.',
+      'Paste the token below — publishing goes on-air instantly.',
     ],
-    docs: 'developers.facebook.com/docs/instagram-api',
+    fields: [
+      { key: 'accessToken', label: 'Access Token', placeholder: 'EAAG…' },
+      { key: 'externalId', label: 'Business Account ID (optional)', placeholder: '1784…' },
+    ],
   },
   linkedin: {
     label: 'LinkedIn',
+    blurb: 'Professional posts & articles',
     color: '#0a66c2',
+    tile: 'bg-sky-500/15',
     icon: Linkedin,
-    fields: [
-      { key: 'accessToken', label: 'Access Token', hint: 'OAuth token with w_member_social scope' },
-      { key: 'authorUrn', label: 'Author URN (optional)', hint: 'Empty = post as you · urn:li:organization:ID for a page' },
+    steps: [
+      'Create a free app at developer.linkedin.com and request the “Share on LinkedIn” product.',
+      'Generate an OAuth 2.0 access token with the w_member_social scope.',
+      'Paste it below — publishing goes on-air instantly.',
     ],
-    docs: 'learn.microsoft.com/en-us/linkedin/marketing/',
+    fields: [
+      { key: 'accessToken', label: 'Access Token', placeholder: 'AQX…' },
+      { key: 'authorUrn', label: 'Author URN (optional — empty posts as you)', placeholder: 'urn:li:person:…' },
+    ],
   },
   x: {
     label: 'X (Twitter)',
+    blurb: 'Short, fast texts',
     color: '#e7e9ea',
+    tile: 'bg-zinc-500/15',
     icon: Twitter,
-    fields: [{ key: 'accessToken', label: 'Access Token', hint: 'OAuth 2.0 user token with tweet.write' }],
-    docs: 'developer.x.com/en/docs/x-api',
+    steps: [
+      'Sign up free at developer.x.com and create a project + app.',
+      'Generate an OAuth 2.0 user token with tweet.write permission.',
+      'Paste it below — publishing goes on-air instantly.',
+    ],
+    fields: [{ key: 'accessToken', label: 'Access Token', placeholder: '…' }],
   },
   facebook: {
-    label: 'Facebook Page',
+    label: 'Facebook',
+    blurb: 'Your Page’s posts',
     color: '#1877f2',
+    tile: 'bg-blue-500/15',
     icon: FacebookIcon,
-    fields: [
-      { key: 'accessToken', label: 'Page Access Token', hint: 'Token with pages_manage_posts' },
-      { key: 'externalId', label: 'Page ID', hint: 'Numeric page id from /me/accounts' },
+    steps: [
+      'Create a free Meta app and add the Pages product.',
+      'Copy your Page Access Token and Page ID.',
+      'Paste them below — publishing goes on-air instantly.',
     ],
-    docs: 'developers.facebook.com/docs/pages-api',
+    fields: [
+      { key: 'accessToken', label: 'Page Access Token', placeholder: 'EAAB…' },
+      { key: 'externalId', label: 'Page ID', placeholder: '1022…' },
+    ],
   },
 }
 
 const PLATFORM_ORDER: Platform[] = ['instagram', 'linkedin', 'x', 'facebook']
 
+const CADENCE_OPTIONS = [
+  { label: '2× a day', mins: 720 },
+  { label: 'Every day', mins: 1440 },
+  { label: '3× a week', mins: 3360 },
+  { label: 'Weekly', mins: 10080 },
+]
+
 /* ------------------------------------------------------------------ */
-/* Types                                                               */
+/* View models                                                         */
 /* ------------------------------------------------------------------ */
 
-type Account = SocialAccountView
+interface PageStrategy {
+  voice: string
+  pillars: string[]
+  hooks: string[]
+  dos: string[]
+  donts: string[]
+  hashtags: string[]
+}
+
+interface TrendBrain {
+  summary: string
+  topics: string[]
+  hooks: string[]
+  formats: string[]
+  hashtags: string[]
+  sources: { title: string; url: string }[]
+  fetchedAt: string
+  researched: boolean
+}
+
+interface Account {
+  id: string
+  platform: Platform
+  platformLabel: string
+  displayName: string
+  handle: string
+  autopilot: boolean
+  autopilotTopic: string
+  autopilotCadenceMinutes: number
+  lastAutoPostAt: string | null
+  pageNiche: string
+  pageAudience: string
+  pageTone: string
+  pageGoal: string
+  pageLanguage: string
+  strategy: PageStrategy | null
+  trends: TrendBrain | null
+  autoReply: boolean
+  status: string
+  statusMessage: string
+  tokenPreview: string
+}
 
 interface Post {
   id: string
@@ -126,7 +203,7 @@ interface Post {
   caption: string
   mediaUrls: string[]
   mediaKind: string
-  status: string // queued | scheduled | published | simulated | failed
+  status: string
   scheduledFor: string | null
   publishedAt: string | null
   result: string
@@ -142,20 +219,45 @@ interface ActivityRow {
   createdAt: string
 }
 
+interface CommentRow {
+  id: string
+  accountId: string
+  platform: string
+  author: string
+  text: string
+  sentiment: string
+  aiReply: string
+  status: string
+  createdAt: string
+  repliedAt: string | null
+}
+
 /* ------------------------------------------------------------------ */
-/* Status chip                                                         */
+/* Small pieces                                                        */
 /* ------------------------------------------------------------------ */
+
+function relTime(iso: string | null): string {
+  if (!iso) return ''
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diff / 60_000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
+function PlatformGlyph({ platform, className }: { platform: string; className?: string }) {
+  const p = PLATFORMS[platform as Platform]
+  const Icon = p?.icon ?? Link2
+  return <Icon className={className} style={{ color: p?.color }} aria-hidden />
+}
 
 function StatusChip({ status }: { status: string }) {
   const map: Record<string, { cls: string; label: string }> = {
-    published: { cls: 'text-emerald-400 border-emerald-400/40', label: 'Published ✓' },
-    simulated: { cls: 'text-sky-400 border-sky-400/40', label: 'Rehearsed' },
-    scheduled: { cls: 'text-amber-400 border-amber-400/40', label: 'Scheduled' },
-    publishing: { cls: 'text-violet-400 border-violet-400/40', label: 'Publishing…' },
-    failed: { cls: 'text-red-400 border-red-400/40', label: 'Failed' },
-    connected: { cls: 'text-emerald-400 border-emerald-400/40', label: 'Connected' },
-    pending: { cls: 'text-amber-400 border-amber-400/40', label: 'Rehearsal' },
-    error: { cls: 'text-red-400 border-red-400/40', label: 'Error' },
+    connected: { cls: 'text-emerald-400 border-emerald-400/30', label: 'Live' },
+    pending: { cls: 'text-amber-400 border-amber-400/30', label: 'Rehearsal' },
+    error: { cls: 'text-red-400 border-red-400/30', label: 'Check' },
   }
   const m = map[status] ?? { cls: 'text-muted-foreground border-border', label: status }
   return (
@@ -166,14 +268,29 @@ function StatusChip({ status }: { status: string }) {
   )
 }
 
-function PlatformIcon({ platform, className }: { platform: string; className?: string }) {
-  const p = PLATFORMS[platform as Platform]
-  const Icon = p?.icon ?? Link2
-  return <Icon className={className} style={{ color: p?.color }} aria-hidden />
+function PostStatusChip({ status }: { status: string }) {
+  const map: Record<string, { cls: string; label: string }> = {
+    published: { cls: 'text-emerald-400 border-emerald-400/30', label: 'Published' },
+    simulated: { cls: 'text-sky-400 border-sky-400/30', label: 'Rehearsed' },
+    scheduled: { cls: 'text-amber-400 border-amber-400/30', label: 'Scheduled' },
+    publishing: { cls: 'text-violet-400 border-violet-400/30', label: 'Publishing…' },
+    queued: { cls: 'text-muted-foreground border-border', label: 'Queued' },
+    failed: { cls: 'text-red-400 border-red-400/30', label: 'Failed' },
+  }
+  const m = map[status] ?? { cls: 'text-muted-foreground border-border', label: status }
+  return (
+    <Badge variant="outline" className={cn('gap-1.5 text-[11px]', m.cls)}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+      {m.label}
+    </Badge>
+  )
 }
 
+const SECTION_LABEL = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+const CARD = 'rounded-2xl border border-border/60 bg-card/60'
+
 /* ------------------------------------------------------------------ */
-/* Connect dialog                                                      */
+/* Connect dialog — the zero-knowledge path                            */
 /* ------------------------------------------------------------------ */
 
 function ConnectDialog({
@@ -188,40 +305,36 @@ function ConnectDialog({
   onConnected: () => void
 }) {
   const { toast } = useToast()
-  const [creds, setCreds] = useState<Record<string, string>>({})
-  const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  const [advanced, setAdvanced] = useState(false)
+  const [goLive, setGoLive] = useState(false)
+  const [creds, setCreds] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (open) {
       setCreds({})
-      setName('')
-      setAdvanced(false)
+      setGoLive(false)
     }
   }, [open, platform])
 
   const meta = platform ? PLATFORMS[platform] : null
 
-  const submit = useCallback(
-    async (rehearsal = false) => {
+  const connect = useCallback(
+    async (rehearsal: boolean) => {
       if (!platform || !meta) return
       setBusy(true)
       try {
         const res = await fetch('/api/social/accounts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ platform, displayName: name, credentials: creds, rehearsal }),
+          body: JSON.stringify({ platform, credentials: creds, rehearsal }),
         })
         const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
         if (!res.ok || !data.account) throw new Error(data.error || 'Connection failed')
         toast({
-          title: rehearsal ? `${meta.label} connected ✓` : `${meta.label} connected ✓`,
+          title: `${meta.label} connected ✓`,
           description: rehearsal
-            ? 'You are in! The agent is ready — flip Autopilot on, or hit “Run autopilot now”. Posts are marked Rehearsed until you add real credentials.'
-            : data.account.status === 'connected'
-              ? 'Verified with the live API — posts go on-air for real.'
-              : 'Saved — publishing will run in rehearsal until the platform is reachable.',
+            ? 'The agent is on it — it will study your page, watch what’s trending and start posting. See the Activity feed.'
+            : 'Live and verified — posts go on-air for real.',
         })
         onOpenChange(false)
         onConnected()
@@ -231,69 +344,267 @@ function ConnectDialog({
         setBusy(false)
       }
     },
-    [platform, meta, creds, name, toast, onOpenChange, onConnected],
+    [platform, meta, creds, toast, onOpenChange, onConnected],
   )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {platform && <PlatformIcon platform={platform} className="h-5 w-5" />}
+          <DialogTitle className="flex items-center gap-2.5">
+            {platform && <PlatformGlyph platform={platform} className="h-5 w-5" />}
             Connect {meta?.label}
           </DialogTitle>
+          <DialogDescription>One tap and your agent starts working for this account.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Promise row — plain words only */}
+          <div className="flex flex-wrap gap-1.5">
+            {['No password needed', 'No tokens', 'No developer account'].map((p) => (
+              <Badge key={p} variant="outline" className="gap-1 border-emerald-400/30 text-[11px] text-emerald-400">
+                <CheckCircle2 className="h-3 w-3" aria-hidden />
+                {p}
+              </Badge>
+            ))}
+          </div>
+
+          <Button onClick={() => void connect(true)} disabled={busy || !platform} className="h-12 w-full text-sm font-semibold">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Zap className="h-4 w-4" aria-hidden />}
+            {busy ? 'Connecting…' : `Connect ${meta?.label ?? ''} — one tap`}
+          </Button>
+
+          <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+            Starts in <span className="font-medium text-amber-400">rehearsal mode</span>: the full pipeline runs — the
+            agent studies your page, watches what’s trending, writes, designs and replies — and posts are marked
+            Rehearsed. Go live whenever you’re ready.
+          </p>
+
+          {/* Optional: go live, collapsed, plain guide */}
+          <div className={cn('rounded-xl border border-border/60', goLive ? 'bg-background/40 p-3.5' : '')}>
+            <button
+              type="button"
+              onClick={() => setGoLive((v) => !v)}
+              className="mx-auto flex min-h-[32px] w-full items-center justify-center gap-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
+              aria-expanded={goLive}
+            >
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', goLive && 'rotate-180')} aria-hidden />
+              Go live — publish for real (optional)
+            </button>
+            {goLive && meta && (
+              <div className="mt-3 space-y-3">
+                <ol className="space-y-1.5">
+                  {meta.steps.map((s, i) => (
+                    <li key={i} className="flex gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                      <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary/15 text-[9px] font-bold text-foreground">
+                        {i + 1}
+                      </span>
+                      {s}
+                    </li>
+                  ))}
+                </ol>
+                {meta.fields.map((f) => (
+                  <div key={f.key} className="space-y-1">
+                    <Label htmlFor={`gl-${f.key}`} className="text-xs">
+                      {f.label}
+                    </Label>
+                    <Input
+                      id={`gl-${f.key}`}
+                      value={creds[f.key] ?? ''}
+                      onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
+                      placeholder={f.placeholder}
+                      className="h-9 text-xs"
+                      autoComplete="off"
+                    />
+                  </div>
+                ))}
+                <Button variant="secondary" onClick={() => void connect(false)} disabled={busy || !platform} className="h-10 w-full text-xs">
+                  Save live credentials
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Compose dialog — topic → AI draft → publish / schedule              */
+/* ------------------------------------------------------------------ */
+
+function ComposeDialog({
+  account,
+  open,
+  onOpenChange,
+  onPublished,
+}: {
+  account: Account | null
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onPublished: () => void
+}) {
+  const { toast } = useToast()
+  const [topic, setTopic] = useState('')
+  const [caption, setCaption] = useState('')
+  const [imageUrl, setImageUrl] = useState('')
+  const [hashtags, setHashtags] = useState<string[]>([])
+  const [drafting, setDrafting] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [scheduled, setScheduled] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setTopic('')
+      setCaption('')
+      setImageUrl('')
+      setHashtags([])
+      setScheduled('')
+    }
+  }, [open])
+
+  const draft = useCallback(async () => {
+    if (!account || topic.trim().length < 3) return
+    setDrafting(true)
+    try {
+      const res = await fetch('/api/social/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: account.platform, topic: topic.trim(), withImage: true, accountId: account.id }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { caption?: string; imageUrl?: string; hashtags?: string[]; error?: string }
+      if (!res.ok) throw new Error(data.error || 'Draft failed')
+      setCaption(data.caption ?? '')
+      setImageUrl(data.imageUrl ?? '')
+      setHashtags(Array.isArray(data.hashtags) ? data.hashtags : [])
+    } catch (err) {
+      toast({ title: 'Draft failed', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
+    } finally {
+      setDrafting(false)
+    }
+  }, [account, topic, toast])
+
+  const publish = useCallback(
+    async (withSchedule: boolean) => {
+      if (!account || !caption.trim()) return
+      setPublishing(true)
+      try {
+        const res = await fetch('/api/social/posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accountId: account.id,
+            caption: caption.trim(),
+            mediaUrls: imageUrl ? [imageUrl] : [],
+            mediaKind: imageUrl ? 'image' : 'text',
+            scheduledFor: withSchedule && scheduled ? new Date(scheduled).toISOString() : 'now',
+          }),
+        })
+        const data = (await res.json().catch(() => ({}))) as { error?: string; post?: { status: string } }
+        if (!res.ok) throw new Error(data.error || 'Publish failed')
+        toast({
+          title: withSchedule ? 'Scheduled ✓' : 'Sent to the platform ✓',
+          description: withSchedule
+            ? `The agent will publish it ${scheduled ? new Date(scheduled).toLocaleString() : 'at the chosen time'}.`
+            : data.post?.status === 'simulated'
+              ? 'Rehearsed — go live to publish for real.'
+              : 'Check the Queue tab for the result.',
+        })
+        onOpenChange(false)
+        onPublished()
+      } catch (err) {
+        toast({ title: 'Could not publish', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
+      } finally {
+        setPublishing(false)
+      }
+    },
+    [account, caption, imageUrl, scheduled, toast, onOpenChange, onPublished],
+  )
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88dvh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New post {account ? `· ${account.platformLabel}` : ''}</DialogTitle>
           <DialogDescription>
-            One click and the agent takes over — no passwords, no tokens. You can go live with real credentials anytime later.
+            Say the idea in one line — the agent writes the caption, shoots the visual and publishes.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          {/* THE easy path — zero fields, works for everyone */}
-          <Button onClick={() => void submit(true)} disabled={busy || !platform} className="h-12 w-full text-sm font-semibold">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Wand2 className="h-4 w-4" aria-hidden />}
-            {busy ? 'Connecting…' : `Quick connect ${meta?.label ?? ''} — one click`}
-          </Button>
-          <p className="-mt-1.5 text-center text-[11px] leading-snug text-muted-foreground">
-            The full pipeline starts immediately: the agent writes the caption, designs the visual and publishes. Posts are marked{' '}
-            <span className="text-sky-400">Rehearsed</span> until real credentials are added.
-          </p>
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <Input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. Our new collection just dropped"
+              className="h-10"
+              aria-label="Post topic"
+            />
+            <Button onClick={() => void draft()} disabled={drafting || topic.trim().length < 3} className="h-10 shrink-0">
+              {drafting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Wand2 className="h-4 w-4" aria-hidden />}
+              Draft
+            </Button>
+          </div>
 
-          {/* Advanced — go live with real credentials */}
-          <button
-            type="button"
-            onClick={() => setAdvanced((v) => !v)}
-            className="mx-auto flex min-h-[32px] items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
-          >
-            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', advanced && 'rotate-180')} aria-hidden />
-            Go live with your own credentials (advanced)
-          </button>
-          {advanced && meta && (
-            <div className="space-y-4 rounded-xl border border-border/60 bg-background/40 p-3">
+          {drafting && (
+            <p className="text-xs text-muted-foreground">
+              <Sparkles className="mr-1 inline h-3 w-3" aria-hidden />
+              Researching what works, writing, shooting the visual…
+            </p>
+          )}
+
+          {caption && (
+            <>
+              {imageUrl && (
+                <img src={imageUrl} alt="AI-generated visual for this post" className="max-h-64 w-full rounded-xl border border-border/60 object-cover" />
+              )}
               <div className="space-y-1.5">
-                <Label htmlFor="acc-name">Display name (optional)</Label>
-                <Input id="acc-name" placeholder="My brand" value={name} onChange={(e) => setName(e.target.value)} />
+                <Label htmlFor="cap" className="text-xs">
+                  Caption — edit anything
+                </Label>
+                <Textarea id="cap" value={caption} onChange={(e) => setCaption(e.target.value)} rows={5} className="text-sm" />
               </div>
-              {meta.fields.map((f) => (
-                <div key={f.key} className="space-y-1.5">
-                  <Label htmlFor={`f-${f.key}`}>{f.label}</Label>
-                  <Input
-                    id={`f-${f.key}`}
-                    type="password"
-                    placeholder={f.hint}
-                    value={creds[f.key] ?? ''}
-                    onChange={(e) => setCreds((c) => ({ ...c, [f.key]: e.target.value }))}
-                    className="font-mono text-xs"
-                  />
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {f.hint} · <span className="text-muted-foreground/70">Docs: {meta.docs}</span>
-                  </p>
+              {hashtags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {hashtags.map((h) => (
+                    <Badge key={h} variant="outline" className="text-[11px] text-muted-foreground">
+                      {h.startsWith('#') ? h : `#${h}`}
+                    </Badge>
+                  ))}
                 </div>
-              ))}
-              <Button onClick={() => void submit(false)} disabled={busy} className="w-full min-h-[44px]">
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <PlugZap className="h-4 w-4" aria-hidden />}
-                {busy ? 'Verifying with the platform…' : 'Verify & go live'}
-              </Button>
-            </div>
+              )}
+
+              <div className="space-y-2 rounded-xl border border-border/60 p-3">
+                <Label htmlFor="sched" className="flex items-center gap-1.5 text-xs">
+                  <Calendar className="h-3.5 w-3.5" aria-hidden />
+                  Schedule (optional)
+                </Label>
+                <Input
+                  id="sched"
+                  type="datetime-local"
+                  value={scheduled}
+                  onChange={(e) => setScheduled(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => void publish(!scheduled)}
+                  disabled={publishing}
+                  className="h-11 flex-1 text-sm font-semibold"
+                >
+                  {publishing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+                  {scheduled ? 'Schedule it' : 'Publish now'}
+                </Button>
+                {scheduled && (
+                  <Button variant="secondary" onClick={() => void publish(false)} disabled={publishing} className="h-11">
+                    Skip schedule
+                  </Button>
+                )}
+              </div>
+            </>
           )}
         </div>
       </DialogContent>
@@ -302,909 +613,776 @@ function ConnectDialog({
 }
 
 /* ------------------------------------------------------------------ */
-/* Autopilot settings dialog                                           */
+/* Trend strip — what the radar learned                                */
 /* ------------------------------------------------------------------ */
 
-function AutopilotDialog({
-  account,
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  account: Account | null
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  onSaved: () => void
-}) {
-  const { toast } = useToast()
-  const [topic, setTopic] = useState('')
-  const [cadence, setCadence] = useState(1440)
-  const [autoReply, setAutoReply] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (account && open) {
-      setTopic(account.autopilotTopic || '')
-      setCadence(account.autopilotCadenceMinutes || 1440)
-      setAutoReply(account.autoReply || false)
-    }
-  }, [account, open])
-
-  const save = useCallback(
-    async (enable: boolean) => {
-      if (!account) return
-      setBusy(true)
-      try {
-        const res = await fetch('/api/social/accounts', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: account.id,
-            autopilot: enable,
-            autopilotTopic: topic,
-            autopilotCadenceMinutes: cadence,
-            autoReply,
-          }),
-        })
-        const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
-        if (!res.ok || !data.account) throw new Error(data.error || 'Save failed')
-        toast({
-          title: enable ? 'Autopilot ON — the agent takes it from here 🤖' : 'Autopilot off',
-          description: enable
-            ? `A fresh AI-written post with a generated visual every ${cadence >= 1440 ? `${Math.round(cadence / 1440)} day(s)` : `${Math.round(cadence / 60)} hour(s)`}.`
-            : undefined,
-        })
-        onOpenChange(false)
-        onSaved()
-      } catch (err) {
-        toast({ title: 'Could not update autopilot', description: err instanceof Error ? err.message : '', variant: 'destructive' })
-      } finally {
-        setBusy(false)
-      }
-    },
-    [account, topic, cadence, toast, onOpenChange, onSaved],
-  )
-
+function TrendStrip({ trends }: { trends: TrendBrain }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Radio className="h-5 w-5 text-amber-400" aria-hidden />
-            Autopilot — {account?.platformLabel}
-          </DialogTitle>
-          <DialogDescription>
-            One switch: the agent picks the moment, writes the post, generates the visual and publishes — even while the app is closed.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-topic">
-              What should it post about? <span className="font-normal text-muted-foreground">(optional — the agent decides if empty)</span>
-            </Label>
-            <Textarea
-              id="ap-topic"
-              rows={3}
-              placeholder="e.g. Daily tips for home bakers, behind-the-scenes of our coffee roastery, new drops and customer stories…"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-cadence">Cadence — post every…</Label>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { m: 60, l: '1 hour' },
-                { m: 180, l: '3 hours' },
-                { m: 720, l: '12 hours' },
-                { m: 1440, l: 'Daily' },
-                { m: 4320, l: '3 days' },
-              ].map((o) => (
-                <button
-                  key={o.m}
-                  type="button"
-                  onClick={() => setCadence(o.m)}
-                  className={cn(
-                    'min-h-[36px] rounded-full border px-3.5 text-xs font-medium transition',
-                    cadence === o.m
-                      ? 'border-amber-400/60 bg-amber-400/10 text-amber-300'
-                      : 'border-border text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {o.l}
-                </button>
-              ))}
-            </div>
-            <input id="ap-cadence" type="number" min={15} max={20160} value={cadence} onChange={(e) => setCadence(Number(e.target.value) || 720)} className="sr-only" />
-          </div>
-          <div className="flex items-center justify-between rounded-xl border border-emerald-400/25 bg-emerald-400/5 px-3.5 py-3">
-            <div className="min-w-0 pr-3">
-              <p className="text-xs font-semibold">Also reply to people automatically</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">The agent answers comments like a warm human — in the commenter&apos;s own language.</p>
-            </div>
-            <Switch checked={autoReply} onCheckedChange={setAutoReply} aria-label="Auto-reply to comments" />
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={() => save(true)} disabled={busy} className="min-h-[44px] flex-1">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Zap className="h-4 w-4" aria-hidden />}
-              Enable autopilot
-            </Button>
-            {account?.autopilot && (
-              <Button variant="outline" onClick={() => save(false)} disabled={busy} className="min-h-[44px]">
-                Turn off
-              </Button>
-            )}
-          </div>
+    <div className="rounded-xl border border-border/60 bg-background/40 p-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className={cn('flex items-center gap-1.5', SECTION_LABEL)}>
+          <TrendingUp className="h-3.5 w-3.5" aria-hidden />
+          What’s attracting people now
+        </p>
+        <span className="text-[10px] text-muted-foreground">{relTime(trends.fetchedAt)}</span>
+      </div>
+      {trends.summary && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{trends.summary}</p>}
+      {trends.hooks.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {trends.hooks.slice(0, 4).map((h, i) => (
+            <Badge key={i} variant="outline" className="max-w-full text-[11px] text-muted-foreground">
+              <span className="truncate">“{h.length > 60 ? `${h.slice(0, 60)}…` : h}”</span>
+            </Badge>
+          ))}
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+      {trends.hashtags.length > 0 && (
+        <p className="mt-2 truncate text-[11px] text-muted-foreground/80">
+          {trends.hashtags.slice(0, 8).map((h) => (h.startsWith('#') ? h : `#${h}`)).join('  ')}
+        </p>
+      )}
+      {trends.sources.length > 0 && (
+        <p className="mt-1.5 text-[10px] text-muted-foreground/60">{trends.sources.length} live sources researched</p>
+      )}
+    </div>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/* Main mode                                                           */
+/* Main component                                                      */
 /* ------------------------------------------------------------------ */
 
 export function SocialMode() {
   const { toast } = useToast()
+
+  const [loading, setLoading] = useState(true)
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [posts, setPosts] = useState<Post[]>([])
   const [activity, setActivity] = useState<ActivityRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const [comments, setComments] = useState<CommentRow[]>([])
+
+  // dialogs
   const [connectPlatform, setConnectPlatform] = useState<Platform | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
-  const [quickBusy, setQuickBusy] = useState<Platform | null>(null)
-  const [autopilotFor, setAutopilotFor] = useState<Account | null>(null)
-  const [autopilotOpen, setAutopilotOpen] = useState(false)
-  const [autopilotBusy, setAutopilotBusy] = useState(false)
+  const [composeOpen, setComposeOpen] = useState(false)
 
-  // Composer state
-  const [tab, setTab] = useState('accounts')
-  const [composeAccountId, setComposeAccountId] = useState('')
-  const [brainAccountId, setBrainAccountId] = useState('')
-  const [inboxAccountId, setInboxAccountId] = useState('')
-  const [caption, setCaption] = useState('')
-  const [mediaUrls, setMediaUrls] = useState<string[]>([])
-  const [mediaKind, setMediaKind] = useState<'image' | 'video' | 'text'>('image')
-  const [imageUrlInput, setImageUrlInput] = useState('')
-  const [scheduleAt, setScheduleAt] = useState('')
-  const [genTopic, setGenTopic] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [publishing, setPublishing] = useState(false)
-  const composerRef = useRef<HTMLDivElement | null>(null)
+  // autopilot card state
+  const [topicDraft, setTopicDraft] = useState('')
+  const [brainOpen, setBrainOpen] = useState(false)
+  const [brainFields, setBrainFields] = useState({ niche: '', audience: '', tone: '' })
+  const [running, setRunning] = useState(false)
+  const [researching, setResearching] = useState(false)
+  const [savingBrain, setSavingBrain] = useState(false)
 
-  const connected = useMemo(() => accounts.filter((a) => a.status !== 'error'), [accounts])
-  const autopilotOn = useMemo(() => accounts.filter((a) => a.autopilot), [accounts])
+  // inbox
+  const [sampleText, setSampleText] = useState('')
 
-  const load = useCallback(
-    async (withHeartbeat = false) => {
-      try {
-        const res = await fetch(`/api/social/posts${withHeartbeat ? '' : '?heartbeat=0'}`)
-        if (res.status === 401) {
-          setLoading(false)
-          return
-        }
-        const data = (await res.json().catch(() => ({}))) as {
-          posts?: Post[]
-          activity?: ActivityRow[]
-          accounts?: Account[]
-          autopilot?: { processed: number; results: { account: string; ok: boolean; message: string }[] } | null
-        }
-        setPosts(data.posts ?? [])
-        setActivity(data.activity ?? [])
-        if (data.autopilot && data.autopilot.processed > 0) {
-          const okCount = data.autopilot.results.filter((r) => r.ok).length
-          toast({ title: `🤖 Autopilot fired — ${okCount}/${data.autopilot.processed} post(s) went out` })
-        }
-        // accounts come from their own endpoint
-        const accRes = await fetch('/api/social/accounts')
-        if (accRes.ok) {
-          const accData = (await accRes.json().catch(() => ({}))) as { accounts?: Account[] }
-          setAccounts(accData.accounts ?? [])
-          setComposeAccountId((cur) => cur || accData.accounts?.[0]?.id || '')
-          setBrainAccountId((cur) => cur || accData.accounts?.[0]?.id || '')
-          setInboxAccountId((cur) => cur || accData.accounts?.[0]?.id || '')
-        }
-      } catch {
-        /* non-fatal */
-      } finally {
-        setLoading(false)
+  const active = useMemo(() => accounts.find((a) => a.id === activeId) ?? accounts[0] ?? null, [accounts, activeId])
+  const pendingComments = useMemo(() => comments.filter((c) => c.status === 'pending'), [comments])
+
+  /* ------------------------------ data ------------------------------ */
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/social/accounts')
+      if (res.ok) {
+        const data = (await res.json()) as { accounts?: Account[] }
+        setAccounts(data.accounts ?? [])
       }
-    },
-    [toast],
-  )
-
-  useEffect(() => {
-    void load(true)
+    } catch {
+      /* non-fatal */
+    }
   }, [])
 
-  // Keep the automation alive while the screen is open (60s heartbeat).
-  useEffect(() => {
-    const t = setInterval(() => void load(true), 60_000)
-    return () => clearInterval(t)
-  }, [load])
-
-  const runAutopilot = useCallback(async () => {
-    setAutopilotBusy(true)
+  const loadQueue = useCallback(async () => {
     try {
-      // force=true — the user pressed "Run now", so the agent acts right
-      // away instead of replying "not due yet" (which felt like a dead end).
+      const res = await fetch('/api/social/posts')
+      if (res.ok) {
+        const data = (await res.json()) as { posts?: Post[]; activity?: ActivityRow[] }
+        setPosts(data.posts ?? [])
+        setActivity(data.activity ?? [])
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, [])
+
+  const loadComments = useCallback(async () => {
+    try {
+      const res = await fetch('/api/social/comments')
+      if (res.ok) {
+        const data = (await res.json()) as { comments?: CommentRow[] }
+        setComments(data.comments ?? [])
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    void Promise.all([loadAccounts(), loadQueue(), loadComments()]).finally(() => setLoading(false))
+    // Gentle heartbeat: while the screen is open, the autopilot tick runs
+    // server-side (the GET doubles as the automation heartbeat).
+    const t = setInterval(() => void loadQueue(), 20_000)
+    return () => clearInterval(t)
+  }, [loadAccounts, loadQueue, loadComments])
+
+  // Sync the autopilot inputs whenever the active account changes.
+  useEffect(() => {
+    if (active) {
+      setTopicDraft(active.autopilotTopic)
+      setBrainFields({ niche: active.pageNiche, audience: active.pageAudience, tone: active.pageTone })
+    }
+  }, [active?.id])
+
+  /* ---------------------------- actions ----------------------------- */
+
+  const patchAccount = useCallback(
+    async (fields: Record<string, unknown>, id?: string) => {
+      const target = id ?? active?.id
+      if (!target) return
+      try {
+        const res = await fetch('/api/social/accounts', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: target, ...fields }),
+        })
+        const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
+        if (!res.ok || !data.account) throw new Error(data.error || 'Update failed')
+        setAccounts((prev) => prev.map((a) => (a.id === target ? (data.account as Account) : a)))
+      } catch (err) {
+        toast({ title: 'Could not save', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
+      }
+    },
+    [active?.id, toast],
+  )
+
+  const runNow = useCallback(async () => {
+    setRunning(true)
+    try {
       const res = await fetch('/api/social/autopilot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force: true }),
       })
-      const data = (await res.json().catch(() => ({}))) as { processed?: number; results?: { ok: boolean; message: string }[]; error?: string }
-      if (!res.ok) throw new Error(data.error || 'Autopilot failed')
-      const okCount = (data.results ?? []).filter((r) => r.ok).length
+      const data = (await res.json().catch(() => ({}))) as { processed?: number; error?: string }
+      if (!res.ok) throw new Error(data.error || 'Run failed')
       toast({
-        title: data.processed ? `🤖 ${okCount}/${data.processed} autopilot post(s) done` : 'Turn Autopilot on first',
+        title: data.processed ? 'The agent worked its magic ✓' : 'Nothing was due right now',
         description: data.processed
-          ? (data.results ?? []).map((r) => r.message).join(' · ')
-          : 'Go to Accounts, flip the Autopilot switch on a connected account, and the agent starts posting for you.',
+          ? `Processed ${data.processed} account${data.processed > 1 ? 's' : ''} — research, write, design, publish. Check the Queue.`
+          : 'Turn Autopilot on or wait for the next scheduled run.',
       })
-      void load(false)
+      await Promise.all([loadQueue(), loadAccounts()])
     } catch (err) {
-      toast({ title: 'Autopilot run failed', description: err instanceof Error ? err.message : '', variant: 'destructive' })
+      toast({ title: 'Run failed', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
     } finally {
-      setAutopilotBusy(false)
+      setRunning(false)
     }
-  }, [toast, load])
+  }, [toast, loadQueue, loadAccounts])
 
-  const toggleAutopilot = useCallback(
-    async (account: Account) => {
-      if (!account.autopilot) {
-        setAutopilotFor(account)
-        setAutopilotOpen(true)
-        return
-      }
-      // Turning OFF is instant (no config needed).
-      try {
-        const res = await fetch('/api/social/accounts', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: account.id, autopilot: false }),
-        })
-        if (!res.ok) throw new Error('Could not turn autopilot off')
-        toast({ title: 'Autopilot off' })
-        void load(false)
-      } catch (err) {
-        toast({ title: 'Failed', description: err instanceof Error ? err.message : '', variant: 'destructive' })
-      }
-    },
-    [toast, load],
-  )
-
-  const disconnect = useCallback(
-    async (account: Account) => {
-      try {
-        const res = await fetch(`/api/social/accounts?id=${account.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Could not disconnect')
-        toast({ title: `${account.platformLabel} disconnected` })
-        void load(false)
-      } catch (err) {
-        toast({ title: 'Failed', description: err instanceof Error ? err.message : '', variant: 'destructive' })
-      }
-    },
-    [toast, load],
-  )
-
-  /* ---------------- Composer actions ---------------- */
-
-  const generateDraft = useCallback(async () => {
-    const account = accounts.find((a) => a.id === composeAccountId)
-    if (!account) {
-      toast({ title: 'Pick an account first', variant: 'destructive' })
-      return
-    }
-    setGenerating(true)
+  const research = useCallback(async () => {
+    if (!active) return
+    setResearching(true)
     try {
-      const res = await fetch('/api/social/generate', {
+      const res = await fetch('/api/social/trends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: active.id, force: true }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { trends?: TrendBrain; error?: string }
+      if (!res.ok || !data.trends) throw new Error(data.error || 'Scan failed')
+      setAccounts((prev) => prev.map((a) => (a.id === active.id ? { ...a, trends: data.trends as TrendBrain } : a)))
+      toast({ title: 'Trend scan done ✓', description: 'The agent studied what’s attracting people in your niche right now.' })
+    } catch (err) {
+      toast({ title: 'Scan failed', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
+    } finally {
+      setResearching(false)
+    }
+  }, [active, toast])
+
+  const saveBrain = useCallback(async () => {
+    if (!active) return
+    setSavingBrain(true)
+    try {
+      const res = await fetch('/api/social/brain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: account.id,
-          platform: account.platform,
-          topic: genTopic || account.autopilotTopic || account.pageNiche || `something valuable for ${account.displayName || 'the audience'}`,
-          withImage: mediaKind === 'image',
+          accountId: active.id,
+          pageNiche: brainFields.niche,
+          pageAudience: brainFields.audience,
+          pageTone: brainFields.tone,
+          buildStrategy: true,
         }),
       })
-      const data = (await res.json().catch(() => ({}))) as { caption?: string; imageUrl?: string; error?: string }
-      if (!res.ok) throw new Error(data.error || 'Generation failed')
-      if (data.caption) setCaption(data.caption)
-      if (data.imageUrl) {
-        setMediaUrls((m) => (m.includes(data.imageUrl!) ? m : [...m, data.imageUrl!]))
-        setMediaKind('image')
-      }
-      toast({
-        title: 'Draft ready ✨',
-        description: 'Written with your page brain' + (account.trends ? ' + live trend research' : '') + (data.imageUrl ? ' + a generated visual.' : '.'),
-      })
+      const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
+      if (!res.ok || !data.account) throw new Error(data.error || 'Save failed')
+      setAccounts((prev) => prev.map((a) => (a.id === active.id ? (data.account as Account) : a)))
+      toast({ title: 'The agent knows your page ✓', description: 'Every future post and reply now matches your voice.' })
     } catch (err) {
-      toast({ title: 'Generation failed', description: err instanceof Error ? err.message : '', variant: 'destructive' })
+      toast({ title: 'Could not save', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
     } finally {
-      setGenerating(false)
+      setSavingBrain(false)
     }
-  }, [accounts, composeAccountId, genTopic, mediaKind, toast])
+  }, [active, brainFields, toast])
 
-  const publish = useCallback(
-    async (mode: 'now' | 'schedule') => {
-      const account = accounts.find((a) => a.id === composeAccountId)
-      if (!account) {
-        toast({ title: 'Pick an account first', variant: 'destructive' })
-        return
-      }
-      if (!caption.trim()) {
-        toast({ title: 'Write a caption (or generate one)', variant: 'destructive' })
-        return
-      }
-      if (mode === 'schedule' && !scheduleAt) {
-        toast({ title: 'Pick a date & time to schedule', variant: 'destructive' })
-        return
-      }
-      setPublishing(true)
+  const disconnect = useCallback(
+    async (id: string) => {
       try {
-        const res = await fetch('/api/social/posts', {
-          method: 'POST',
+        await fetch(`/api/social/accounts?id=${id}`, { method: 'DELETE' })
+        setAccounts((prev) => prev.filter((a) => a.id !== id))
+        if (activeId === id) setActiveId(null)
+        toast({ title: 'Disconnected' })
+        void loadQueue()
+      } catch {
+        toast({ title: 'Could not disconnect', variant: 'destructive' })
+      }
+    },
+    [activeId, toast, loadQueue],
+  )
+
+  const sendReply = useCallback(
+    async (comment: CommentRow) => {
+      try {
+        const res = await fetch(`/api/social/comments/${comment.id}`, {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            accountId: account.id,
-            caption,
-            mediaUrls,
-            mediaKind: mediaUrls.length > 1 ? 'carousel' : mediaKind,
-            scheduledFor: mode === 'schedule' ? new Date(scheduleAt).toISOString() : 'now',
-          }),
+          body: JSON.stringify({ reply: comment.aiReply }),
         })
-        const data = (await res.json().catch(() => ({}))) as {
-          post?: Post
-          result?: { ok: boolean; mode: string; message: string; permalink: string }
-          error?: string
+        if (res.ok) {
+          setComments((prev) =>
+            prev.map((c) => (c.id === comment.id ? { ...c, status: 'replied', repliedAt: new Date().toISOString() } : c)),
+          )
+          toast({ title: 'Reply sent ✓', description: 'The agent answered like a human would.' })
+          void loadQueue()
         }
-        if (!res.ok || !data.result?.ok) throw new Error(data.error || data.result?.message || 'Publish failed')
-        const live = data.result.mode === 'live'
-        toast({
-          title: mode === 'schedule' ? 'Scheduled ✓' : live ? 'LIVE — published for real 🚀' : 'Rehearsal complete ✓',
-          description:
-            mode === 'schedule'
-              ? `The agent will post it on ${new Date(scheduleAt).toLocaleString()}.`
-              : data.result.message,
-        })
-        setCaption('')
-        setMediaUrls([])
-        setScheduleAt('')
-        void load(false)
-      } catch (err) {
-        toast({ title: 'Could not publish', description: err instanceof Error ? err.message : '', variant: 'destructive' })
-      } finally {
-        setPublishing(false)
+      } catch {
+        toast({ title: 'Could not send', variant: 'destructive' })
       }
     },
-    [accounts, composeAccountId, caption, mediaUrls, mediaKind, scheduleAt, toast, load],
+    [toast, loadQueue],
   )
 
-  const cancelPost = useCallback(
-    async (post: Post) => {
-      try {
-        const res = await fetch(`/api/social/posts/${post.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Could not cancel')
-        toast({ title: 'Post cancelled' })
-        void load(false)
-      } catch (err) {
-        toast({ title: 'Failed', description: err instanceof Error ? err.message : '', variant: 'destructive' })
+  const addSample = useCallback(async () => {
+    if (!active || sampleText.trim().length < 2) return
+    try {
+      const res = await fetch('/api/social/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: active.id, author: 'Curious visitor', text: sampleText.trim(), draftNow: true }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
+      if (res.ok && data.comment) {
+        setComments((prev) => [data.comment as CommentRow, ...prev])
+        setSampleText('')
       }
-    },
-    [toast, load],
-  )
+    } catch {
+      /* non-fatal */
+    }
+  }, [active, sampleText])
 
-  const openCompose = useCallback(() => {
-    setTab('composer')
-    setTimeout(() => composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
+  const openConnect = useCallback((p: Platform) => {
+    setConnectPlatform(p)
+    setConnectOpen(true)
   }, [])
 
-  /** Zero-friction connect: one click, no fields, no dialog. */
-  const quickConnect = useCallback(
-    async (platform: Platform) => {
-      setQuickBusy(platform)
-      try {
-        const res = await fetch('/api/social/accounts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ platform, credentials: {}, rehearsal: true }),
-        })
-        const data = (await res.json().catch(() => ({}))) as { account?: Account; error?: string }
-        if (!res.ok || !data.account) throw new Error(data.error || 'Connection failed')
-        toast({
-          title: `${PLATFORMS[platform].label} connected ✓`,
-          description: 'Now flip the Autopilot switch — or press “Run autopilot now” to see the agent post instantly.',
-        })
-        await load(false)
-      } catch (err) {
-        toast({ title: 'Could not connect', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' })
-      } finally {
-        setQuickBusy(null)
-      }
-    },
-    [toast, load],
-  )
+  const nextRunLabel = useCallback((a: Account): string => {
+    if (!a.autopilot) return 'Autopilot is off — the agent waits for you.'
+    if (!a.lastAutoPostAt) return 'First post is brewing — the agent is getting ready.'
+    const due = new Date(new Date(a.lastAutoPostAt).getTime() + a.autopilotCadenceMinutes * 60_000)
+    const mins = Math.round((due.getTime() - Date.now()) / 60_000)
+    if (mins <= 0) return 'Due now — the next post is on its way.'
+    if (mins < 60) return `Next post in ~${mins}m`
+    return `Next post in ~${Math.round(mins / 60)}h`
+  }, [])
 
-  /* ---------------- Render ---------------- */
+  const accountPosts = useMemo(() => posts.filter((p) => !active || p.accountId === active.id), [posts, active])
+
+  /* ---------------------------- render ------------------------------ */
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+        <span className="sr-only">Loading Social Autopilot</span>
+      </div>
+    )
+  }
 
   return (
-    <div className="nx-scroll flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl space-y-5 p-4 sm:p-6">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-lg font-semibold">
-              <Radio className="h-5 w-5 text-amber-400" aria-hidden />
-              Social Pilot
-              {autopilotOn.length > 0 && (
-                <Badge className="gap-1 bg-amber-400/15 text-amber-300 border border-amber-400/30">
-                  <span className="relative flex h-1.5 w-1.5" aria-hidden>
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400" />
-                  </span>
-                  {autopilotOn.length} on autopilot
-                </Badge>
+    <div className="mx-auto w-full max-w-3xl space-y-5 pb-6">
+      {/* Account chips */}
+      {accounts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Connected accounts">
+          {accounts.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              role="tab"
+              aria-selected={a.id === active?.id}
+              onClick={() => setActiveId(a.id)}
+              className={cn(
+                'group flex min-h-[40px] items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition',
+                a.id === active?.id
+                  ? 'border-primary/50 bg-primary/10 text-foreground'
+                  : 'border-border/60 bg-card/60 text-muted-foreground hover:border-border hover:text-foreground',
               )}
-            </h1>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Connect once — the agents research trends, write, design, publish and reply to people on their own.
+            >
+              <PlatformGlyph platform={a.platform} className="h-3.5 w-3.5" />
+              <span className="font-medium">{a.handle || a.displayName}</span>
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  a.status === 'connected' ? 'bg-emerald-400' : a.status === 'error' ? 'bg-red-400' : 'bg-amber-400',
+                )}
+                aria-hidden
+              />
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Disconnect ${a.displayName}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void disconnect(a.id)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.stopPropagation()
+                    void disconnect(a.id)
+                  }
+                }}
+                className="ml-0.5 hidden text-muted-foreground/60 transition hover:text-red-400 group-hover:block"
+              >
+                <Trash2 className="h-3 w-3" aria-hidden />
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* EMPTY — the connect gallery */}
+      {accounts.length === 0 ? (
+        <section className={cn(CARD, 'p-6')} aria-label="Connect a social account">
+          <div className="mx-auto max-w-md text-center">
+            <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/15">
+              <Radio className="h-6 w-6 text-amber-400" aria-hidden />
+            </span>
+            <h3 className="mt-3 text-base font-semibold">Connect your first account</h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              One tap. No passwords, no tokens, no developer account — the agent starts working immediately.
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="min-h-[38px]" onClick={() => void load(false)}>
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Refresh
-            </Button>
-            <Button size="sm" className="min-h-[38px]" onClick={runAutopilot} disabled={autopilotBusy}>
-              {autopilotBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
-              Run autopilot now
-            </Button>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {PLATFORM_ORDER.map((p) => {
+              const meta = PLATFORMS[p]
+              const Icon = meta.icon
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => openConnect(p)}
+                  className="group flex min-h-[72px] items-center gap-3.5 rounded-2xl border border-border/60 bg-background/40 p-4 text-start transition hover:border-primary/40 hover:bg-background/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-xl', meta.tile)}>
+                    <Icon className="h-5 w-5" style={{ color: meta.color }} aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{meta.label}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{meta.blurb}</span>
+                  </span>
+                  <Zap className="h-4 w-4 shrink-0 text-muted-foreground/40 transition group-hover:text-amber-400" aria-hidden />
+                </button>
+              )
+            })}
           </div>
-        </div>
-
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="w-full justify-start overflow-x-auto">
-            <TabsTrigger value="accounts" className="gap-1.5">
-              <Link2 className="h-3.5 w-3.5" aria-hidden /> Accounts
-              {connected.length > 0 && <span className="rounded-full bg-emerald-400/15 px-1.5 text-[10px] text-emerald-300">{connected.length}</span>}
-            </TabsTrigger>
-            <TabsTrigger value="composer" className="gap-1.5">
-              <Wand2 className="h-3.5 w-3.5" aria-hidden /> Composer
-            </TabsTrigger>
-            <TabsTrigger value="brain" className="gap-1.5">
-              <Brain className="h-3.5 w-3.5" aria-hidden /> Brain
-              {accounts.some((a) => a.pageNiche) && <span className="rounded-full bg-violet-400/15 px-1.5 text-[10px] text-violet-300">✓</span>}
-            </TabsTrigger>
-            <TabsTrigger value="inbox" className="gap-1.5">
-              <MessageCircle className="h-3.5 w-3.5" aria-hidden /> Inbox
-              {accounts.some((a) => a.autoReply) && (
-                <span className="relative flex h-1.5 w-1.5" aria-hidden>
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="queue" className="gap-1.5">
-              <Clock className="h-3.5 w-3.5" aria-hidden /> Queue
-              {posts.length > 0 && <span className="rounded-full bg-primary/15 px-1.5 text-[10px]">{posts.length}</span>}
-            </TabsTrigger>
-            <TabsTrigger value="activity" className="gap-1.5">
-              <Activity className="h-3.5 w-3.5" aria-hidden /> Activity
-            </TabsTrigger>
-          </TabsList>
-
-          {/* ---------------- Accounts ---------------- */}
-          <TabsContent value="accounts" className="space-y-4">
-            {loading ? (
-              <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading your connections…
-              </div>
-            ) : (
-              <>
-                {/* First-run welcome — three steps, zero jargon */}
-                {accounts.length === 0 && (
-                  <div className="rounded-2xl border border-amber-400/25 bg-gradient-to-b from-amber-400/10 to-transparent p-5 sm:p-6">
-                    <p className="text-sm font-semibold">Your agents can run your social media — hands-free.</p>
-                    <ol className="mt-3 space-y-2 text-[13px] text-foreground/80">
-                      {[
-                        'Connect an account — one click, no passwords or tokens needed',
-                        'Teach the agent about your page in the Brain tab (1 minute) — it studies your niche and scans what works',
-                        'Flip Autopilot on — it researches, writes, designs, publishes AND replies to comments hands-free',
-                      ].map((s, i) => (
-                        <li key={s} className="flex items-start gap-2.5">
-                          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-amber-400/40 bg-amber-400/10 text-[10px] font-bold text-amber-300">
-                            {i + 1}
-                          </span>
-                          {s}
-                        </li>
-                      ))}
-                    </ol>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Button onClick={() => void quickConnect('instagram')} disabled={quickBusy !== null} className="min-h-[44px] flex-1 sm:flex-none">
-                        {quickBusy === 'instagram' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Instagram className="h-4 w-4" aria-hidden />}
-                        {quickBusy === 'instagram' ? 'Connecting…' : 'Connect Instagram — 1 click'}
-                      </Button>
-                      <Button variant="outline" onClick={() => void quickConnect('linkedin')} disabled={quickBusy !== null} className="min-h-[44px] flex-1 sm:flex-none">
-                        {quickBusy === 'linkedin' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Linkedin className="h-4 w-4" aria-hidden />}
-                        {quickBusy === 'linkedin' ? 'Connecting…' : 'Connect LinkedIn — 1 click'}
-                      </Button>
-                    </div>
-                    <p className="mt-2.5 text-[11px] text-muted-foreground">
-                      Starts in rehearsal mode — the whole agent pipeline runs and posts are marked <span className="text-sky-400">Rehearsed</span>. Add real credentials anytime to go on-air.
-                    </p>
+        </section>
+      ) : (
+        active && (
+          <>
+            {/* ---------- Autopilot hero ---------- */}
+            <section className={cn(CARD, 'p-5')} aria-label="Autopilot control">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold">Autopilot</h3>
+                    <StatusChip status={active.status} />
                   </div>
-                )}
-
-                {accounts.length > 0 && (
-                  <div className="space-y-3">
-                    {accounts.map((a) => (
-                      <div key={a.id} className="rounded-2xl border border-border/70 bg-card/60 p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <span className="grid h-10 w-10 place-items-center rounded-xl border border-border/70 bg-background/60">
-                              <PlatformIcon platform={a.platform} className="h-5 w-5" />
-                            </span>
-                            <div>
-                              <p className="flex items-center gap-2 text-sm font-semibold">
-                                {a.displayName}
-                                <StatusChip status={a.status} />
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {a.handle || a.platformLabel}
-                                {a.autopilot && (
-                                  <span className="text-amber-400">
-                                    {' '}
-                                    · autopilot every {a.autopilotCadenceMinutes >= 1440 ? `${Math.round(a.autopilotCadenceMinutes / 1440)}d` : `${Math.round(a.autopilotCadenceMinutes / 60)}h`}
-                                  </span>
-                                )}
-                                {a.lastAutoPostAt && a.autopilot && (
-                                  <span> · last: {new Date(a.lastAutoPostAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                              <Switch checked={a.autopilot} onCheckedChange={() => void toggleAutopilot(a)} aria-label={`Autopilot for ${a.displayName}`} />
-                              <span className={a.autopilot ? 'text-amber-300' : ''}>Autopilot</span>
-                            </label>
-                            <Button variant="outline" size="sm" className="min-h-[36px]" onClick={openCompose}>
-                              <Send className="h-3.5 w-3.5" aria-hidden /> Post
-                            </Button>
-                            <Button variant="ghost" size="sm" className="min-h-[36px] text-red-400 hover:text-red-300" onClick={() => void disconnect(a)}>
-                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                              <span className="sr-only">Disconnect {a.displayName}</span>
-                            </Button>
-                          </div>
-                        </div>
-                        {a.autopilotTopic && (
-                          <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[11px] text-amber-200/80">
-                            🤖 Posts about: {a.autopilotTopic}
-                          </p>
-                        )}
-                        {(a.pageNiche || a.trends || a.autoReply) && (
-                          <div className="mt-2.5 flex flex-wrap gap-1.5">
-                            {a.pageNiche && (
-                              <Badge variant="outline" className="border-violet-400/40 text-[10px] text-violet-300">
-                                🧠 knows the page
-                              </Badge>
-                            )}
-                            {a.trends && (
-                              <Badge variant="outline" className="border-amber-400/40 text-[10px] text-amber-300">
-                                🛰 trends scanned
-                              </Badge>
-                            )}
-                            {a.autoReply && (
-                              <Badge variant="outline" className="border-emerald-400/40 text-[10px] text-emerald-300">
-                                💬 auto-replies
-                              </Badge>
-                            )}
-                          </div>
-                        )}
-                        {a.statusMessage && (
-                          <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{a.statusMessage}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Connect cards */}
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  {PLATFORM_ORDER.map((p) => {
-                    const meta = PLATFORMS[p]
-                    const Icon = meta.icon
-                    const count = accounts.filter((a) => a.platform === p).length
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => {
-                          setConnectPlatform(p)
-                          setConnectOpen(true)
-                        }}
-                        className="group flex min-h-[104px] flex-col items-start gap-2 rounded-2xl border border-dashed border-border/80 bg-card/40 p-4 text-left transition hover:border-foreground/30 hover:bg-card/70"
-                      >
-                        <span className="grid h-9 w-9 place-items-center rounded-xl border border-border/60 bg-background/60 transition group-hover:scale-105" style={{ color: meta.color }}>
-                          <Icon className="h-4.5 w-4.5" aria-hidden />
-                        </span>
-                        <span className="text-xs font-semibold">{meta.label}</span>
-                        <span className="text-[10px] text-muted-foreground">{count ? `${count} connected` : 'Connect account'}</span>
-                      </button>
-                    )
-                  })}
+                  <p className="mt-0.5 text-xs text-muted-foreground">{nextRunLabel(active)}</p>
                 </div>
-              </>
-            )}
-          </TabsContent>
+                <Switch
+                  checked={active.autopilot}
+                  onCheckedChange={(v) => void patchAccount({ autopilot: v })}
+                  aria-label="Toggle autopilot"
+                />
+              </div>
 
-          {/* ---------------- Composer ---------------- */}
-          <TabsContent value="composer">
-            <div ref={composerRef} className="space-y-4 rounded-2xl border border-border/70 bg-card/60 p-4 sm:p-5">
-              {connected.length === 0 ? (
-                <div className="py-10 text-center">
-                  <Users className="mx-auto h-8 w-8 text-muted-foreground/50" aria-hidden />
-                  <p className="mt-3 text-sm font-medium">Connect an account first</p>
-                  <p className="mt-1 text-xs text-muted-foreground">The composer unlocks the moment one platform is linked.</p>
-                  <Button size="sm" className="mt-4 min-h-[40px]" onClick={() => setTab('accounts')}>
-                    Go to accounts
+              <div className="mt-4 space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    value={topicDraft}
+                    onChange={(e) => setTopicDraft(e.target.value)}
+                    onBlur={() => {
+                      if (topicDraft !== active.autopilotTopic) void patchAccount({ autopilotTopic: topicDraft })
+                    }}
+                    placeholder="What should the agent post about? (your brand, your niche…)"
+                    className="h-10"
+                    aria-label="Autopilot topic"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className={cn('me-1', SECTION_LABEL)}>Cadence</span>
+                  {CADENCE_OPTIONS.map((c) => (
+                    <button
+                      key={c.mins}
+                      type="button"
+                      onClick={() => void patchAccount({ autopilotCadenceMinutes: c.mins })}
+                      aria-pressed={active.autopilotCadenceMinutes === c.mins}
+                      className={cn(
+                        'min-h-[32px] rounded-full border px-3 py-1 text-[11px] transition',
+                        active.autopilotCadenceMinutes === c.mins
+                          ? 'border-primary/50 bg-primary/10 text-foreground'
+                          : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground',
+                      )}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+
+                {active.trends && <TrendStrip trends={active.trends} />}
+
+                {/* Actions */}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button onClick={() => void runNow()} disabled={running} className="h-10 text-xs font-semibold">
+                    {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
+                    Post now
+                  </Button>
+                  <Button variant="secondary" onClick={() => void research()} disabled={researching} className="h-10 text-xs">
+                    {researching ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Search className="h-3.5 w-3.5" aria-hidden />}
+                    Research what’s trending
+                  </Button>
+                  <Button variant="secondary" onClick={() => setComposeOpen(true)} className="h-10 text-xs">
+                    <Wand2 className="h-3.5 w-3.5" aria-hidden />
+                    New post
                   </Button>
                 </div>
-              ) : (
-                <>
-                  {/* Account picker */}
-                  <div className="flex flex-wrap gap-2">
-                    {connected.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => setComposeAccountId(a.id)}
-                        className={cn(
-                          'flex min-h-[40px] items-center gap-2 rounded-full border px-3.5 text-xs font-medium transition',
-                          composeAccountId === a.id
-                            ? 'border-foreground/40 bg-accent/60 text-foreground'
-                            : 'border-border text-muted-foreground hover:text-foreground',
-                        )}
-                      >
-                        <PlatformIcon platform={a.platform} className="h-3.5 w-3.5" />
-                        {a.displayName}
-                      </button>
-                    ))}
-                  </div>
 
-                  {/* AI generation */}
-                  <div className="rounded-xl border border-violet-400/25 bg-violet-400/5 p-3">
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        placeholder="Tell the agent what to post about… (e.g. 'new espresso blend launch')"
-                        value={genTopic}
-                        onChange={(e) => setGenTopic(e.target.value)}
-                        className="min-h-[40px] flex-1 border-0 bg-transparent focus-visible:ring-0"
-                      />
-                      <Button onClick={() => void generateDraft()} disabled={generating} className="min-h-[40px]">
-                        {generating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
-                        {generating ? 'Creating…' : 'Generate with AI'}
-                      </Button>
-                    </div>
-                    <p className="mt-1 px-1 text-[10px] text-muted-foreground">Writes the caption in your platform&apos;s voice and generates a matching visual.</p>
-                  </div>
-
-                  {/* Caption */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="cap">Caption</Label>
-                      <span className="text-[10px] text-muted-foreground">{caption.length} chars</span>
-                    </div>
-                    <Textarea id="cap" rows={5} value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Write it yourself, or let the agent draft it above…" />
-                  </div>
-
-                  {/* Media */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Media</Label>
-                      <div className="flex gap-1.5">
-                        {(['image', 'video', 'text'] as const).map((k) => (
-                          <button
-                            key={k}
-                            type="button"
-                            onClick={() => setMediaKind(k)}
-                            className={cn(
-                              'min-h-[30px] rounded-full border px-3 text-[11px] font-medium capitalize transition',
-                              mediaKind === k ? 'border-foreground/40 bg-accent/60' : 'border-border text-muted-foreground hover:text-foreground',
-                            )}
-                          >
-                            {k}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {mediaKind !== 'text' && (
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Paste a public media URL (photo/video) — or generate one with AI above"
-                          value={imageUrlInput}
-                          onChange={(e) => setImageUrlInput(e.target.value)}
-                          className="min-h-[40px] flex-1 text-xs"
-                        />
-                        <Button
-                          variant="outline"
-                          className="min-h-[40px]"
-                          onClick={() => {
-                            const u = imageUrlInput.trim()
-                            if (u && !mediaUrls.includes(u)) setMediaUrls((m) => [...m, u])
-                            setImageUrlInput('')
-                          }}
-                        >
-                          <ImageIcon className="h-4 w-4" aria-hidden /> Add
-                        </Button>
-                      </div>
-                    )}
-                    {mediaUrls.length > 0 && (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {mediaUrls.map((u) => (
-                          <span key={u} className="flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-background/60 py-1 pl-1.5 pr-1.5 text-[11px] text-muted-foreground">
-                            <img src={u} alt="" loading="lazy" decoding="async" className="h-7 w-7 shrink-0 rounded-full object-cover" />
-                            <span className="max-w-[200px] truncate font-mono">{u.split('/').pop()}</span>
-                            <button type="button" onClick={() => setMediaUrls((m) => m.filter((x) => x !== u))} aria-label="Remove media" className="grid h-5 w-5 place-items-center rounded-full hover:bg-accent/60">
-                              <X className="h-3 w-3" aria-hidden />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Schedule + publish */}
-                  <div className="flex flex-col gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-end">
-                    <div className="flex-1 space-y-1.5">
-                      <Label htmlFor="sched" className="flex items-center gap-1.5 text-xs">
-                        <Calendar className="h-3 w-3" aria-hidden /> Schedule for later (optional)
-                      </Label>
-                      <Input id="sched" type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="min-h-[40px] text-xs" />
-                    </div>
-                    <div className="flex gap-2">
-                      {scheduleAt ? (
-                        <Button onClick={() => void publish('schedule')} disabled={publishing} className="min-h-[44px] flex-1">
-                          {publishing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Calendar className="h-4 w-4" aria-hidden />}
-                          Schedule
-                        </Button>
-                      ) : (
-                        <Button onClick={() => void publish('now')} disabled={publishing} className="min-h-[44px] flex-1">
-                          {publishing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
-                          Publish now
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* ---------------- Brain (page understanding + trends) ---------------- */}
-          <TabsContent value="brain">
-            <BrainTab accounts={accounts} selectedId={brainAccountId} onSelect={setBrainAccountId} onChanged={() => void load(false)} />
-          </TabsContent>
-
-          {/* ---------------- Inbox (engagement) ---------------- */}
-          <TabsContent value="inbox">
-            <InboxTab accounts={accounts} selectedId={inboxAccountId} onSelect={setInboxAccountId} onChanged={() => void load(false)} />
-          </TabsContent>
-
-          {/* ---------------- Queue ---------------- */}
-          <TabsContent value="queue" className="space-y-3">
-            {loading ? (
-              <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading…
-              </div>
-            ) : posts.length === 0 ? (
-              <div className="py-12 text-center">
-                <CircleDashed className="mx-auto h-8 w-8 text-muted-foreground/40" aria-hidden />
-                <p className="mt-3 text-sm text-muted-foreground">Nothing here yet — compose a post or switch on autopilot.</p>
-              </div>
-            ) : (
-              posts.map((p) => (
-                <div key={p.id} className="rounded-2xl border border-border/70 bg-card/60 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <PlatformIcon platform={p.platform} className="h-4 w-4" />
-                      <span className="text-xs font-semibold">{p.platform}</span>
-                      {p.origin === 'autopilot' && <Badge variant="outline" className="border-amber-400/40 text-[10px] text-amber-300">🤖 autopilot</Badge>}
-                      {p.origin === 'agent' && <Badge variant="outline" className="border-violet-400/40 text-[10px] text-violet-300">✦ agent</Badge>}
-                      <StatusChip status={p.status} />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground">
-                        {p.publishedAt ? new Date(p.publishedAt).toLocaleString() : p.scheduledFor ? `→ ${new Date(p.scheduledFor).toLocaleString()}` : new Date(p.createdAt).toLocaleString()}
-                      </span>
-                      {(p.status === 'queued' || p.status === 'scheduled') && (
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground hover:text-red-300" onClick={() => void cancelPost(p)}>
-                          <X className="h-3.5 w-3.5" aria-hidden />
-                          <span className="sr-only">Cancel post</span>
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/85">{p.caption}</p>
-                  {p.mediaUrls?.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-2">
-                      {p.mediaUrls.map((u) =>
-                        p.mediaKind === 'video' ? (
-                          <span key={u} className="grid h-20 w-32 place-items-center rounded-xl border border-border/70 bg-background/60 text-xl" aria-label="Video attachment">
-                            🎬
-                          </span>
-                        ) : (
-                          <a
-                            key={u}
-                            href={u}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="group block overflow-hidden rounded-xl border border-border/70 transition hover:border-border"
-                            aria-label="Open media in a new tab"
-                          >
-                            <img
-                              src={u}
-                              alt="AI-generated post media"
-                              loading="lazy"
-                              decoding="async"
-                              className="h-24 w-36 object-cover transition-transform duration-200 group-hover:scale-[1.04]"
-                            />
-                          </a>
-                        ),
-                      )}
-                    </div>
-                  )}
-                  {p.result && (
-                    <p className={cn('mt-2 text-[11px]', p.status === 'failed' ? 'text-red-400' : p.status === 'published' ? 'text-emerald-400' : 'text-sky-400')}>
-                      {p.status === 'published' && <CheckCircle2 className="mr-1 inline h-3 w-3" aria-hidden />}
-                      {p.result}
+                {/* Auto-reply toggle — human-quality replies */}
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 p-3">
+                  <div>
+                    <p className="text-xs font-semibold">Reply to people automatically</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      The agent answers comments like a savvy human — warm, helpful, on-brand.
                     </p>
+                  </div>
+                  <Switch
+                    checked={active.autoReply}
+                    onCheckedChange={(v) => void patchAccount({ autoReply: v })}
+                    aria-label="Toggle automatic replies"
+                  />
+                </div>
+
+                {/* Page brain — collapsible */}
+                <div className="rounded-xl border border-border/60 bg-background/40">
+                  <button
+                    type="button"
+                    onClick={() => setBrainOpen((v) => !v)}
+                    aria-expanded={brainOpen}
+                    className="flex min-h-[44px] w-full items-center justify-between gap-2 p-3 text-start"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Brain className="h-4 w-4 text-muted-foreground" aria-hidden />
+                      <span className="text-xs font-semibold">What the agent knows about your page</span>
+                      {active.strategy && <Badge variant="outline" className="text-[10px] text-emerald-400">Strategy ready</Badge>}
+                    </span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', brainOpen && 'rotate-180')} aria-hidden />
+                  </button>
+                  {brainOpen && (
+                    <div className="space-y-3 border-t border-border/60 p-3.5">
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="b-niche" className="text-[11px]">
+                            The page is about
+                          </Label>
+                          <Input
+                            id="b-niche"
+                            value={brainFields.niche}
+                            onChange={(e) => setBrainFields((f) => ({ ...f, niche: e.target.value }))}
+                            placeholder="handmade candles"
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="b-aud" className="text-[11px]">
+                            Followers are
+                          </Label>
+                          <Input
+                            id="b-aud"
+                            value={brainFields.audience}
+                            onChange={(e) => setBrainFields((f) => ({ ...f, audience: e.target.value }))}
+                            placeholder="home-decor lovers, 25–40"
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="b-tone" className="text-[11px]">
+                            It should sound
+                          </Label>
+                          <Input
+                            id="b-tone"
+                            value={brainFields.tone}
+                            onChange={(e) => setBrainFields((f) => ({ ...f, tone: e.target.value }))}
+                            placeholder="warm, playful"
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => void saveBrain()} disabled={savingBrain} className="h-9 text-xs">
+                          {savingBrain ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Brain className="h-3.5 w-3.5" aria-hidden />}
+                          Teach the agent
+                        </Button>
+                        {active.strategy && (
+                          <p className="truncate text-[10px] text-muted-foreground">
+                            Voice: {active.strategy.voice} · Pillars: {active.strategy.pillars.slice(0, 3).join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
-              ))
-            )}
-          </TabsContent>
+              </div>
+            </section>
 
-          {/* ---------------- Activity ---------------- */}
-          <TabsContent value="activity">
-            <div className="rounded-2xl border border-border/70 bg-card/60 p-2 sm:p-3">
-              {activity.length === 0 ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">No activity yet.</p>
-              ) : (
-                <ol className="space-y-1">
-                  {activity.map((a) => (
-                    <li key={a.id} className="flex items-start gap-3 rounded-xl px-3 py-2.5 transition hover:bg-accent/30">
-                      <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-border/60 bg-background/60 text-[11px]">
-                        {a.kind === 'publish' ? '🚀' : a.kind === 'autopilot' || a.kind === 'autopilot_on' ? '🤖' : a.kind === 'fail' ? '⚠️' : a.kind === 'connected' ? '🔗' : a.kind === 'generate' ? '✨' : a.kind === 'research' ? '🛰' : a.kind === 'brain' ? '🧠' : a.kind === 'reply' ? '💬' : '•'}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] leading-snug text-foreground/85">{a.message}</p>
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
+            {/* ---------- Queue / Inbox / Activity ---------- */}
+            <Tabs defaultValue="queue">
+              <TabsList className="rounded-xl">
+                <TabsTrigger value="queue" className="gap-1.5 rounded-lg text-xs">
+                  <ImageIcon className="h-3.5 w-3.5" aria-hidden /> Queue
+                  {accountPosts.length > 0 && <span className="text-muted-foreground">({accountPosts.length})</span>}
+                </TabsTrigger>
+                <TabsTrigger value="inbox" className="gap-1.5 rounded-lg text-xs">
+                  <Inbox className="h-3.5 w-3.5" aria-hidden /> Inbox
+                  {pendingComments.length > 0 && (
+                    <span className="rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400">
+                      {pendingComments.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="activity" className="gap-1.5 rounded-lg text-xs">
+                  <ActivityIcon className="h-3.5 w-3.5" aria-hidden /> Activity
+                </TabsTrigger>
+              </TabsList>
 
-        {/* Live/simulated explainer */}
-        <div className="rounded-2xl border border-border/60 bg-card/40 p-4 text-[11px] leading-relaxed text-muted-foreground">
-          <p className="mb-1 font-semibold text-foreground/80">How the agent works</p>
-          Before writing anything it scans the live web for the best-performing content in your niche (Trend Radar) and studies your page (Brain) — then writes the caption, designs the visual and publishes through the platform&apos;s real API (Instagram Graph, LinkedIn UGC, X v2, Facebook Pages), marked <span className="text-emerald-400">Published</span> with a link. When the platform isn&apos;t reachable from this environment, the full agent flow still runs and the run is marked <span className="text-sky-400">Rehearsed</span>.
-          With auto-reply on, the agent also answers comments in the commenter&apos;s own language. The automation clock runs on the server — research, posts and replies keep going even when the app is closed.
-        </div>
-      </div>
+              {/* QUEUE */}
+              <TabsContent value="queue" className="mt-3">
+                {accountPosts.length === 0 ? (
+                  <p className="py-10 text-center text-sm text-muted-foreground">
+                    Nothing here yet — turn Autopilot on or press “Post now”.
+                  </p>
+                ) : (
+                  <div className="omni-scroll max-h-96 space-y-2 overflow-y-auto pe-1">
+                    {accountPosts.map((p) => (
+                      <article key={p.id} className="flex gap-3 rounded-xl border border-border/60 bg-card/60 p-3">
+                        {p.mediaUrls[0] ? (
+                          <img
+                            src={p.mediaUrls[0]}
+                            alt=""
+                            className="h-14 w-14 shrink-0 rounded-lg border border-border/60 object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-border/60 bg-background/40">
+                            <PlatformGlyph platform={p.platform} className="h-5 w-5" />
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <PostStatusChip status={p.status} />
+                            <span className="truncate text-[10px] text-muted-foreground">
+                              {p.origin === 'autopilot' ? 'by the agent' : 'by you'} · {relTime(p.createdAt)}
+                            </span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-foreground/90">{p.caption}</p>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
 
+              {/* INBOX */}
+              <TabsContent value="inbox" className="mt-3">
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      value={sampleText}
+                      onChange={(e) => setSampleText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void addSample()
+                      }}
+                      placeholder="Try it — type a comment a customer would leave…"
+                      className="h-10 text-xs"
+                      aria-label="Sample comment"
+                    />
+                    <Button variant="secondary" onClick={() => void addSample()} disabled={sampleText.trim().length < 2} className="h-10 shrink-0 text-xs">
+                      <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+                      Add
+                    </Button>
+                  </div>
+
+                  {comments.filter((c) => !active || c.accountId === active.id).length === 0 ? (
+                    <p className="py-8 text-center text-sm text-muted-foreground">
+                      No comments yet. When people comment, the agent drafts the perfect reply here.
+                    </p>
+                  ) : (
+                    <div className="omni-scroll max-h-96 space-y-2 overflow-y-auto pe-1">
+                      {comments
+                        .filter((c) => !active || c.accountId === active.id)
+                        .map((c) => (
+                          <article key={c.id} className="rounded-xl border border-border/60 bg-card/60 p-3.5">
+                            <div className="flex items-center gap-2">
+                              <span className="grid h-6 w-6 place-items-center rounded-full bg-primary/15 text-[10px] font-bold">
+                                {(c.author || 'A').charAt(0).toUpperCase()}
+                              </span>
+                              <span className="text-xs font-semibold">{c.author || 'Someone'}</span>
+                              <span className="text-[10px] text-muted-foreground">{relTime(c.createdAt)}</span>
+                              {c.status === 'replied' && (
+                                <Badge variant="outline" className="ms-auto text-[10px] text-emerald-400">
+                                  Replied
+                                </Badge>
+                              )}
+                              {c.status === 'dismissed' && (
+                                <Badge variant="outline" className="ms-auto text-[10px] text-muted-foreground">
+                                  Dismissed
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="mt-1.5 text-xs leading-relaxed text-foreground/90">{c.text}</p>
+                            {c.aiReply ? (
+                              <div className="mt-2.5 rounded-lg border-s-2 border-emerald-400/60 bg-emerald-400/5 p-2.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Agent’s reply</p>
+                                <p className="mt-1 text-xs leading-relaxed text-foreground/90">{c.aiReply}</p>
+                                {c.status === 'pending' && (
+                                  <div className="mt-2 flex gap-1.5">
+                                    <Button size="sm" onClick={() => void sendReply(c)} className="h-7 text-[11px]">
+                                      <Send className="h-3 w-3" aria-hidden />
+                                      Send
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-[11px]"
+                                      onClick={async () => {
+                                        await fetch(`/api/social/comments/${c.id}`, {
+                                          method: 'PATCH',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ action: 'dismiss' }),
+                                        })
+                                        setComments((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: 'dismissed' } : x)))
+                                      }}
+                                    >
+                                      Dismiss
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-7 text-[11px]"
+                                      onClick={async () => {
+                                        const res = await fetch(`/api/social/comments/${c.id}`, {
+                                          method: 'PATCH',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ action: 'draft' }),
+                                        })
+                                        const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
+                                        if (data.comment) setComments((prev) => prev.map((x) => (x.id === c.id ? (data.comment as CommentRow) : x)))
+                                      }}
+                                    >
+                                      <RefreshCw className="h-3 w-3" aria-hidden />
+                                      Redraft
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              c.status === 'pending' && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="mt-2 h-7 text-[11px]"
+                                  onClick={async () => {
+                                    const res = await fetch(`/api/social/comments/${c.id}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'draft' }),
+                                    })
+                                    const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
+                                    if (data.comment) setComments((prev) => prev.map((x) => (x.id === c.id ? (data.comment as CommentRow) : x)))
+                                  }}
+                                >
+                                  <Sparkles className="h-3 w-3" aria-hidden />
+                                  Draft a reply
+                                </Button>
+                              )
+                            )}
+                          </article>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              {/* ACTIVITY */}
+              <TabsContent value="activity" className="mt-3">
+                {activity.length === 0 ? (
+                  <p className="py-10 text-center text-sm text-muted-foreground">The work log appears here — every action the agents take.</p>
+                ) : (
+                  <div className="omni-scroll max-h-96 space-y-1 overflow-y-auto pe-1">
+                    {activity.map((row) => {
+                      const icon =
+                        row.kind === 'publish'
+                          ? Send
+                          : row.kind === 'research'
+                            ? TrendingUp
+                            : row.kind === 'brain'
+                              ? Brain
+                              : row.kind === 'reply'
+                                ? MessageCircle
+                                : row.kind === 'fail'
+                                  ? Trash2
+                                  : Zap
+                      const Icon = icon
+                      return (
+                        <div key={row.id} className="flex items-start gap-2.5 rounded-lg px-2 py-2 transition hover:bg-secondary/40">
+                          <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <p className="min-w-0 flex-1 text-xs leading-relaxed text-foreground/90">{row.message}</p>
+                          <span className="shrink-0 text-[10px] text-muted-foreground/70">{relTime(row.createdAt)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </>
+        )
+      )}
+
+      {/* Dialogs */}
       <ConnectDialog
         platform={connectPlatform}
         open={connectOpen}
         onOpenChange={setConnectOpen}
-        onConnected={() => void load(false)}
+        onConnected={() => {
+          void loadAccounts()
+          void loadQueue()
+        }}
       />
-      <AutopilotDialog account={autopilotFor} open={autopilotOpen} onOpenChange={setAutopilotOpen} onSaved={() => void load(false)} />
+      <ComposeDialog account={active} open={composeOpen} onOpenChange={setComposeOpen} onPublished={() => void loadQueue()} />
     </div>
   )
 }

@@ -231,8 +231,8 @@ export default function Page() {
           <FramedPanel
             fill
             dark
-            title="WhatsApp Business"
-            description="Connect your number, automate replies with the NEXUS agent, and chat with customers."
+            title="WhatsApp Agent"
+            description="One tap to connect — the agent answers your customers day and night. Go live anytime."
           >
             {/* WhatsAppMode is built on shadcn semantic tokens — the .dark
                 wrapper resolves them to dark values on the dark framed panel. */}
@@ -246,8 +246,8 @@ export default function Page() {
           <FramedPanel
             fill
             dark
-            title="Social Pilot — hands-free social media"
-            description="Connect Instagram, LinkedIn, X and Facebook — the agents write, design and publish on their own, or go full autopilot."
+            title="Social Autopilot"
+            description="Connect Instagram, LinkedIn, X or Facebook in one tap — the agents research what's trending, write, design, publish and reply for you."
           >
             <div className="dark flex h-full min-h-0 flex-1 flex-col">
               <SocialMode />

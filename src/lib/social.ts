@@ -1120,7 +1120,7 @@ export async function publishSocialPost(opts: {
   })
 
   if (scheduledFor) {
-    await logActivity(userId, rec.id, 'schedule', `Scheduled a ${SOCIAL_PLATFORMS[rec.platform].label} post for ${scheduledFor.toISOString()}`)
+    await logActivity(userId, rec.id, 'schedule', `Scheduled an ${SOCIAL_PLATFORMS[rec.platform].label} post for ${scheduledFor.toISOString()}`)
     return { post: JSON.parse(JSON.stringify(post)), result: { ok: true, mode: 'simulated', externalId: '', permalink: '', message: 'Scheduled' } }
   }
 

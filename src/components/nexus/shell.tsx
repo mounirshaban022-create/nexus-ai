@@ -364,6 +364,11 @@ function SidebarContent({
             active={view.type === 'agents'}
             onClick={() => go({ type: 'agents' })}
           />
+
+          {/* CONNECT — channels where the agent does real work for you */}
+          <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Connect
+          </p>
           <NavItem
             icon={MessageCircle}
             label={t('nav.whatsapp')}
@@ -378,6 +383,11 @@ function SidebarContent({
             onClick={() => go({ type: 'social' })}
             iconClassName="text-amber-500 dark:text-amber-400"
           />
+
+          {/* STUDIO — creation tools */}
+          <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Studio
+          </p>
           <NavItem
             icon={Phone}
             label="Voice Call"
@@ -399,6 +409,11 @@ function SidebarContent({
             onClick={() => go({ type: 'video-intel' })}
             iconClassName="text-violet-500 dark:text-violet-400"
           />
+
+          {/* LIBRARY — knowledge & extensions */}
+          <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Library
+          </p>
           <NavItem
             icon={Library}
             label="Knowledge"
@@ -413,6 +428,8 @@ function SidebarContent({
             active={view.type === 'skills'}
             onClick={() => go({ type: 'skills' })}
           />
+
+          <div className="my-2 border-t border-border/60" role="separator" />
           <NavItem
             icon={Settings}
             label={t('nav.settings')}
