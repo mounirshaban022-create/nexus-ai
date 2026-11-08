@@ -329,14 +329,21 @@ export async function GET(req: NextRequest) {
 
   const expectedTables = [
     'AiProvider',
+    'AppConfig',
     'ChatMessage',
     'ChatSession',
     'EmailAccount',
     'GeneratedDocument',
     'GeneratedImage',
     'GeneratedVideo',
+    'KnowledgeChunk',
+    'KnowledgeDoc',
     'Project',
     'ProjectFile',
+    'SocialAccount',
+    'SocialActivity',
+    'SocialComment',
+    'SocialPost',
     'User',
     'UserMemory',
     'WhatsAppAccount',
@@ -360,7 +367,7 @@ export async function GET(req: NextRequest) {
     missingTables: missing,
     nextSteps:
       missing.length === 0
-        ? 'All 13 tables exist. Auth + chat will work — try signing up.'
+        ? 'All 20 tables exist. Auth, chat and the Social Autopilot will work — try signing up.'
         : `Migration incomplete. ${missing.length} table(s) still missing: ${missing.join(', ')}`,
   })
 }
