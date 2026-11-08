@@ -51,6 +51,7 @@ import {
   Link2,
   Loader2,
   MessageCircle,
+  Plus,
   Radio,
   RefreshCw,
   Search,
@@ -625,6 +626,9 @@ export function SocialMode() {
   // dialogs
   const [connectPlatform, setConnectPlatform] = useState<Platform | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
+  // Re-open the connect gallery even when accounts already exist
+  // (e.g. Facebook auto-connected and Instagram still needs a retry).
+  const [galleryOpen, setGalleryOpen] = useState(false)
   const [composeOpen, setComposeOpen] = useState(false)
 
   // autopilot card state
@@ -699,6 +703,7 @@ export function SocialMode() {
       void loadAccounts()
       void loadQueue()
       setConnectOpen(false)
+      setGalleryOpen(false)
       toast(
         d.ok
           ? {
@@ -946,11 +951,25 @@ export function SocialMode() {
               </span>
             </button>
           ))}
+          <button
+            type="button"
+            role="tab"
+            onClick={() => setGalleryOpen(true)}
+            className={cn(
+              'flex min-h-[40px] items-center gap-1.5 rounded-full border border-dashed border-border/70 px-3 py-1.5 text-xs transition',
+              galleryOpen
+                ? 'border-primary/50 bg-primary/10 text-foreground'
+                : 'text-muted-foreground hover:border-primary/40 hover:text-foreground',
+            )}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            <span className="font-medium">Connect</span>
+          </button>
         </div>
       )}
 
-      {/* EMPTY — the connect gallery */}
-      {accounts.length === 0 ? (
+      {/* EMPTY — the connect gallery (or re-opened via the + chip) */}
+      {accounts.length === 0 || galleryOpen ? (
         <section className={cn(CARD, 'p-6')} aria-label="Connect a social account">
           <div className="mx-auto max-w-md text-center">
             <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/15">
@@ -984,6 +1003,15 @@ export function SocialMode() {
               )
             })}
           </div>
+          {accounts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setGalleryOpen(false)}
+              className="mx-auto mt-4 block min-h-[44px] rounded-full border border-border/60 px-5 text-xs text-muted-foreground transition hover:text-foreground"
+            >
+              Back to my accounts
+            </button>
+          )}
         </section>
       ) : (
         active && (
