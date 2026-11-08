@@ -904,7 +904,8 @@ export function SocialMode() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-5 pb-6">
+    <div className="omni-scroll h-full min-h-0 w-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-3xl space-y-5 pb-6">
       {/* Account chips */}
       {accounts.length > 0 && (
         <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Connected accounts">
@@ -1397,6 +1398,7 @@ export function SocialMode() {
         }}
       />
       <ComposeDialog account={active} open={composeOpen} onOpenChange={setComposeOpen} onPublished={() => void loadQueue()} />
+      </div>
     </div>
   )
 }
