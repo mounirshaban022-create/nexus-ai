@@ -475,6 +475,10 @@ export async function GET(req: NextRequest) {
               en: 'Come back to this window and tap “I created it — retry”.',
               ar: 'ارجع للنافذة دي واضغط «I created it — retry» وهنكمل أوتوماتيك.',
             },
+            {
+              en: 'Important: after creating a Page, Facebook switches you to “acting as the Page”. Switch back to your personal profile before retrying, or the login will fail with “App not active”.',
+              ar: 'مهم: بعد ما تعمل الصفحة، فيسبوك بيحوّلك «للعمل باسم الصفحة». ارجع لبروفايلك الشخصي الأول (القائمة ☰ ← صورتك الشخصية) وبعدها دوس retry — لو ما رجعتش هيطلع «App not active».',
+            },
           ],
         )
       }
