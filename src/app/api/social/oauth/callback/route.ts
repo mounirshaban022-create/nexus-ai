@@ -190,6 +190,9 @@ interface ResultAction {
   href: string
   label: string
   primary?: boolean
+  /** Open in a new tab — used for external links (Facebook) so the retry
+   * buttons in this window survive the detour. */
+  newTab?: boolean
 }
 
 /** SECURITY (audit M4): real HTML entity escaping — the previous
@@ -209,6 +212,7 @@ function resultPage(
   platformLabel: string,
   message: string,
   actions: ResultAction[] = [{ href: '/', label: 'Back to NEXUS' }],
+  steps?: { en: string; ar: string }[],
 ): NextResponse {
   const title = ok ? 'Connected ✓' : 'One step left'
   const color = ok ? '#10b981' : '#f59e0b'
@@ -219,9 +223,21 @@ function resultPage(
       const style = a.primary
         ? 'display:inline-block;margin:.35rem .3rem;padding:.8rem 1.3rem;border-radius:.8rem;background:#fafafa;color:#0b0b0d;font-weight:600;font-size:.86rem;text-decoration:none;'
         : 'display:inline-block;margin:.35rem .3rem;padding:.75rem 1.15rem;border-radius:.8rem;border:1px solid #3f3f46;color:#e4e4e7;font-size:.84rem;text-decoration:none;'
-      return `    <a href="${safeHref}" style="${style}">${safeText}</a>`
+      const target = a.newTab ? ' target="_blank" rel="noopener noreferrer"' : ''
+      return `    <a href="${safeHref}"${target} style="${style}">${safeText}</a>`
     })
     .join('\n')
+  // Bilingual step list (EN + AR) for the one-tap fix flows — the user is
+  // anxious and needs the exact taps, not prose.
+  const stepsHtml = (steps ?? [])
+    .map(
+      (s, i) =>
+        `      <li><span class="num">${i + 1}</span><span class="txt"><span class="en">${escapeHtml(s.en)}</span><span class="ar" dir="rtl" lang="ar">${escapeHtml(s.ar)}</span></span></li>`,
+    )
+    .join('\n')
+  const stepsBlock = stepsHtml
+    ? `\n    <ol class="steps">\n${stepsHtml}\n    </ol>`
+    : ''
   // The opener notification is a JSON payload — stringify (never hand-build a
   // JS string literal) and neutralize < so </script> cannot break out.
   const postMessagePayload = JSON.stringify({
@@ -248,13 +264,21 @@ function resultPage(
   h1 { font-size:1.15rem; font-weight:600; margin:0 0 .5rem; }
   p { margin:0; font-size:.85rem; line-height:1.6; color:#a1a1aa; max-width:26rem; margin:0 auto; }
   .actions { margin-top:1.25rem; }
+  .steps { margin:1.4rem auto 0; max-width:24rem; text-align:left; list-style:none; padding:0; }
+  .steps li { display:flex; align-items:flex-start; gap:.6rem; padding:.6rem 0; border-top:1px solid #27272a; }
+  .steps li:first-child { border-top:0; padding-top:0; }
+  .steps .num { flex:0 0 1.35rem; height:1.35rem; margin-top:.15rem; border-radius:999px; background:${color}22; border:1px solid ${color}55; color:${color}; font-size:.7rem; font-weight:700; display:grid; place-items:center; }
+  .steps .txt { display:flex; flex-direction:column; gap:.1rem; }
+  .steps .en { font-size:.78rem; color:#a1a1aa; line-height:1.5; }
+  .steps .ar { font-size:.88rem; color:#fafafa; line-height:1.65; text-align:right; }
+  .hint { margin-top:1.1rem; font-size:.72rem; color:#71717a; }
 </style>
 </head>
 <body>
   <div class="card">
     <div class="dot">${ok ? '✓' : '!'}</div>
     <h1>${ok ? `${escapeHtml(platformLabel)} is live` : `${escapeHtml(platformLabel)} connection didn't finish`}</h1>
-    <p>${escapeHtml(message)}</p>
+    <p>${escapeHtml(message)}</p>${stepsBlock}
     <div class="actions">
 ${buttons}
     </div>
@@ -422,14 +446,35 @@ export async function GET(req: NextRequest) {
       if (outcome.kind === 'no-pages') {
         // The ONE free thing Meta requires that we cannot do for the user:
         // a Facebook Page. Give them a one-tap path to create it, then retry.
+        // NOTE: on phones Facebook often bounces /pages/creation to the user's
+        // profile — the steps below give the in-app Menu → Pages path too.
         return resultPage(
           false,
           label,
-          'Almost there — your Facebook account has no Page yet, and the agent needs one to publish. A Page is free and takes about a minute: tap the button, give it any name, skip the extras, then come back and tap retry.',
+          'Almost there! Your Facebook account has no Page yet, and Meta requires one before connecting. It is free, stays invisible until you post, and takes about a minute.',
           [
-            { href: 'https://www.facebook.com/pages/creation', label: 'Create your Page — free, 1 min', primary: true },
+            { href: 'https://www.facebook.com/pages/creation', label: 'Open the Create-Page form', primary: true, newTab: true },
             { href: `/api/social/oauth/start?platform=${platform}`, label: 'I created it — retry' },
+            { href: 'https://www.facebook.com/help/104002523025024', label: 'Official Facebook guide', newTab: true },
             ...back,
+          ],
+          [
+            {
+              en: 'Easiest on your phone: open the Facebook app → Menu ☰ → Pages → Create.',
+              ar: 'أسهل طريق من الموبايل: افتح تطبيق فيسبوك ← القائمة ☰ ← «الصفحات» ← «إنشاء».',
+            },
+            {
+              en: 'On a computer: tap the button above — the form opens right away.',
+              ar: 'من الكمبيوتر: اضغط الزر اللي فوق والفورم هيفتح على طول.',
+            },
+            {
+              en: 'Type any name, pick any category → Create. Your personal profile stays untouched.',
+              ar: 'اكتب أي اسم واختار أي تصنيف ← «إنشاء». بروفايلك الشخصي مش هيتأثر خالص.',
+            },
+            {
+              en: 'Come back to this window and tap “I created it — retry”.',
+              ar: 'ارجع للنافذة دي واضغط «I created it — retry» وهنكمل أوتوماتيك.',
+            },
           ],
         )
       }
@@ -448,11 +493,29 @@ export async function GET(req: NextRequest) {
         return resultPage(
           false,
           'Instagram',
-          'Good news — your Facebook Page is now connected to NEXUS. One free step left for Instagram: in the Instagram app, switch to a professional (creator) account and pick your page — Profile → menu → Settings and privacy → Account type and tools → Switch to professional account. Then tap retry.',
+          'Good news — your Facebook Page is now connected to NEXUS. One free step left for Instagram: switch it to a professional (creator) account and pick your page. Then tap retry.',
           [
-            { href: 'https://www.instagram.com/', label: 'Open Instagram', primary: true },
+            { href: 'https://www.instagram.com/', label: 'Open Instagram', primary: true, newTab: true },
             { href: '/api/social/oauth/start?platform=instagram', label: 'Done — retry Instagram' },
             ...back,
+          ],
+          [
+            {
+              en: 'Instagram app → your profile → menu ☰ → Settings and privacy.',
+              ar: 'في تطبيق انستجرام: البروفايل ← القائمة ☰ ← «الإعدادات والخصوصية».',
+            },
+            {
+              en: 'Account type and tools → Switch to professional account → Creator.',
+              ar: '«نوع الحساب والأدوات» ← «التبديل إلى حساب احترافي» ← «مبدع».',
+            },
+            {
+              en: 'When asked, pick the Facebook Page you just created → Done.',
+              ar: 'لما يسألك، اختار صفحة فيسبوك اللي عملتها دلوقتي ← تم.',
+            },
+            {
+              en: 'Back here → “Done — retry Instagram” and the rest is automatic.',
+              ar: 'ارجع هنا ← «Done — retry Instagram» والباقي أوتوماتيك.',
+            },
           ],
         )
       }
