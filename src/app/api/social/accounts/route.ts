@@ -38,7 +38,8 @@ export async function GET(req: NextRequest) {
 /* ------------------------------------------------------------------ */
 
 const connectSchema = z.object({
-  platform: z.string().min(2),
+  // min(1) — "x" (X/Twitter) is a legitimate one-letter platform id.
+  platform: z.string().min(1),
   displayName: z.string().max(80).optional().default(''),
   // rehearsal: save WITHOUT live verification — the full agent pipeline
   // runs, but every publish is simulated until a real token is added.
