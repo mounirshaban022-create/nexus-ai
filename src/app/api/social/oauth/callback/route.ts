@@ -151,6 +151,9 @@ async function finishX(code: string, redirectUri: string, clientId: string, clie
 function resultPage(ok: boolean, platformLabel: string, message: string): NextResponse {
   const safeLabel = platformLabel.replace(/[<>&"]/g, '')
   const safeMessage = message.replace(/[<>&"]/g, '')
+  // For the postMessage channel (inside a single-quoted JS literal) quotes
+  // must go entirely — the wording stays readable without them.
+  const safePostMessage = message.replace(/[<>&"']/g, '')
   const title = ok ? 'Connected ✓' : 'Not connected'
   const color = ok ? '#10b981' : '#f59e0b'
   const html = `<!doctype html>
@@ -180,7 +183,7 @@ function resultPage(ok: boolean, platformLabel: string, message: string): NextRe
   <script>
     try {
       if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({ type: 'nexus-social-oauth', ok: ${ok ? 'true' : 'false'}, platform: '${safeLabel}' }, window.location.origin);
+        window.opener.postMessage({ type: 'nexus-social-oauth', ok: ${ok ? 'true' : 'false'}, platform: '${safeLabel}', message: '${safePostMessage}' }, window.location.origin);
       }
     } catch (e) {}
     setTimeout(function () { try { window.close() } catch (e) {} }, 900);

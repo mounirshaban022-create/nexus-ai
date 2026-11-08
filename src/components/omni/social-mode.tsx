@@ -269,15 +269,10 @@ function ConnectDialog({
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
-  const [goLive, setGoLive] = useState(false)
-  const [liveBusy, setLiveBusy] = useState(false)
-  const [liveHint, setLiveHint] = useState('')
+  const [hint, setHint] = useState('')
 
   useEffect(() => {
-    if (open) {
-      setGoLive(false)
-      setLiveHint('')
-    }
+    if (open) setHint('')
   }, [open, platform])
 
   const meta = platform ? PLATFORMS[platform] : null
@@ -311,27 +306,48 @@ function ConnectDialog({
     [platform, meta, toast, onOpenChange, onConnected],
   )
 
-  // ZERO-KNOWLEDGE go-live: the platform's own sign-in window does all
-  // the technical work. The user signs in, approves, done.
-  const goLiveNow = useCallback(async () => {
+  // ZERO-KNOWLEDGE one tap: the platform's OWN sign-in window does all the
+  // technical work. The window is opened synchronously inside the tap —
+  // BEFORE any await — so popup blockers can never swallow it. After the
+  // user signs in on the platform's page, the callback reports back via
+  // postMessage and the account flips to live automatically.
+  const connectOneTap = useCallback(async () => {
     if (!platform || !meta) return
-    setLiveBusy(true)
+    setBusy(true)
+    setHint('')
+    const win = window.open('about:blank', 'nexus-social-oauth', 'width=620,height=760')
     try {
+      if (win) {
+        win.document.write(
+          `<title>Connecting…</title><p style="font-family:ui-sans-serif,system-ui,sans-serif;padding:28px;color:#666;font-size:15px">Opening ${meta.label}…</p>`,
+        )
+      }
       const res = await fetch(`/api/social/oauth/start?platform=${platform}`)
+      if (res.status === 401) {
+        win?.close()
+        setHint('Your session ended — sign in once more and tap again. The connection itself is switched on and waiting.')
+        return
+      }
       const data = (await res.json().catch(() => ({}))) as { available?: boolean; url?: string; hint?: string }
       if (data.available && data.url) {
-        setLiveHint('')
-        const win = window.open(data.url, 'nexus-social-oauth', 'width=620,height=760')
-        if (!win) window.location.href = data.url
+        setHint('')
+        if (win) win.location.href = data.url
+        else window.location.href = data.url
+        // The popup finishes the handshake and messages us back.
       } else {
-        setLiveHint(data.hint ?? 'The official connection isn’t switched on for this deployment yet — nothing for you to prepare. Your agent keeps rehearsing meanwhile.')
+        // This deployment hasn't switched that platform's connection on
+        // yet — keep the promise: the agent starts rehearsing right now.
+        win?.close()
+        setHint(data.hint ?? '')
+        await connect(true)
       }
     } catch {
-      setLiveHint('The connection service didn’t answer. Your agent keeps rehearsing meanwhile — try again in a moment.')
+      win?.close()
+      setHint('The connection service didn’t answer. Try again in a moment — nothing is broken.')
     } finally {
-      setLiveBusy(false)
+      setBusy(false)
     }
-  }, [platform, meta])
+  }, [platform, meta, connect])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -355,43 +371,19 @@ function ConnectDialog({
             ))}
           </div>
 
-          <Button onClick={() => void connect(true)} disabled={busy || !platform} className="h-12 w-full text-sm font-semibold">
+          <Button onClick={() => void connectOneTap()} disabled={busy || !platform} className="h-12 w-full text-sm font-semibold">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Zap className="h-4 w-4" aria-hidden />}
             {busy ? 'Connecting…' : `Connect ${meta?.label ?? ''} — one tap`}
           </Button>
 
           <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-            Starts in <span className="font-medium text-amber-400">rehearsal mode</span>: the full pipeline runs — the
-            agent studies your page, watches what’s trending, writes, designs and replies — and posts are marked
-            Rehearsed. Go live whenever you’re ready.
+            The official {meta?.label ?? ''} window opens — sign in, approve, done.
+            <span className="font-medium text-emerald-400"> Nothing to copy, nothing to paste.</span>
           </p>
 
-          {/* Optional: go live — also one tap, on the platform's own page */}
-          <div className={cn('rounded-xl border border-border/60', goLive ? 'bg-background/40 p-3.5' : '')}>
-            <button
-              type="button"
-              onClick={() => setGoLive((v) => !v)}
-              className="mx-auto flex min-h-[32px] w-full items-center justify-center gap-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
-              aria-expanded={goLive}
-            >
-              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', goLive && 'rotate-180')} aria-hidden />
-              Go live — publish for real (optional)
-            </button>
-            {goLive && meta && (
-              <div className="mt-3 space-y-3">
-                <Button variant="secondary" onClick={() => void goLiveNow()} disabled={liveBusy} className="h-11 w-full text-xs font-semibold">
-                  {liveBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Link2 className="h-4 w-4" aria-hidden />}
-                  Continue with {meta.label}
-                </Button>
-                <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-                  A {meta.label} window opens — sign in, approve, done. Nothing to copy, nothing to paste.
-                </p>
-                {liveHint && (
-                  <p className="rounded-lg border border-amber-400/25 bg-amber-400/5 p-2.5 text-[11px] leading-relaxed text-amber-200/90">{liveHint}</p>
-                )}
-              </div>
-            )}
-          </div>
+          {hint && (
+            <p className="rounded-lg border border-amber-400/25 bg-amber-400/5 p-2.5 text-[11px] leading-relaxed text-amber-200/90">{hint}</p>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -702,7 +694,7 @@ export function SocialMode() {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
-      const d = e.data as { type?: string; ok?: boolean; platform?: string }
+      const d = e.data as { type?: string; ok?: boolean; platform?: string; message?: string }
       if (d?.type !== 'nexus-social-oauth') return
       void loadAccounts()
       void loadQueue()
@@ -715,7 +707,7 @@ export function SocialMode() {
             }
           : {
               title: `${d.platform ?? 'Connection'} wasn't finished`,
-              description: 'No problem — the agent keeps rehearsing. You can try again any time.',
+              description: d.message || 'No problem — the agent keeps rehearsing. You can try again any time.',
             },
       )
     }
