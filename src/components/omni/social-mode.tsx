@@ -41,8 +41,11 @@ import {
   Activity as ActivityIcon,
   Brain,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronDown,
+  Copy,
+  ExternalLink,
   Facebook as FacebookIcon,
   Image as ImageIcon,
   Inbox,
@@ -257,6 +260,62 @@ const CARD = 'rounded-2xl border border-border/60 bg-card/60'
 /* Connect dialog — the zero-knowledge path                            */
 /* ------------------------------------------------------------------ */
 
+/* The one human step no platform lets anyone else do: creating the app
+   under the owner's identity. The wizard makes it feel like a settings
+   screen — open, copy, paste, switch on — ONCE. After that it is just
+   "sign in", exactly like every app the user knows. */
+const WIZARD: Record<
+  Platform,
+  { portal: string; steps: string[]; pasteWhere: string; idLabel: string; secretLabel: string }
+> = {
+  linkedin: {
+    portal: 'https://www.linkedin.com/developers/apps',
+    steps: [
+      'Tap "Open LinkedIn for developers" below → sign in → Create app',
+      'Name: anything · Privacy URL: your site address · Logo: any image → Create app',
+      'Open the verification email LinkedIn sends → tap Verify',
+      'Products tab → add "Sign In with LinkedIn using OpenID Connect" and "Share on LinkedIn" — both approve instantly',
+    ],
+    pasteWhere: 'Auth tab → Redirect URLs → paste this link',
+    idLabel: 'Client ID (Auth tab)',
+    secretLabel: 'Client Secret (Auth tab → the eye icon)',
+  },
+  x: {
+    portal: 'https://developer.x.com/en/portal/dashboard',
+    steps: [
+      'Tap "Open the X portal" below → sign in → create a project + app (the free tier works)',
+      'App settings → User authentication settings → Set up → enable OAuth 2.0',
+      'Callback URI: paste the link below · Website: your site address',
+      'Keys and tokens → copy the Client ID and Secret',
+    ],
+    pasteWhere: 'User authentication settings → Callback URI → paste this link',
+    idLabel: 'OAuth 2.0 Client ID',
+    secretLabel: 'OAuth 2.0 Client Secret',
+  },
+  instagram: {
+    portal: 'https://developers.facebook.com/apps',
+    steps: [
+      'Tap "Open Meta for developers" below → Create app → type: Business',
+      'Add the "Facebook Login" product → Settings → paste the link below in Valid OAuth Redirect URIs',
+      'Settings → Basic → copy the App ID and App Secret',
+    ],
+    pasteWhere: 'Facebook Login → Settings → Valid OAuth Redirect URIs → paste this link',
+    idLabel: 'App ID (Settings → Basic)',
+    secretLabel: 'App Secret (Settings → Basic)',
+  },
+  facebook: {
+    portal: 'https://developers.facebook.com/apps',
+    steps: [
+      'Tap "Open Meta for developers" below → Create app → type: Business',
+      'Add the "Facebook Login" product → Settings → paste the link below in Valid OAuth Redirect URIs',
+      'Settings → Basic → copy the App ID and App Secret',
+    ],
+    pasteWhere: 'Facebook Login → Settings → Valid OAuth Redirect URIs → paste this link',
+    idLabel: 'App ID (Settings → Basic)',
+    secretLabel: 'App Secret (Settings → Basic)',
+  },
+}
+
 function ConnectDialog({
   platform,
   open,
@@ -272,8 +331,38 @@ function ConnectDialog({
   const [busy, setBusy] = useState(false)
   const [hint, setHint] = useState('')
 
+  // ---- One-time switch-on wizard (runs when a platform isn't live yet) ----
+  const [wizard, setWizard] = useState(false)
+  const [redirectUri, setRedirectUri] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [saving, setSaving] = useState(false)
+
   useEffect(() => {
     if (open) setHint('')
+  }, [open, platform])
+
+  // Ask the server once: is this platform's official connection on? If not,
+  // show the guided switch-on right inside this dialog.
+  useEffect(() => {
+    if (!open || !platform) return
+    setWizard(false)
+    setCopied(false)
+    setClientId('')
+    setClientSecret('')
+    let alive = true
+    fetch(`/api/social/credentials?platform=${platform}`)
+      .then((r) => r.json())
+      .then((d: { configured?: boolean; redirectUri?: string }) => {
+        if (!alive) return
+        if (d.redirectUri) setRedirectUri(d.redirectUri)
+        if (d.configured === false) setWizard(true)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
   }, [open, platform])
 
   const meta = platform ? PLATFORMS[platform] : null
@@ -332,14 +421,17 @@ function ConnectDialog({
       const data = (await res.json().catch(() => ({}))) as { available?: boolean; url?: string; hint?: string }
       if (data.available && data.url) {
         setHint('')
+        setWizard(false)
         if (win) win.location.href = data.url
         else window.location.href = data.url
         // The popup finishes the handshake and messages us back.
       } else {
         // This deployment hasn't switched that platform's connection on
-        // yet — keep the promise: the agent starts rehearsing right now.
+        // yet — keep the promise: the agent starts rehearsing right now,
+        // and the guided one-time switch-on appears in this dialog.
         win?.close()
         setHint(data.hint ?? '')
+        setWizard(true)
         await connect(true)
       }
     } catch {
@@ -350,9 +442,51 @@ function ConnectDialog({
     }
   }, [platform, meta, connect])
 
+  const copyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(redirectUri)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* clipboard blocked — the link is visible to copy by hand */
+    }
+  }, [redirectUri])
+
+  // THE PAYOFF: save the two values (encrypted) and — without the user
+  // doing anything else — jump straight into the platform's own sign-in.
+  // This is the exact "sign in and it just connects" moment.
+  const switchOn = useCallback(async () => {
+    if (!platform || !clientId.trim() || !clientSecret.trim()) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/social/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, clientId: clientId.trim(), clientSecret: clientSecret.trim() }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(data.error || 'Could not save the two values')
+      setHint('')
+      setWizard(false)
+      toast({
+        title: `${meta?.label ?? 'The platform'} connection is switched on ✓`,
+        description: 'Opening the official sign-in — approve and done.',
+      })
+      void connectOneTap()
+    } catch (err) {
+      toast({
+        title: 'Could not switch on',
+        description: err instanceof Error ? err.message : 'Check both values and try again',
+        variant: 'destructive',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }, [platform, clientId, clientSecret, meta, toast, connectOneTap])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[85dvh] max-w-md overflow-y-auto omni-scroll">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2.5">
             {platform && <PlatformGlyph platform={platform} className="h-5 w-5" />}
@@ -364,7 +498,7 @@ function ConnectDialog({
         <div className="space-y-4">
           {/* Promise row — plain words only */}
           <div className="flex flex-wrap gap-1.5">
-            {['No password needed', 'No tokens', 'No developer account'].map((p) => (
+            {['No password needed', 'No tokens', wizard ? 'One-time switch-on' : 'No developer account'].map((p) => (
               <Badge key={p} variant="outline" className="gap-1 border-emerald-400/30 text-[11px] text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" aria-hidden />
                 {p}
@@ -379,11 +513,87 @@ function ConnectDialog({
 
           <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
             The official {meta?.label ?? ''} window opens — sign in, approve, done.
-            <span className="font-medium text-emerald-400"> Nothing to copy, nothing to paste.</span>
+            {!wizard && <span className="font-medium text-emerald-400"> Nothing to copy, nothing to paste.</span>}
           </p>
 
-          {hint && (
+          {hint && !wizard && (
             <p className="rounded-lg border border-amber-400/25 bg-amber-400/5 p-2.5 text-[11px] leading-relaxed text-amber-200/90">{hint}</p>
+          )}
+
+          {/* ---- One-time switch-on wizard (like every official app, ONCE) ---- */}
+          {wizard && platform && (
+            <div className="space-y-3 rounded-xl border border-amber-400/25 bg-amber-400/5 p-3.5">
+              <p className="text-xs font-semibold leading-relaxed text-amber-200">
+                First time only: switch {meta?.label} on officially — about 5 minutes, then never again.
+              </p>
+              <ol className="list-inside list-decimal space-y-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                {WIZARD[platform].steps.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ol>
+
+              <a
+                href={WIZARD[platform].portal}
+                target="_blank"
+                rel="noreferrer"
+                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background/60 text-xs font-medium text-foreground transition hover:border-primary/40"
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                Open {meta?.label} for developers
+              </a>
+
+              <div className="rounded-lg border border-border/60 bg-background/60 p-2.5">
+                <p className="text-[11px] leading-relaxed text-muted-foreground">{WIZARD[platform].pasteWhere}:</p>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate rounded bg-secondary/70 px-2 py-1.5 text-[10px] text-foreground/80" dir="ltr">
+                    {redirectUri || '…'}
+                  </code>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void copyLink()}
+                    className="h-9 shrink-0 gap-1 text-[11px]"
+                  >
+                    {copied ? <Check className="h-3 w-3" aria-hidden /> : <Copy className="h-3 w-3" aria-hidden />}
+                    {copied ? 'Copied ✓' : 'Copy'}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Input
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  placeholder={WIZARD[platform].idLabel}
+                  className="h-11 text-xs"
+                  autoComplete="off"
+                  dir="ltr"
+                />
+                <Input
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  placeholder={WIZARD[platform].secretLabel}
+                  type="password"
+                  className="h-11 text-xs"
+                  autoComplete="off"
+                  dir="ltr"
+                />
+              </div>
+
+              <Button
+                onClick={() => void switchOn()}
+                disabled={saving || !clientId.trim() || !clientSecret.trim()}
+                className="h-12 w-full text-sm font-semibold"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Zap className="h-4 w-4" aria-hidden />}
+                {saving ? 'Switching on…' : 'Switch on — then sign in'}
+              </Button>
+
+              <p className="text-center text-[10px] leading-relaxed text-muted-foreground">
+                Stored encrypted on your server — never shown again. After this it is just sign-in, like any app.
+              </p>
+            </div>
           )}
         </div>
       </DialogContent>

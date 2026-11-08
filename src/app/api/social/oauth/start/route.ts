@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getVerifiedSession, signOAuthState } from '@/lib/auth'
-import { SOCIAL_PLATFORMS, isSocialPlatform, SocialPlatform } from '@/lib/social'
+import { SOCIAL_PLATFORMS, isSocialPlatform, getPlatformCredentials, SocialPlatform } from '@/lib/social'
 
 export const maxDuration = 30
 
@@ -25,11 +25,9 @@ interface OAuthConfig {
   authorize: string
   scopes: string[]
   scopeSeparator: ',' | ' '
-  envId: string
-  envSecret: string
 }
 
-const CONFIG: Record<SocialPlatform, OAuthConfig> = {
+const CONFIG: Record<SocialPlatform, Omit<OAuthConfig, 'envId' | 'envSecret'>> = {
   instagram: {
     authorize: 'https://www.facebook.com/v21.0/dialog/oauth',
     scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list', 'pages_read_engagement', 'business_management'],
@@ -79,11 +77,24 @@ export async function GET(req: NextRequest) {
   }
 
   const cfg = CONFIG[platform]
-  const clientId = process.env[cfg.envId]?.trim() ?? ''
-  const clientSecret = process.env[cfg.envSecret]?.trim() ?? ''
+  // Credentials come from the database (saved by the in-app Connect wizard,
+  // AES-256-GCM encrypted) with deployment env vars as the fallback.
+  const creds = await getPlatformCredentials(platform)
 
-  if (!clientId || !clientSecret) {
+  if (!creds) {
     // Calm, human answer — the user never needs to do anything here.
+    return NextResponse.json({
+      available: false,
+      hint:
+        `The official connection for ${SOCIAL_PLATFORMS[platform].label} isn't switched on for this deployment yet. ` +
+        "That's a server-side switch — there is nothing for you to prepare. Your agent keeps rehearsing everything " +
+        'meanwhile, and this button goes live the moment the connection is switched on.',
+    })
+  }
+
+  if (!creds) {
+    // Calm, human answer — the user never needs to do anything here.
+    // (The Connect dialog offers its own guided one-place setup.)
     return NextResponse.json({
       available: false,
       hint:
@@ -97,7 +108,7 @@ export async function GET(req: NextRequest) {
   const state = await signOAuthState({ userId: session.userId, platform })
 
   const url = new URL(cfg.authorize)
-  url.searchParams.set('client_id', clientId)
+  url.searchParams.set('client_id', creds.clientId)
   url.searchParams.set('redirect_uri', redirectUri)
   url.searchParams.set('state', state)
   url.searchParams.set('response_type', 'code')

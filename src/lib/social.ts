@@ -96,6 +96,61 @@ export function isSocialPlatform(v: string): v is SocialPlatform {
 }
 
 /* ------------------------------------------------------------------ */
+/* OAuth app credentials — DB first (in-app Connect wizard), env fall- */
+/* back. Encrypted at rest (AES-256-GCM). This is what makes "just    */
+/* sign in" possible: the wizard lets the account owner switch a      */
+/* platform's official connection ON at runtime, no redeploy.         */
+/* ------------------------------------------------------------------ */
+
+const ENV_IDS: Record<SocialPlatform, string> = {
+  instagram: 'META_APP_ID',
+  facebook: 'META_APP_ID',
+  linkedin: 'LINKEDIN_CLIENT_ID',
+  x: 'X_CLIENT_ID',
+}
+
+const ENV_SECRETS: Record<SocialPlatform, string> = {
+  instagram: 'META_APP_SECRET',
+  facebook: 'META_APP_SECRET',
+  linkedin: 'LINKEDIN_CLIENT_SECRET',
+  x: 'X_CLIENT_SECRET',
+}
+
+export interface PlatformCredentials {
+  clientId: string
+  clientSecret: string
+  source: 'database' | 'environment'
+}
+
+export async function getPlatformCredentials(platform: SocialPlatform): Promise<PlatformCredentials | null> {
+  try {
+    const row = await db.platformCredential.findUnique({ where: { platform } })
+    if (row?.clientIdEnc && row?.clientSecretEnc) {
+      return {
+        clientId: decryptSecret(row.clientIdEnc),
+        clientSecret: decryptSecret(row.clientSecretEnc),
+        source: 'database',
+      }
+    }
+  } catch {
+    /* table missing or decrypt failed — fall through to env */
+  }
+  const clientId = process.env[ENV_IDS[platform]]?.trim() ?? ''
+  const clientSecret = process.env[ENV_SECRETS[platform]]?.trim() ?? ''
+  if (clientId && clientSecret) return { clientId, clientSecret, source: 'environment' }
+  return null
+}
+
+/* Where the account owner creates the platform's app (the ONLY human
+   step no one else can do — it requires their identity, once). */
+export const PLATFORM_APP_URLS: Record<SocialPlatform, string> = {
+  instagram: 'https://developers.facebook.com/apps',
+  facebook: 'https://developers.facebook.com/apps',
+  linkedin: 'https://www.linkedin.com/developers/apps',
+  x: 'https://developer.x.com/en/portal/dashboard',
+}
+
+/* ------------------------------------------------------------------ */
 /* Records                                                             */
 /* ------------------------------------------------------------------ */
 

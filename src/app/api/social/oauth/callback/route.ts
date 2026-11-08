@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyOAuthState } from '@/lib/auth'
 import { encryptSecret } from '@/lib/email'
-import { SOCIAL_PLATFORMS, isSocialPlatform, logActivity, SocialPlatform } from '@/lib/social'
+import { SOCIAL_PLATFORMS, isSocialPlatform, logActivity, getPlatformCredentials, SocialPlatform } from '@/lib/social'
 
 export const maxDuration = 60
 
@@ -326,21 +326,6 @@ export async function GET(req: NextRequest) {
       ? [{ href: `/api/social/oauth/start?platform=${platform}`, label: 'Try again', primary: true }]
       : []
 
-  const clientIdFor = (platform: string): string => {
-    const id =
-      platform === 'linkedin' ? process.env.LINKEDIN_CLIENT_ID : platform === 'x' ? process.env.X_CLIENT_ID : process.env.META_APP_ID
-    return id?.trim() ?? ''
-  }
-  const secretFor = (platform: string): string => {
-    const s =
-      platform === 'linkedin'
-        ? process.env.LINKEDIN_CLIENT_SECRET
-        : platform === 'x'
-          ? process.env.X_CLIENT_SECRET
-          : process.env.META_APP_SECRET
-    return s?.trim() ?? ''
-  }
-
   try {
     if (oauthError) {
       return resultPage(
@@ -372,7 +357,11 @@ export async function GET(req: NextRequest) {
     const redirectUri = `${origin}/api/social/oauth/callback`
 
     if (platform === 'instagram' || platform === 'facebook') {
-      const outcome = await finishMeta(code, redirectUri, secretFor(platform), clientIdFor(platform), platform)
+      const creds = await getPlatformCredentials(platform)
+      if (!creds) {
+        return resultPage(false, label, 'The connection was switched off in the meantime. Open NEXUS and tap connect again.', back)
+      }
+      const outcome = await finishMeta(code, redirectUri, creds.clientSecret, creds.clientId, platform)
 
       if (outcome.kind === 'no-pages') {
         // The ONE free thing Meta requires that we cannot do for the user:
@@ -419,9 +408,13 @@ export async function GET(req: NextRequest) {
 
     let profile: MetaProfile
     if (platform === 'linkedin') {
-      profile = await finishLinkedIn(code, redirectUri, clientIdFor(platform), secretFor(platform))
+      const creds = await getPlatformCredentials(platform)
+      if (!creds) throw new Error('The LinkedIn connection is not switched on for this deployment.')
+      profile = await finishLinkedIn(code, redirectUri, creds.clientId, creds.clientSecret)
     } else {
-      profile = await finishX(code, redirectUri, clientIdFor(platform), secretFor(platform), payload.verifier ?? '')
+      const creds = await getPlatformCredentials(platform)
+      if (!creds) throw new Error('The X connection is not switched on for this deployment.')
+      profile = await finishX(code, redirectUri, creds.clientId, creds.clientSecret, payload.verifier ?? '')
     }
     await upsertAccount(payload.userId, platform, label, profile)
     return resultPage(true, label, `The agent can now publish to ${label} for real. You can close this window.`)
