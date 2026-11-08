@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyOAuthState } from '@/lib/auth'
 import { encryptSecret } from '@/lib/email'
-import { SOCIAL_PLATFORMS, isSocialPlatform, logActivity } from '@/lib/social'
+import { SOCIAL_PLATFORMS, isSocialPlatform, logActivity, SocialPlatform } from '@/lib/social'
 
 export const maxDuration = 60
 
@@ -18,7 +18,10 @@ export const maxDuration = 60
 /*   4. store the token AES-256-GCM encrypted, mark the account LIVE   */
 /*   5. answer with a tiny page that tells the app "done" and closes   */
 /*                                                                     */
-/* The user sees one screen: a green check and the window closing.     */
+/* If the user's Meta account is missing the one free thing Meta       */
+/* requires (a Page / a professional IG linked to it), the answer page */
+/* turns into a ONE-TAP FIX: a button that creates the page, a button  */
+/* that retries the handshake — no knowledge required, ever.           */
 /* ------------------------------------------------------------------ */
 
 const TIMEOUT = 15_000
@@ -38,7 +41,34 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Record<string
 
 /* ------------------------------ Meta ------------------------------ */
 
-async function finishMeta(code: string, redirectUri: string, clientSecret: string, clientId: string, platform: 'instagram' | 'facebook') {
+interface MetaProfile {
+  externalId: string
+  handle: string
+  displayName: string
+  token: string
+  avatarUrl: string
+}
+
+interface MetaPageRow {
+  id: string
+  name?: string
+  username?: string
+  access_token?: string
+  instagram_business_account?: { id: string; username?: string }
+}
+
+type MetaOutcome =
+  | { kind: 'ok'; profile: MetaProfile }
+  | { kind: 'no-pages' }
+  | { kind: 'page-without-ig'; page: MetaPageRow }
+
+async function finishMeta(
+  code: string,
+  redirectUri: string,
+  clientSecret: string,
+  clientId: string,
+  platform: 'instagram' | 'facebook',
+): Promise<MetaOutcome> {
   const GRAPH = 'https://graph.facebook.com/v21.0'
   const short = (await fetchJson(
     `${GRAPH}/oauth/access_token?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(clientSecret)}&code=${encodeURIComponent(code)}`,
@@ -53,33 +83,39 @@ async function finishMeta(code: string, redirectUri: string, clientSecret: strin
 
   const pages = (await fetchJson(
     `${GRAPH}/me/accounts?fields=id,name,username,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(token)}`,
-  )) as { data?: Array<{ id: string; name?: string; username?: string; access_token?: string; instagram_business_account?: { id: string; username?: string } }> }
+  )) as { data?: MetaPageRow[] }
 
   const list = pages.data ?? []
-  if (list.length === 0) throw new Error('No Facebook Page was found on this account. Connect a page (free) and try again.')
+  if (list.length === 0) return { kind: 'no-pages' }
 
   if (platform === 'instagram') {
     const withIg = list.find((p) => p.instagram_business_account?.id)
     if (!withIg?.instagram_business_account) {
-      throw new Error('No Instagram professional account is linked to your page yet. Switch your Instagram to a free Creator account and link it to your page.')
+      return { kind: 'page-without-ig', page: withIg ?? list[0] }
     }
     const ig = withIg.instagram_business_account
     return {
-      externalId: ig.id,
-      handle: ig.username ? `@${ig.username}` : withIg.name ?? '',
-      displayName: ig.username ? `@${ig.username}` : withIg.name ?? 'Instagram',
-      token: withIg.access_token ?? token, // page token publishes to IG Graph
-      avatarUrl: '',
+      kind: 'ok',
+      profile: {
+        externalId: ig.id,
+        handle: ig.username ? `@${ig.username}` : withIg.name ?? '',
+        displayName: ig.username ? `@${ig.username}` : withIg.name ?? 'Instagram',
+        token: withIg.access_token ?? token, // page token publishes to IG Graph
+        avatarUrl: '',
+      },
     }
   }
 
   const page = list[0]
   return {
-    externalId: page.id,
-    handle: page.username ? `@${page.username}` : page.name ?? '',
-    displayName: page.name ?? 'Facebook Page',
-    token: page.access_token ?? token,
-    avatarUrl: '',
+    kind: 'ok',
+    profile: {
+      externalId: page.id,
+      handle: page.username ? `@${page.username}` : page.name ?? '',
+      displayName: page.name ?? 'Facebook Page',
+      token: page.access_token ?? token,
+      avatarUrl: '',
+    },
   }
 }
 
@@ -148,14 +184,35 @@ async function finishX(code: string, redirectUri: string, clientId: string, clie
 
 /* ---------------------------- HTML answer --------------------------- */
 
-function resultPage(ok: boolean, platformLabel: string, message: string): NextResponse {
+interface ResultAction {
+  href: string
+  label: string
+  primary?: boolean
+}
+
+function resultPage(
+  ok: boolean,
+  platformLabel: string,
+  message: string,
+  actions: ResultAction[] = [{ href: '/', label: 'Back to NEXUS' }],
+): NextResponse {
   const safeLabel = platformLabel.replace(/[<>&"]/g, '')
   const safeMessage = message.replace(/[<>&"]/g, '')
   // For the postMessage channel (inside a single-quoted JS literal) quotes
   // must go entirely — the wording stays readable without them.
   const safePostMessage = message.replace(/[<>&"']/g, '')
-  const title = ok ? 'Connected ✓' : 'Not connected'
+  const title = ok ? 'Connected ✓' : 'One step left'
   const color = ok ? '#10b981' : '#f59e0b'
+  const buttons = actions
+    .map((a) => {
+      const safeHref = a.href.replace(/[<>&"]/g, '')
+      const safeText = a.label.replace(/[<>&"]/g, '')
+      const style = a.primary
+        ? 'display:inline-block;margin:.35rem .3rem;padding:.8rem 1.3rem;border-radius:.8rem;background:#fafafa;color:#0b0b0d;font-weight:600;font-size:.86rem;text-decoration:none;'
+        : 'display:inline-block;margin:.35rem .3rem;padding:.75rem 1.15rem;border-radius:.8rem;border:1px solid #3f3f46;color:#e4e4e7;font-size:.84rem;text-decoration:none;'
+      return `    <a href="${safeHref}" style="${style}">${safeText}</a>`
+    })
+    .join('\n')
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -165,12 +222,12 @@ function resultPage(ok: boolean, platformLabel: string, message: string): NextRe
 <style>
   body { margin:0; min-height:100dvh; display:grid; place-items:center; background:#0b0b0d; color:#fafafa;
          font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .card { text-align:center; padding:2.5rem 2rem; }
+  .card { text-align:center; padding:2.5rem 1.5rem; max-width:30rem; }
   .dot { width:56px; height:56px; margin:0 auto 1.25rem; border-radius:9999px; display:grid; place-items:center;
          background:${color}22; border:1px solid ${color}55; font-size:1.6rem; }
   h1 { font-size:1.15rem; font-weight:600; margin:0 0 .5rem; }
-  p { margin:0; font-size:.85rem; line-height:1.6; color:#a1a1aa; max-width:26rem; }
-  a { display:inline-block; margin-top:1.5rem; font-size:.8rem; color:#fafafa; }
+  p { margin:0; font-size:.85rem; line-height:1.6; color:#a1a1aa; max-width:26rem; margin:0 auto; }
+  .actions { margin-top:1.25rem; }
 </style>
 </head>
 <body>
@@ -178,7 +235,9 @@ function resultPage(ok: boolean, platformLabel: string, message: string): NextRe
     <div class="dot">${ok ? '✓' : '!'}</div>
     <h1>${ok ? `${safeLabel} is live` : `${safeLabel} connection didn't finish`}</h1>
     <p>${safeMessage}</p>
-    <a href="/">Back to NEXUS</a>
+    <div class="actions">
+${buttons}
+    </div>
   </div>
   <script>
     try {
@@ -186,11 +245,60 @@ function resultPage(ok: boolean, platformLabel: string, message: string): NextRe
         window.opener.postMessage({ type: 'nexus-social-oauth', ok: ${ok ? 'true' : 'false'}, platform: '${safeLabel}', message: '${safePostMessage}' }, window.location.origin);
       }
     } catch (e) {}
-    setTimeout(function () { try { window.close() } catch (e) {} }, 900);
+    ${ok
+      ? `setTimeout(function () { try { window.close() } catch (e) {} }, 1200);
+    setTimeout(function () { try { if (!window.closed) window.location.replace('/') } catch (e) {} }, 2200);`
+      : ''}
   </script>
 </body>
 </html>`
   return new NextResponse(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+}
+
+/* --------------------------- account upsert -------------------------- */
+
+async function upsertAccount(
+  userId: string,
+  platform: SocialPlatform,
+  label: string,
+  profile: MetaProfile,
+) {
+  const existing = await db.socialAccount.findFirst({ where: { userId, platform } })
+  const meta = JSON.stringify({ handle: profile.handle, avatarUrl: profile.avatarUrl })
+  const statusMessage = `Live — connected with one tap via ${label}. Posts go on-air for real.`
+
+  const row = existing
+    ? await db.socialAccount.update({
+        where: { id: existing.id },
+        data: {
+          externalId: profile.externalId,
+          accessTokenEnc: encryptSecret(profile.token),
+          displayName: profile.displayName || existing.displayName,
+          meta,
+          status: 'connected',
+          statusMessage,
+        },
+      })
+    : await db.socialAccount.create({
+        data: {
+          userId,
+          platform,
+          displayName: profile.displayName || label,
+          externalId: profile.externalId,
+          accessTokenEnc: encryptSecret(profile.token),
+          meta,
+          status: 'connected',
+          statusMessage,
+        },
+      })
+
+  await logActivity(
+    userId,
+    row.id,
+    'connected',
+    `🚀 ${label} is LIVE (${profile.handle || profile.displayName}) — the agent can now publish for real.`,
+  )
+  return row
 }
 
 /* ------------------------------ handler ----------------------------- */
@@ -200,6 +308,23 @@ export async function GET(req: NextRequest) {
   const code = url.searchParams.get('code') ?? ''
   const state = url.searchParams.get('state') ?? ''
   const oauthError = url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? ''
+
+  // Best-effort platform recovery (for "Try again" buttons even on errors).
+  let retryPlatform = ''
+  if (state) {
+    try {
+      const peek = await verifyOAuthState(state)
+      if (peek && isSocialPlatform(peek.platform)) retryPlatform = peek.platform
+    } catch {
+      /* expired/invalid — no retry button then */
+    }
+  }
+
+  const back: ResultAction[] = [{ href: '/', label: 'Back to NEXUS' }]
+  const retry = (platform: string): ResultAction[] =>
+    platform
+      ? [{ href: `/api/social/oauth/start?platform=${platform}`, label: 'Try again', primary: true }]
+      : []
 
   const clientIdFor = (platform: string): string => {
     const id =
@@ -218,15 +343,25 @@ export async function GET(req: NextRequest) {
 
   try {
     if (oauthError) {
-      return resultPage(false, 'Account', 'No problem — nothing was changed, and the agent keeps rehearsing. You can try again any time.')
+      return resultPage(
+        false,
+        'Account',
+        'No problem — nothing was changed, and the agent keeps rehearsing. You can try again any time.',
+        [...retry(retryPlatform), ...back],
+      )
     }
     if (!code || !state) {
-      return resultPage(false, 'Account', 'The platform did not finish the handshake. Please try again.')
+      return resultPage(false, 'Account', 'The platform did not finish the handshake. Please try again.', back)
     }
 
     const payload = await verifyOAuthState(state)
     if (!payload || !isSocialPlatform(payload.platform)) {
-      return resultPage(false, 'Account', 'The connection link expired (it is valid for 10 minutes). Please tap the button again.')
+      return resultPage(
+        false,
+        'Account',
+        'The connection link expired (it is valid for 10 minutes). Please tap the connect button again.',
+        back,
+      )
     }
 
     const platform = payload.platform
@@ -236,56 +371,66 @@ export async function GET(req: NextRequest) {
     const origin = proto && host ? `${proto}://${host}` : req.nextUrl.origin
     const redirectUri = `${origin}/api/social/oauth/callback`
 
-    let profile: { externalId: string; handle: string; displayName: string; token: string; avatarUrl: string }
     if (platform === 'instagram' || platform === 'facebook') {
-      profile = await finishMeta(code, redirectUri, secretFor(platform), clientIdFor(platform), platform)
-    } else if (platform === 'linkedin') {
+      const outcome = await finishMeta(code, redirectUri, secretFor(platform), clientIdFor(platform), platform)
+
+      if (outcome.kind === 'no-pages') {
+        // The ONE free thing Meta requires that we cannot do for the user:
+        // a Facebook Page. Give them a one-tap path to create it, then retry.
+        return resultPage(
+          false,
+          label,
+          'Almost there — your Facebook account has no Page yet, and the agent needs one to publish. A Page is free and takes about a minute: tap the button, give it any name, skip the extras, then come back and tap retry.',
+          [
+            { href: 'https://www.facebook.com/pages/creation', label: 'Create your Page — free, 1 min', primary: true },
+            { href: `/api/social/oauth/start?platform=${platform}`, label: 'I created it — retry' },
+            ...back,
+          ],
+        )
+      }
+
+      if (outcome.kind === 'page-without-ig') {
+        // Silver lining: the Page itself is perfectly usable — connect
+        // Facebook right now, free of charge, zero extra work.
+        const page = outcome.page
+        await upsertAccount(payload.userId, 'facebook', SOCIAL_PLATFORMS.facebook.label, {
+          externalId: page.id,
+          handle: page.username ? `@${page.username}` : page.name ?? '',
+          displayName: page.name ?? 'Facebook Page',
+          token: page.access_token ?? '',
+          avatarUrl: '',
+        })
+        return resultPage(
+          false,
+          'Instagram',
+          'Good news — your Facebook Page is now connected to NEXUS. One free step left for Instagram: in the Instagram app, switch to a professional (creator) account and pick your page — Profile → menu → Settings and privacy → Account type and tools → Switch to professional account. Then tap retry.',
+          [
+            { href: 'https://www.instagram.com/', label: 'Open Instagram', primary: true },
+            { href: '/api/social/oauth/start?platform=instagram', label: 'Done — retry Instagram' },
+            ...back,
+          ],
+        )
+      }
+
+      const profile = outcome.profile
+      await upsertAccount(payload.userId, platform, label, profile)
+      return resultPage(true, label, `The agent can now publish to ${label} for real. You can close this window.`)
+    }
+
+    let profile: MetaProfile
+    if (platform === 'linkedin') {
       profile = await finishLinkedIn(code, redirectUri, clientIdFor(platform), secretFor(platform))
     } else {
       profile = await finishX(code, redirectUri, clientIdFor(platform), secretFor(platform), payload.verifier ?? '')
     }
-
-    // Upsert: one live connection per platform per user (autopilot settings preserved on update).
-    const existing = await db.socialAccount.findFirst({ where: { userId: payload.userId, platform } })
-    const meta = JSON.stringify({ handle: profile.handle, avatarUrl: profile.avatarUrl })
-    const statusMessage = `Live — connected with one tap via ${label}. Posts go on-air for real.`
-
-    const row = existing
-      ? await db.socialAccount.update({
-          where: { id: existing.id },
-          data: {
-            externalId: profile.externalId,
-            accessTokenEnc: encryptSecret(profile.token),
-            displayName: profile.displayName || existing.displayName,
-            meta,
-            status: 'connected',
-            statusMessage,
-          },
-        })
-      : await db.socialAccount.create({
-          data: {
-            userId: payload.userId,
-            platform,
-            displayName: profile.displayName || label,
-            externalId: profile.externalId,
-            accessTokenEnc: encryptSecret(profile.token),
-            meta,
-            status: 'connected',
-            statusMessage,
-          },
-        })
-
-    await logActivity(
-      payload.userId,
-      row.id,
-      'connected',
-      `🚀 ${label} is LIVE (${profile.handle || profile.displayName}) — the agent can now publish for real.`,
-    )
-
+    await upsertAccount(payload.userId, platform, label, profile)
     return resultPage(true, label, `The agent can now publish to ${label} for real. You can close this window.`)
   } catch (error) {
     console.error('[api/social/oauth/callback] error:', error)
     const message = error instanceof Error ? error.message : 'Something went wrong — please try again.'
-    return resultPage(false, 'Account', `${message} Nothing was broken — the agent keeps rehearsing meanwhile.`)
+    return resultPage(false, 'Account', `${message} Nothing was broken — the agent keeps rehearsing meanwhile.`, [
+      ...retry(retryPlatform),
+      ...back,
+    ])
   }
 }
