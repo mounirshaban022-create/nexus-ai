@@ -27,34 +27,26 @@ interface OAuthConfig {
   scopeSeparator: ',' | ' '
 }
 
-const CONFIG: Record<SocialPlatform, Omit<OAuthConfig, 'envId' | 'envSecret'>> = {
+const CONFIG: Record<SocialPlatform, OAuthConfig> = {
   instagram: {
     authorize: 'https://www.facebook.com/v21.0/dialog/oauth',
     scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list', 'pages_read_engagement', 'business_management'],
     scopeSeparator: ',',
-    envId: 'META_APP_ID',
-    envSecret: 'META_APP_SECRET',
   },
   facebook: {
     authorize: 'https://www.facebook.com/v21.0/dialog/oauth',
     scopes: ['pages_manage_posts', 'pages_show_list', 'pages_read_engagement'],
     scopeSeparator: ',',
-    envId: 'META_APP_ID',
-    envSecret: 'META_APP_SECRET',
   },
   linkedin: {
     authorize: 'https://www.linkedin.com/oauth/v2/authorization',
     scopes: ['openid', 'profile', 'w_member_social'],
     scopeSeparator: ' ',
-    envId: 'LINKEDIN_CLIENT_ID',
-    envSecret: 'LINKEDIN_CLIENT_SECRET',
   },
   x: {
     authorize: 'https://x.com/i/oauth2/authorize',
     scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
     scopeSeparator: ' ',
-    envId: 'X_CLIENT_ID',
-    envSecret: 'X_CLIENT_SECRET',
   },
 }
 
