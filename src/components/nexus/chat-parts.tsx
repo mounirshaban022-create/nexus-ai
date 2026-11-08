@@ -218,21 +218,29 @@ export interface ToolCardInfo {
 /* ------------------------------------------------------------------ */
 
 function useElapsedSeconds(active: boolean): number {
-  // Adjust-on-prop-change during render (React's endorsed pattern — keeps
-  // the lint rule happy by never calling setState inside an effect body).
-  const [state, setState] = useState({ active: false, t0: 0, sec: 0 })
-  if (active !== state.active) {
-    setState({ active, t0: Date.now(), sec: 0 })
+  // AUDIT FIX: the previous version called Date.now() during render (impure,
+  // flagged by react-hooks/purity) and setState synchronously inside the
+  // effect (cascading renders, flagged by set-state-in-effect). Now:
+  //  - render-phase adjustment uses only pure sentinels (React-endorsed
+  //    "derived state from props" pattern — no impure calls),
+  //  - the real timestamp lives inside the interval closure,
+  //  - the interval callback is the only place state updates asynchronously.
+  const [sec, setSec] = useState(0)
+  const [t0, setT0] = useState<number | null>(null)
+  if (active && t0 === null) {
+    setT0(0) // 0 = "activation pending start" sentinel
+  }
+  if (!active && t0 !== null) {
+    setT0(null)
+    setSec(0)
   }
   useEffect(() => {
-    if (!active) return
-    const id = setInterval(
-      () => setState((s) => ({ ...s, sec: Math.floor((Date.now() - s.t0) / 1000) })),
-      1000
-    )
+    if (!active || t0 !== 0) return
+    const start = Date.now()
+    const id = setInterval(() => setSec(Math.floor((Date.now() - start) / 1000)), 1000)
     return () => clearInterval(id)
-  }, [active])
-  return state.sec
+  }, [active, t0])
+  return sec
 }
 
 /* ------------------------------------------------------------------ */

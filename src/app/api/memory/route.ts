@@ -27,73 +27,84 @@ const createSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
-  const session = await getVerifiedSession(req)
-  if (!session) {
-    return NextResponse.json({ error: 'Sign in to view memories.' }, { status: 401 })
-  }
-  const limit = rateLimit(`memory:list:${session.userId}`, 60, 60_000)
-  if (!limit.ok) {
-    return NextResponse.json({ error: 'Too many requests. Retry shortly.' }, { status: 429 })
-  }
+  try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in to view memories.' }, { status: 401 })
+    }
+    const limit = rateLimit(`memory:list:${session.userId}`, 60, 60_000)
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many requests. Retry shortly.' }, { status: 429 })
+    }
 
-  const memories = await db.userMemory.findMany({
-    where: { userId: session.userId },
-    orderBy: { createdAt: 'desc' },
-    take: MAX_MEMORIES_RETURNED,
-    select: {
-      id: true,
-      content: true,
-      sourceSessionId: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  })
+    const memories = await db.userMemory.findMany({
+      where: { userId: session.userId },
+      orderBy: { createdAt: 'desc' },
+      take: MAX_MEMORIES_RETURNED,
+      select: {
+        id: true,
+        content: true,
+        sourceSessionId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
 
-  return NextResponse.json({ memories })
+    return NextResponse.json({ memories })
+  } catch (error) {
+    // Audit fix: DB hiccups must return a clean JSON error, not an unstyled 500.
+    console.error('[api/memory] GET error:', error)
+    return NextResponse.json({ error: 'Could not load memories right now.' }, { status: 500 })
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getVerifiedSession(req)
-  if (!session) {
-    return NextResponse.json({ error: 'Sign in to save memories.' }, { status: 401 })
-  }
-  const limit = rateLimit(`memory:create:${session.userId}`, 30, 60_000)
-  if (!limit.ok) {
-    return NextResponse.json({ error: 'Too many requests. Retry shortly.' }, { status: 429 })
-  }
+  try {
+    const session = await getVerifiedSession(req)
+    if (!session) {
+      return NextResponse.json({ error: 'Sign in to save memories.' }, { status: 401 })
+    }
+    const limit = rateLimit(`memory:create:${session.userId}`, 30, 60_000)
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many requests. Retry shortly.' }, { status: 429 })
+    }
 
-  const parsed = createSchema.safeParse(await req.json().catch(() => null))
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Memory text is required (max 600 chars).' },
-      { status: 400 }
-    )
+    const parsed = createSchema.safeParse(await req.json().catch(() => null))
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Memory text is required (max 600 chars).' },
+        { status: 400 }
+      )
+    }
+
+    // Cap total memories per user to prevent runaway growth (cheap DOS guard).
+    // 500 memories × 600 chars = 300KB max — well within SQLite comfort zone.
+    const count = await db.userMemory.count({ where: { userId: session.userId } })
+    if (count >= 500) {
+      return NextResponse.json(
+        { error: 'Memory limit reached (500). Delete one before adding another.' },
+        { status: 409 }
+      )
+    }
+
+    const memory = await db.userMemory.create({
+      data: {
+        userId: session.userId,
+        content: parsed.data.content,
+        sourceSessionId: parsed.data.sourceSessionId ?? null,
+      },
+      select: {
+        id: true,
+        content: true,
+        sourceSessionId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+
+    return NextResponse.json({ memory }, { status: 201 })
+  } catch (error) {
+    console.error('[api/memory] POST error:', error)
+    return NextResponse.json({ error: 'Could not save the memory right now.' }, { status: 500 })
   }
-
-  // Cap total memories per user to prevent runaway growth (cheap DOS guard).
-  // 500 memories × 600 chars = 300KB max — well within SQLite comfort zone.
-  const count = await db.userMemory.count({ where: { userId: session.userId } })
-  if (count >= 500) {
-    return NextResponse.json(
-      { error: 'Memory limit reached (500). Delete one before adding another.' },
-      { status: 409 }
-    )
-  }
-
-  const memory = await db.userMemory.create({
-    data: {
-      userId: session.userId,
-      content: parsed.data.content,
-      sourceSessionId: parsed.data.sourceSessionId ?? null,
-    },
-    select: {
-      id: true,
-      content: true,
-      sourceSessionId: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  })
-
-  return NextResponse.json({ memory }, { status: 201 })
 }

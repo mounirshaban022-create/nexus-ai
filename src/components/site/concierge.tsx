@@ -316,7 +316,7 @@ export function ConciergePanel({
             className="mx-auto mt-2.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 transition hover:text-[#ff5a5f]"
           >
             <Ear className="h-3 w-3" aria-hidden />
-            That's enough talking — launch the real NEXUS
+            That&apos;s enough talking — launch the real NEXUS
           </button>
         )}
       </form>
@@ -386,7 +386,7 @@ export function ConciergeWidget({
                 <X className="h-3 w-3" />
               </span>
               <span aria-hidden className="mr-1">👋</span>
-              I'm NEXUS — the AI that runs this site. Want a quick tour? Just say hi.
+              I&apos;m NEXUS — the AI that runs this site. Want a quick tour? Just say hi.
             </motion.button>
           )}
         </AnimatePresence>

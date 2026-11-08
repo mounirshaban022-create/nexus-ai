@@ -37,22 +37,12 @@ import { getPrimaryAccount, organizeEmail, listEmailFolders, type OrganizeAction
 import { cliSkillsCatalog, getCliSkillDoc, searchCliSkills, findCliSkillByName, listAllSkills } from '@/lib/cli-skills'
 import { runSkillAction, resolveSkillAction } from '@/lib/skill-actions'
 import { CLOUD_SKILLS } from '@/lib/skill-map'
+import { appOriginFromRequest } from '@/lib/origin'
 
-/** Resolves the app's own origin — works on localhost, Vercel previews,
- *  and production (falls back to localhost for direct dev calls).
- *  Headers FIRST: the request's own host is always reachable (a stale or
- *  misencoded APP_URL env once made every tool self-fetch an HTML 404 —
- *  "The page could not be found" — instead of JSON). */
+/** Resolves the app's own origin — shared helper (src/lib/origin.ts):
+ *  request host first (always reachable), env overrides as fallback. */
 function appOrigin(req: NextRequest): string {
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
-  if (host) {
-    const proto =
-      req.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
-    return `${proto}://${host}`
-  }
-  if (process.env.APP_URL) return process.env.APP_URL
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-  return `http://localhost:${process.env.PORT || 3000}`
+  return appOriginFromRequest(req)
 }
 
 
@@ -1176,7 +1166,7 @@ async function executeChatTool(
     // (`pip install cli-anything-mermaid`) — that is not a PyPI package.
     // When the package token matches a vendored skill, rewrite it to the
     // registry's real git+URL so the install actually works.
-    const pkgMatch = runnable.match(/python3 -m pip install\s+(?:--[\w-]+\s+)*([A-Za-z0-9_.@\/+:-]+)/)
+    const pkgMatch = runnable.match(/python3 -m pip install\s+(?:--[\w-]+\s+)*([A-Za-z0-9_.@/+:-]+)/)
     if (pkgMatch) {
       const pkgToken = pkgMatch[1]
       const bareName = pkgToken.replace(/^cli-anything-/, '').replace(/\.(git|tar\.gz|zip)$/, '')
@@ -2076,7 +2066,7 @@ export async function POST(req: NextRequest) {
           // This makes NEXUS the primary conversationalist: instant start,
           // smarter model (Claude Sonnet 4), one continuous persona.
           let effectiveAgentSlug: string | null = null
-          let routingDecision: RoutingDecision | null = null
+          const routingDecision: RoutingDecision | null = null
           if (session.agentPinned && session.agentSlug) {
             // PINNED by the user — use the chosen specialist.
             effectiveAgentSlug = session.agentSlug

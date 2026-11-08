@@ -4,6 +4,7 @@ import { smartChat } from '@/lib/smart-chat'
 import { freeWebSearch } from '@/lib/web-access'
 import { requireVerifiedSession, getVerifiedSession } from '@/lib/auth'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { appOriginFromEnv } from '@/lib/origin'
 
 /**
  * NEXUS Answer — Perplexity-style "Pro Search" engine.
@@ -75,11 +76,10 @@ interface ReaderResponse {
 /* Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-/** Resolves the reader URL — dynamic for Vercel deployment. */
+/** Resolves the reader URL — shared helper (src/lib/origin.ts),
+ *  dynamic for Vercel deployments. */
 function getReaderUrl(): string {
-  if (process.env.APP_URL) return `${process.env.APP_URL}/api/reader`
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/api/reader`
-  return `http://localhost:${process.env.PORT || 3000}/api/reader`
+  return `${appOriginFromEnv()}/api/reader`
 }
 const READER_URL = getReaderUrl()
 const MAX_PAGE_CHARS = 3000

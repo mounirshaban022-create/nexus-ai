@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { smartChat } from '@/lib/smart-chat'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { buildSystemPrompt } from '@/lib/chat-system-prompt'
+import { getVerifiedSession } from '@/lib/auth'
 
 const requestSchema = z.object({ sessionId: z.string().min(1).max(64) })
 
@@ -22,8 +23,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'sessionId is required.' }, { status: 400 })
     }
 
+    // SECURITY (audit C2): this handler previously ran with NO authentication
+    // and looked up ANY session by id — cross-user read/delete + unauthenticated
+    // AI spend. Require a verified session and scope the lookup to the owner,
+    // exactly like chat/sessions/[id] does.
+    const auth = await getVerifiedSession(req)
+    if (!auth) {
+      return NextResponse.json(
+        { error: 'Sign in to regenerate replies.', code: 'AUTH_REQUIRED' },
+        { status: 401 }
+      )
+    }
+
     const session = await db.chatSession.findFirst({
-      where: { id: parsed.data.sessionId, kind: 'chat' },
+      where: { id: parsed.data.sessionId, kind: 'chat', userId: auth.userId },
       include: { messages: { orderBy: { createdAt: 'asc' } } },
     })
     if (!session) {

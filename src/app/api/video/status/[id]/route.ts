@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { getVerifiedSession } from '@/lib/auth'
 import { videoJobs } from '@/lib/video-jobs'
 import { agnesGetVideoStatus } from '@/lib/agnes-video'
 import { db } from '@/lib/db'
@@ -14,15 +15,43 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
     }
 
+  // SECURITY (audit H2): this endpoint previously served ANY job id to
+  // anonymous callers — leaking the render prompt and status. Media jobs
+  // are account-gated at creation, so require a session here too.
+  const auth = await getVerifiedSession(_req)
+  if (!auth) {
+    return NextResponse.json(
+      { error: 'Sign in to view video jobs.', code: 'AUTH_REQUIRED' },
+      { status: 401 }
+    )
+  }
+
   const { id } = await context.params
-  let job = videoJobs.get(id)
+  const job = videoJobs.get(id)
+
+  // SECURITY (audit H2): ownership — the durable row knows the owner. An
+  // in-memory job whose row belongs to someone else is not yours to poll.
+  if (job) {
+    try {
+      const row = await db.generatedVideo.findFirst({
+        where: { jobId: id },
+        select: { userId: true },
+      })
+      if (row?.userId && row.userId !== auth.userId) {
+        return NextResponse.json({ error: 'Job not found.' }, { status: 404 })
+      }
+    } catch {
+      /* DB hiccup — the row check is best-effort; the session gate above
+         already stopped anonymous access. */
+    }
+  }
 
   /* ---- VERCEL FALLBACK: serverless invocations hit different instances,
    * so the in-memory map can miss a job that's actively rendering on the
    * instance that created it. Derive the snapshot from the DB row. ---- */
   if (!job) {
     try {
-      const row = await db.generatedVideo.findFirst({ where: { jobId: id } })
+      const row = await db.generatedVideo.findFirst({ where: { jobId: id, userId: auth.userId } })
       if (!row) {
         return NextResponse.json({ error: 'Job not found.' }, { status: 404 })
       }

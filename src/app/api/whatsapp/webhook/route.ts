@@ -35,7 +35,16 @@ export async function GET(req: NextRequest) {
   }
 
   const account = await getWhatsAppAccountByVerifyToken(token)
-  if (!account || token !== account.verifyToken) {
+  // Audit L3: confirm the match timing-safely (sha256-normalized so the
+  // buffers always have equal length) — mirrors the POST signature path.
+  const tokenOk = await (async () => {
+    if (!account?.verifyToken) return false
+    const { createHash, timingSafeEqual } = await import('node:crypto')
+    const a = createHash('sha256').update(token, 'utf8').digest()
+    const b = createHash('sha256').update(account.verifyToken, 'utf8').digest()
+    return timingSafeEqual(a, b)
+  })()
+  if (!account || !tokenOk) {
     console.warn('[whatsapp-webhook] verification failed — token mismatch')
     return new NextResponse('Forbidden', { status: 403 })
   }

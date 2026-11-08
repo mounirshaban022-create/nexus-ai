@@ -767,7 +767,7 @@ function AddProviderDialog({
                   href={selected.keyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 transition hover:underline dark:text-[#ff8a80]"
+                  className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 transition hover:underline dark:text-[#ff8a8d]"
                 >
                   Get a key <ExternalLink className="h-3 w-3" aria-hidden />
                 </a>
@@ -1728,7 +1728,7 @@ export function NexusSettingsMode() {
               <h3 className="font-display mt-3 text-base font-bold tracking-tight text-foreground">
                 Mounir Shaaban
               </h3>
-              <p className="mt-0.5 text-xs font-medium text-rose-600 dark:text-[#ff8a80]">
+              <p className="mt-0.5 text-xs font-medium text-rose-600 dark:text-[#ff8a8d]">
                 {t('settings.creatorRole')}
               </p>
               <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/80">

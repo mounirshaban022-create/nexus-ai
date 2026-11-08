@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { db } from '@/lib/db'
 import { verifyOAuthState } from '@/lib/auth'
 import { encryptSecret } from '@/lib/email'
 import { SOCIAL_PLATFORMS, isSocialPlatform, logActivity, getPlatformCredentials, SocialPlatform } from '@/lib/social'
+import { OAUTH_NONCE_COOKIE } from '@/app/api/social/oauth/start/route'
 
 export const maxDuration = 60
 
@@ -190,35 +192,53 @@ interface ResultAction {
   primary?: boolean
 }
 
+/** SECURITY (audit M4): real HTML entity escaping — the previous
+ * char-stripping approach blocked current injection paths but any future
+ * template edit could silently re-open XSS. Escape every dynamic value. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function resultPage(
   ok: boolean,
   platformLabel: string,
   message: string,
   actions: ResultAction[] = [{ href: '/', label: 'Back to NEXUS' }],
 ): NextResponse {
-  const safeLabel = platformLabel.replace(/[<>&"]/g, '')
-  const safeMessage = message.replace(/[<>&"]/g, '')
-  // For the postMessage channel (inside a single-quoted JS literal) quotes
-  // must go entirely — the wording stays readable without them.
-  const safePostMessage = message.replace(/[<>&"']/g, '')
   const title = ok ? 'Connected ✓' : 'One step left'
   const color = ok ? '#10b981' : '#f59e0b'
   const buttons = actions
     .map((a) => {
-      const safeHref = a.href.replace(/[<>&"]/g, '')
-      const safeText = a.label.replace(/[<>&"]/g, '')
+      const safeHref = escapeHtml(a.href)
+      const safeText = escapeHtml(a.label)
       const style = a.primary
         ? 'display:inline-block;margin:.35rem .3rem;padding:.8rem 1.3rem;border-radius:.8rem;background:#fafafa;color:#0b0b0d;font-weight:600;font-size:.86rem;text-decoration:none;'
         : 'display:inline-block;margin:.35rem .3rem;padding:.75rem 1.15rem;border-radius:.8rem;border:1px solid #3f3f46;color:#e4e4e7;font-size:.84rem;text-decoration:none;'
       return `    <a href="${safeHref}" style="${style}">${safeText}</a>`
     })
     .join('\n')
+  // The opener notification is a JSON payload — stringify (never hand-build a
+  // JS string literal) and neutralize < so </script> cannot break out.
+  const postMessagePayload = JSON.stringify({
+    type: 'nexus-social-oauth',
+    ok,
+    platform: platformLabel,
+    message,
+  })
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${title} · NEXUS</title>
+<title>${escapeHtml(title)} · NEXUS</title>
 <style>
   body { margin:0; min-height:100dvh; display:grid; place-items:center; background:#0b0b0d; color:#fafafa;
          font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -233,8 +253,8 @@ function resultPage(
 <body>
   <div class="card">
     <div class="dot">${ok ? '✓' : '!'}</div>
-    <h1>${ok ? `${safeLabel} is live` : `${safeLabel} connection didn't finish`}</h1>
-    <p>${safeMessage}</p>
+    <h1>${ok ? `${escapeHtml(platformLabel)} is live` : `${escapeHtml(platformLabel)} connection didn't finish`}</h1>
+    <p>${escapeHtml(message)}</p>
     <div class="actions">
 ${buttons}
     </div>
@@ -242,7 +262,7 @@ ${buttons}
   <script>
     try {
       if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({ type: 'nexus-social-oauth', ok: ${ok ? 'true' : 'false'}, platform: '${safeLabel}', message: '${safePostMessage}' }, window.location.origin);
+        window.opener.postMessage(${postMessagePayload}, window.location.origin);
       }
     } catch (e) {}
     ${ok
@@ -309,6 +329,14 @@ export async function GET(req: NextRequest) {
   const state = url.searchParams.get('state') ?? ''
   const oauthError = url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? ''
 
+  // SECURITY (audit M1): consume the one-time handshake cookie. Whether the
+  // flow succeeds or fails, the nonce is spent — retry always re-runs /start.
+  const nonceCookie = req.cookies.get(OAUTH_NONCE_COOKIE)?.value ?? ''
+  const clearNonce = (res: NextResponse): NextResponse => {
+    res.cookies.set(OAUTH_NONCE_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 })
+    return res
+  }
+
   // Best-effort platform recovery (for "Try again" buttons even on errors).
   let retryPlatform = ''
   if (state) {
@@ -341,19 +369,47 @@ export async function GET(req: NextRequest) {
 
     const payload = await verifyOAuthState(state)
     if (!payload || !isSocialPlatform(payload.platform)) {
-      return resultPage(
-        false,
-        'Account',
-        'The connection link expired (it is valid for 10 minutes). Please tap the connect button again.',
-        back,
+      return clearNonce(
+        resultPage(
+          false,
+          'Account',
+          'The connection link expired (it is valid for 10 minutes). Please tap the connect button again.',
+          back,
+        ),
+      )
+    }
+
+    // SECURITY (audit M1): the state JWT must pair with the nonce cookie this
+    // browser received at /start. Missing/mismatched → reject (replay guard).
+    const nonceHash = createHash('sha256').update(payload.nonce ?? '').digest('hex')
+    const nonceOk =
+      Boolean(payload.nonce) &&
+      nonceCookie.length === nonceHash.length &&
+      timingSafeEqual(Buffer.from(nonceCookie), Buffer.from(nonceHash))
+    if (!nonceOk) {
+      return clearNonce(
+        resultPage(
+          false,
+          'Account',
+          'This connection link was already used or came from another browser. Please tap the connect button again.',
+          back,
+        ),
       )
     }
 
     const platform = payload.platform
     const label = SOCIAL_PLATFORMS[platform].label
+    // SECURITY (audit M2): canonical origin from operator env first, headers
+    // as fallback (see start/route.ts resolveOrigin).
+    const configuredOrigin = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
     const proto = req.headers.get('x-forwarded-proto')?.split(',')[0].trim()
     const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
-    const origin = proto && host ? `${proto}://${host}` : req.nextUrl.origin
+    const origin =
+      configuredOrigin && configuredOrigin.startsWith('http')
+        ? configuredOrigin.replace(/\/+$/, '')
+        : proto && host
+          ? `${proto}://${host}`
+          : req.nextUrl.origin
     const redirectUri = `${origin}/api/social/oauth/callback`
 
     if (platform === 'instagram' || platform === 'facebook') {

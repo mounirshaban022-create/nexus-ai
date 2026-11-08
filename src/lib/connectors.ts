@@ -608,8 +608,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { latitude: '25.1972', longitude: '55.2744' },
     execute: async (args) => {
-      const lat = String(args.latitude).replace(/[^0-9.\-]/g, '')
-      const lon = String(args.longitude).replace(/[^0-9.\-]/g, '')
+      const lat = String(args.latitude).replace(/[^0-9.-]/g, '')
+      const lon = String(args.longitude).replace(/[^0-9.-]/g, '')
       if (!lat || !lon) throw new Error('latitude and longitude are required')
       const data = (await fetchJson(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3`
@@ -1375,8 +1375,8 @@ export const CONNECTORS: ConnectorDefinition[] = [
     ],
     sampleArgs: { latitude: '25.1972', longitude: '55.2744' },
     execute: async (args) => {
-      const lat = String(args.latitude).replace(/[^0-9.\-]/g, '')
-      const lon = String(args.longitude).replace(/[^0-9.\-]/g, '')
+      const lat = String(args.latitude).replace(/[^0-9.-]/g, '')
+      const lon = String(args.longitude).replace(/[^0-9.-]/g, '')
       if (!lat || !lon) throw new Error('latitude and longitude are required')
       // NOTE: use fetchJson() helper (not raw fetch) — Open-Meteo rejects requests
       // without a User-Agent header (returns ETIMEDOUT). The helper sets one.

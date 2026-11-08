@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { SignJWT, jwtVerify } from 'jose'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { rateLimit, clientKey } from '@/lib/rate-limit'
+import { getAuthSecret } from '@/lib/auth'
 
 /* ------------------------------------------------------------------ */
 /* CONSOLE AUTH — separate admin gate for /console + /api/console/*    */
@@ -10,9 +11,9 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 /* it uses its OWN credential (CONSOLE_PASSWORD) and its OWN cookie    */
 /* (`nexus-console`) — completely independent of user sessions.        */
 /*                                                                     */
-/* The signing key is derived from AUTH_SECRET (already mandatory in   */
-/* production — src/lib/auth.ts throws without it) + a console salt,   */
-/* so no extra secret needs provisioning.                              */
+/* The signing key is derived from the SHARED auth secret resolution
+ * (env → DB auto-provision — src/lib/auth.ts loadSecret) + a console salt,
+ * so no extra secret needs provisioning and the key is NEVER a constant. */
 /*                                                                     */
 /* In non-production (local dev) a default password is accepted so the */
 /* console works out of the box; in production CONSOLE_PASSWORD MUST   */
@@ -35,8 +36,12 @@ function consolePassword(): string {
   return 'nexus-console-dev'
 }
 
-function consoleKey(): Uint8Array {
-  const secret = process.env.AUTH_SECRET || 'nexus-dev-secret-change-me'
+async function consoleKey(): Promise<Uint8Array> {
+  // SECURITY (audit C1): resolve the secret exactly like user sessions do —
+  // env first, then the DB auto-provisioned secret. Falling back to a
+  // hardcoded constant here made console JWTs forgeable whenever AUTH_SECRET
+  // was unset, granting full admin access to the whole control plane.
+  const secret = await getAuthSecret()
   const material = createHash('sha256')
     .update(`${secret}::nexus-console-v1`)
     .digest()
@@ -57,7 +62,7 @@ async function signConsoleToken(): Promise<string> {
     .setProtectedHeader({ alg: ALG })
     .setIssuedAt()
     .setExpirationTime(`${TTL_SECONDS}s`)
-    .sign(consoleKey())
+    .sign(await consoleKey())
 }
 
 /** Verify the console cookie from a request. Returns true when valid. */
@@ -65,7 +70,7 @@ export async function isConsoleAuthed(req: NextRequest): Promise<boolean> {
   const token = req.cookies.get(CONSOLE_COOKIE)?.value
   if (!token) return false
   try {
-    const { payload } = await jwtVerify(token, consoleKey(), { algorithms: [ALG] })
+    const { payload } = await jwtVerify(token, await consoleKey(), { algorithms: [ALG] })
     return payload.scope === 'console'
   } catch {
     return false

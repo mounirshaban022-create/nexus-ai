@@ -13,12 +13,12 @@
  */
 
 import type { ConnectorDefinition } from './connectors'
+import { appOriginFromEnv } from '@/lib/origin'
 
-/** Resolves the app origin — dynamic for Vercel deployment. */
+/** Resolves the app origin — shared helper (src/lib/origin.ts),
+ *  dynamic for Vercel deployment. */
 function getOrigin(): string {
-  if (process.env.APP_URL) return process.env.APP_URL
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-  return `http://localhost:${process.env.PORT || 3000}`
+  return appOriginFromEnv()
 }
 const ORIGIN = getOrigin()
 

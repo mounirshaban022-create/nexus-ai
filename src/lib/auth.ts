@@ -116,6 +116,17 @@ async function getSecretKey(): Promise<Uint8Array> {
   return new TextEncoder().encode(await loadSecret())
 }
 
+/**
+ * Expose the resolved auth secret to sibling security gates (console admin
+ * JWTs) so they share the SAME resolution order: env → DB auto-provision.
+ * SECURITY: sibling gates must never derive keys from a hardcoded fallback
+ * constant — that would make their tokens forgeable whenever AUTH_SECRET is
+ * unset (audit finding C1). Never log the returned value.
+ */
+export async function getAuthSecret(): Promise<string> {
+  return loadSecret()
+}
+
 /** Hash a plaintext password using bcrypt with 10 rounds. */
 export async function hashPassword(plain: string): Promise<string> {
   const salt = await bcrypt.genSalt(10)
@@ -150,6 +161,12 @@ export interface OAuthStatePayload {
   // X (Twitter) PKCE: the code_verifier rides inside the signed state so
   // no server-side session storage is needed.
   verifier?: string
+  // SECURITY (audit M1): one-time nonce bound to an httpOnly cookie set at
+  // /start and verified (then cleared) at /callback. Without it, a captured
+  // state JWT stayed replayable for its full 10-minute TTL — an attacker
+  // completing the flow with THEIR platform code could attach their account
+  // to the victim's NEXUS id. The cookie binding closes that window.
+  nonce?: string
 }
 
 /** Sign a short-lived OAuth state JWT (HS256, 10-minute expiry). */
@@ -169,8 +186,9 @@ export async function verifyOAuthState(token: string): Promise<OAuthStatePayload
     const userId = typeof payload.userId === 'string' ? payload.userId : ''
     const platform = typeof payload.platform === 'string' ? payload.platform : ''
     const verifier = typeof payload.verifier === 'string' ? payload.verifier : undefined
+    const nonce = typeof payload.nonce === 'string' ? payload.nonce : undefined
     if (!userId || !platform) return null
-    return { userId, platform, verifier }
+    return { userId, platform, verifier, nonce }
   } catch {
     return null
   }

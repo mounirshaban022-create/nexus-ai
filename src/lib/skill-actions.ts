@@ -30,6 +30,7 @@ import { smartChat } from '@/lib/smart-chat'
 import { persistImage } from '@/lib/media-store'
 import { getCurrentUser } from '@/lib/auth'
 import type { NextRequest } from 'next/server'
+import { appOriginFromRequest } from '@/lib/origin'
 
 /* ------------------------------------------------------------------ */
 /* Types + capability map live in the client-safe skill-map module      */
@@ -58,17 +59,9 @@ export interface SkillRunResult {
 /* ------------------------------------------------------------------ */
 
 function origin(req: Request): string {
-  // The request's own host is the most reliable origin everywhere (sandbox,
-  // Vercel preview, production domain). Env overrides come second — APP_URL
-  // may be stale/misconfigured.
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
-  if (host) {
-    const proto = req.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
-    return `${proto}://${host}`
-  }
-  if (process.env.APP_URL) return process.env.APP_URL
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-  return `http://localhost:${process.env.PORT || 3000}`
+  // Shared helper (src/lib/origin.ts) — request host first (always reachable
+  // from sandbox, Vercel preview and production), env fallback.
+  return appOriginFromRequest(req)
 }
 
 async function callApi<T>(

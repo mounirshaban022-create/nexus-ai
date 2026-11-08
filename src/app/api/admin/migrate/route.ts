@@ -168,12 +168,25 @@ export async function GET(req: NextRequest) {
       )
     }
   } else {
-    // Dev: still prefer a token, but allow it if unset (for local
-    // convenience). Never reachable in production — the isProd branch
-    // above is the only other path.
-    if ((expectedAdmin || expectedServiceRole) && !matchesAdmin && !matchesServiceRole) {
+    // SECURITY (audit M6): the previous dev bypass let this endpoint run DDL
+    // with NO token whenever no secrets were configured — and the sandbox
+    // preview gateway exposes the dev server to an external host, so that
+    // path was externally reachable. Fail closed everywhere now: when no
+    // secret is configured the endpoint refuses to run (set
+    // ADMIN_MIGRATION_TOKEN locally if you need it in dev).
+    if (!expectedAdmin && !expectedServiceRole) {
       return NextResponse.json(
-        { ok: false, error: 'Invalid token.' },
+        {
+          ok: false,
+          error:
+            'Migration endpoint is locked: set ADMIN_MIGRATION_TOKEN (or SUPABASE_SERVICE_ROLE_KEY) and pass it as a Bearer token.',
+        },
+        { status: 500 }
+      )
+    }
+    if (!matchesAdmin && !matchesServiceRole) {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid or missing token.' },
         { status: 401 }
       )
     }

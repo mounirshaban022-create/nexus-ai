@@ -26,7 +26,8 @@ export async function register() {
   const tick = async () => {
     try {
       const { automationTick } = await import('@/lib/social')
-      const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      const { appOriginFromEnv } = await import('@/lib/origin')
+      const origin = appOriginFromEnv()
       const report = await automationTick(origin)
       const posts =
         (report.autopilot?.processed ?? 0) + (report.scheduled?.published ?? 0)

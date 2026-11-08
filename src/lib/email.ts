@@ -267,7 +267,7 @@ export async function listEmails(
         headers: false,
       })) {
         // Snippet: fetch first text part cheaply
-        let snippet = ''
+        const snippet = ''
         emails.push({
           uid: msg.uid,
           subject: msg.envelope?.subject ?? '(no subject)',

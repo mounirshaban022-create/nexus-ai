@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
           ],
         }],
       })
-      filename = `invoice-${fields.invoiceNo.replace(/[^a-z0-9\-]+/gi, '-')}.docx`
+      filename = `invoice-${fields.invoiceNo.replace(/[^a-z0-9-]+/gi, '-')}.docx`
     } else if (templateId === 'report') {
       const metrics = lines('metrics').map(l => l.split('|').map(s => s.trim()))
       doc = new Document({

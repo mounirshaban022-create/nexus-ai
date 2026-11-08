@@ -7,7 +7,7 @@ import { rateLimit, clientKey } from '@/lib/rate-limit'
 import { smartChat } from '@/lib/smart-chat'
 import { db } from '@/lib/db'
 import { supabaseUpsert } from '@/lib/supabase'
-import { requireVerifiedSession, getCurrentUser } from '@/lib/auth'
+import { requireVerifiedSession, getCurrentUser, getVerifiedSession } from '@/lib/auth'
 import { ensurePerUserColumns, persistParsedDocument, loadParsedDocument } from '@/lib/schema-guard'
 import { extractPdfText } from '@/lib/pdf-text'
 import type { Paragraph } from 'docx'
@@ -44,6 +44,9 @@ interface ParsedDoc {
     sheetNames?: string[]
     slideCount?: number
   }
+  // SECURITY (audit C3): owner stamped at upload; GET verifies this so one
+  // user can never read another user's document.
+  userId?: string | null
   uploadedAt: string
 }
 
@@ -109,7 +112,7 @@ export async function POST(req: NextRequest) {
 
     let text = ''
     const metadata: ParsedDoc['metadata'] = { wordCount: 0, charCount: 0, readingTime: 0 }
-    let tables: Array<{ caption: string; rows: string[][] }> = []
+    const tables: Array<{ caption: string; rows: string[][] }> = []
 
     if (format === 'pdf') {
       // Validate it's actually a PDF before parsing
@@ -232,14 +235,19 @@ export async function POST(req: NextRequest) {
     }
     docStore.set(doc.id, doc)
 
+    // SECURITY (audit C3): stamp the owner so the GET handler can enforce
+    // ownership even on the warm in-memory path.
+    const user = await getCurrentUser(req).catch(() => null)
+    doc.userId = user?.id ?? null
+    docStore.set(doc.id, doc)
+
     // DURABLE PERSISTENCE — the in-memory docStore is per-serverless-instance;
     // on Vercel the follow-up GET (chat attachment context, Studio import,
     // document Q&A) can hit a different instance → "Document not found".
     // Persisting makes every later read work (additive table, best-effort).
-    const user = await getCurrentUser(req).catch(() => null)
     void persistParsedDocument({
       id: doc.id,
-      userId: user?.id ?? null,
+      userId: doc.userId ?? null,
       filename: doc.filename,
       format: doc.format,
       title: doc.title,
@@ -301,6 +309,22 @@ export async function POST(req: NextRequest) {
 // GET: ask questions about a document
 export async function GET(req: NextRequest) {
   try {
+    // SECURITY (audit C3): this handler previously served ANY document by id
+    // to anonymous callers and ran un-rate-limited AI Q&A over it. Require a
+    // verified session and scope every read to the document's owner.
+    const auth = await getVerifiedSession(req)
+    if (!auth) {
+      return NextResponse.json(
+        { error: 'Sign in to access documents.', code: 'AUTH_REQUIRED' },
+        { status: 401 }
+      )
+    }
+
+    const limit = rateLimit(`doc-read:${clientKey(req)}`, 30, 60_000)
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many requests. Wait a moment.' }, { status: 429 })
+    }
+
     const id = req.nextUrl.searchParams.get('id')
     const question = req.nextUrl.searchParams.get('q')
     if (!id) {
@@ -313,6 +337,11 @@ export async function GET(req: NextRequest) {
       // switches on Vercel; the in-memory map covers the warm path).
       const row = await loadParsedDocument(id)
       if (row) {
+        // SECURITY (audit C3): the durable row knows its owner — refuse to
+        // serve another user's document.
+        if (row.userId && row.userId !== auth.userId) {
+          return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+        }
         let sections: ParsedDoc['sections'] = []
         let tables: ParsedDoc['tables'] = []
         let metadata: ParsedDoc['metadata'] = { wordCount: 0, charCount: 0, readingTime: 0 }
@@ -334,12 +363,22 @@ export async function GET(req: NextRequest) {
           sections,
           tables,
           metadata,
+          // Owner carried over from the durable row so the warm-path
+          // ownership check below keeps working after a cold rebuild.
+          userId: row.userId,
           uploadedAt: row.createdAt ?? new Date().toISOString(),
         }
         docStore.set(doc.id, doc) // warm the cache for subsequent reads
       }
     }
     if (!doc) {
+      return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+    }
+
+    // SECURITY (audit C3): ownership check on the warm path too. Legacy
+    // entries without a stamped owner stay reachable only via their
+    // durable row — unknown-owner docs are treated as not found for safety.
+    if (doc.userId && doc.userId !== auth.userId) {
       return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
     }
 

@@ -1033,13 +1033,17 @@ export function SocialMode() {
   const disconnect = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/social/accounts?id=${id}`, { method: 'DELETE' })
+        // Audit fix: only remove the account from the UI when the server
+        // actually deleted it — a failed request used to “lose” the account
+        // silently until the next reload resurrected it.
+        const res = await fetch(`/api/social/accounts?id=${id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error(`Request failed (${res.status})`)
         setAccounts((prev) => prev.filter((a) => a.id !== id))
         if (activeId === id) setActiveId(null)
         toast({ title: 'Disconnected' })
         void loadQueue()
       } catch {
-        toast({ title: 'Could not disconnect', variant: 'destructive' })
+        toast({ title: 'Could not disconnect', description: 'The account is still connected — try again.', variant: 'destructive' })
       }
     },
     [activeId, toast, loadQueue],
@@ -1503,12 +1507,19 @@ export function SocialMode() {
                                       variant="ghost"
                                       className="h-7 text-[11px]"
                                       onClick={async () => {
-                                        await fetch(`/api/social/comments/${c.id}`, {
-                                          method: 'PATCH',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ action: 'dismiss' }),
-                                        })
-                                        setComments((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: 'dismissed' } : x)))
+                                        try {
+                                          // Audit fix: verify the request actually succeeded
+                                          // before flipping UI state (no false "dismissed").
+                                          const res = await fetch(`/api/social/comments/${c.id}`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ action: 'dismiss' }),
+                                          })
+                                          if (!res.ok) throw new Error(`Request failed (${res.status})`)
+                                          setComments((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: 'dismissed' } : x)))
+                                        } catch {
+                                          toast({ title: 'Could not dismiss', description: 'Check your connection and try again.', variant: 'destructive' })
+                                        }
                                       }}
                                     >
                                       Dismiss
@@ -1518,13 +1529,19 @@ export function SocialMode() {
                                       variant="ghost"
                                       className="h-7 text-[11px]"
                                       onClick={async () => {
-                                        const res = await fetch(`/api/social/comments/${c.id}`, {
-                                          method: 'PATCH',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ action: 'draft' }),
-                                        })
-                                        const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
-                                        if (data.comment) setComments((prev) => prev.map((x) => (x.id === c.id ? (data.comment as CommentRow) : x)))
+                                        try {
+                                          const res = await fetch(`/api/social/comments/${c.id}`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ action: 'draft' }),
+                                          })
+                                          if (!res.ok) throw new Error(`Request failed (${res.status})`)
+                                          const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
+                                          if (data.comment) setComments((prev) => prev.map((x) => (x.id === c.id ? (data.comment as CommentRow) : x)))
+                                          else toast({ title: 'No draft came back', description: 'Try again in a moment.', variant: 'destructive' })
+                                        } catch {
+                                          toast({ title: 'Could not redraft', description: 'Check your connection and try again.', variant: 'destructive' })
+                                        }
                                       }}
                                     >
                                       <RefreshCw className="h-3 w-3" aria-hidden />
@@ -1540,13 +1557,19 @@ export function SocialMode() {
                                   variant="secondary"
                                   className="mt-2 h-7 text-[11px]"
                                   onClick={async () => {
-                                    const res = await fetch(`/api/social/comments/${c.id}`, {
-                                      method: 'PATCH',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ action: 'draft' }),
-                                    })
-                                    const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
-                                    if (data.comment) setComments((prev) => prev.map((x) => (x.id === c.id ? (data.comment as CommentRow) : x)))
+                                    try {
+                                      const res = await fetch(`/api/social/comments/${c.id}`, {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'draft' }),
+                                      })
+                                      if (!res.ok) throw new Error(`Request failed (${res.status})`)
+                                      const data = (await res.json().catch(() => ({}))) as { comment?: CommentRow }
+                                      if (data.comment) setComments((prev) => prev.map((x) => (x.id === c.id ? (data.comment as CommentRow) : x)))
+                                      else toast({ title: 'No draft came back', description: 'Try again in a moment.', variant: 'destructive' })
+                                    } catch {
+                                      toast({ title: 'Could not draft a reply', description: 'Check your connection and try again.', variant: 'destructive' })
+                                    }
                                   }}
                                 >
                                   <Sparkles className="h-3 w-3" aria-hidden />

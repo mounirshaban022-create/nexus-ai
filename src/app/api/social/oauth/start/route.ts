@@ -4,6 +4,9 @@ import { SOCIAL_PLATFORMS, isSocialPlatform, getPlatformCredentials, SocialPlatf
 
 export const maxDuration = 30
 
+/** Cookie that binds an OAuth handshake to this browser (audit M1). */
+export const OAUTH_NONCE_COOKIE = 'nexus-oauth-nonce'
+
 /* ------------------------------------------------------------------ */
 /* GET /api/social/oauth/start?platform=instagram                      */
 /*                                                                     */
@@ -51,6 +54,11 @@ const CONFIG: Record<SocialPlatform, OAuthConfig> = {
 }
 
 function resolveOrigin(req: NextRequest): string {
+  // SECURITY (audit M2): prefer an operator-configured canonical origin over
+  // the x-forwarded-* headers, which are attacker-influenceable on hosts that
+  // do not sanitize them (redirect_uri poisoning on misconfigured proxies).
+  const configured = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
+  if (configured && configured.startsWith('http')) return configured.replace(/\/+$/, '')
   // Behind proxies (Vercel, the sandbox gateway) the forwarded host is the
   // public origin — prefer it over the internal nextUrl origin.
   const proto = req.headers.get('x-forwarded-proto')
@@ -75,17 +83,6 @@ export async function GET(req: NextRequest) {
 
   if (!creds) {
     // Calm, human answer — the user never needs to do anything here.
-    return NextResponse.json({
-      available: false,
-      hint:
-        `The official connection for ${SOCIAL_PLATFORMS[platform].label} isn't switched on for this deployment yet. ` +
-        "That's a server-side switch — there is nothing for you to prepare. Your agent keeps rehearsing everything " +
-        'meanwhile, and this button goes live the moment the connection is switched on.',
-    })
-  }
-
-  if (!creds) {
-    // Calm, human answer — the user never needs to do anything here.
     // (The Connect dialog offers its own guided one-place setup.)
     return NextResponse.json({
       available: false,
@@ -97,7 +94,15 @@ export async function GET(req: NextRequest) {
   }
 
   const redirectUri = `${resolveOrigin(req)}/api/social/oauth/callback`
-  const state = await signOAuthState({ userId: session.userId, platform })
+
+  // SECURITY (audit M1): bind this handshake to THIS browser via a one-time
+  // nonce — a random value that rides inside the signed state JWT AND an
+  // httpOnly cookie. The callback requires both to match, so a state token
+  // captured anywhere else cannot be replayed (and the cookie is cleared on
+  // first use, making the handshake strictly one-time).
+  const { randomBytes, createHash } = await import('crypto')
+  const nonce = randomBytes(16).toString('hex')
+  const state = await signOAuthState({ userId: session.userId, platform, nonce })
 
   const url = new URL(cfg.authorize)
   url.searchParams.set('client_id', creds.clientId)
@@ -109,14 +114,29 @@ export async function GET(req: NextRequest) {
   // X requires PKCE (S256). The verifier rides inside the signed state so
   // the callback can complete the exchange without server-side storage.
   if (platform === 'x') {
-    const { randomBytes, createHash } = await import('crypto')
     const verifier = randomBytes(48).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
     url.searchParams.set('code_challenge', challenge)
     url.searchParams.set('code_challenge_method', 'S256')
-    const signed = await signOAuthState({ userId: session.userId, platform, verifier })
+    const signed = await signOAuthState({ userId: session.userId, platform, verifier, nonce })
     url.searchParams.set('state', signed)
   }
 
-  return NextResponse.json({ available: true, url: url.toString() })
+  // Browser navigation (the "Try again" buttons on the callback result page)
+  // should land straight on the platform's consent screen, not render JSON.
+  const wantsHtml = (req.headers.get('accept') ?? '').includes('text/html')
+  const res = wantsHtml
+    ? NextResponse.redirect(url.toString())
+    : NextResponse.json({ available: true, url: url.toString() })
+  const isLocalHttp =
+    (req.headers.get('host') ?? '').startsWith('localhost') &&
+    req.headers.get('x-forwarded-proto') !== 'https'
+  res.cookies.set(OAUTH_NONCE_COOKIE, createHash('sha256').update(nonce).digest('hex'), {
+    httpOnly: true,
+    sameSite: 'lax', // top-level navigations (platform redirect + popup) carry it
+    secure: !isLocalHttp,
+    path: '/',
+    maxAge: 600, // mirrors the 10-minute state TTL
+  })
+  return res
 }

@@ -8,40 +8,46 @@ const __dirname = dirname(__filename);
 
 const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
   rules: {
-    // TypeScript rules
-    "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/no-unused-vars": "off",
-    "@typescript-eslint/no-non-null-assertion": "off",
-    "@typescript-eslint/ban-ts-comment": "off",
-    "@typescript-eslint/prefer-as-const": "off",
-    "@typescript-eslint/no-unused-disable-directive": "off",
-    
-    // React rules
-    "react-hooks/exhaustive-deps": "off",
-    "react-hooks/purity": "off",
-    "react/no-unescaped-entities": "off",
-    "react/display-name": "off",
-    "react/prop-types": "off",
-    "react-compiler/react-compiler": "off",
-    
-    // Next.js rules
-    "@next/next/no-img-element": "off",
-    "@next/next/no-html-link-for-pages": "off",
-    
-    // General JavaScript rules
-    "prefer-const": "off",
-    "no-unused-vars": "off",
-    "no-console": "off",
-    "no-debugger": "off",
-    "no-empty": "off",
-    "no-irregular-whitespace": "off",
-    "no-case-declarations": "off",
-    "no-fallthrough": "off",
-    "no-mixed-spaces-and-tabs": "off",
-    "no-redeclare": "off",
-    "no-undef": "off",
-    "no-unreachable": "off",
-    "no-useless-escape": "off",
+    // ── AUDIT FIX: the previous config disabled 31 rules, which made
+    // "lint passes" meaningless (debug leftovers, dead vars and empty
+    // blocks sailed through). Rules are re-enabled in two tiers:
+    //   * error  — currently zero-violation rules that catch real rot
+    //   * warn   — visibility tier; findings surface but do not block
+    // Anything not listed below now runs at its default (mostly "error").
+
+    // TypeScript — errors (verified clean after the dead-code purge)
+    "@typescript-eslint/ban-ts-comment": "error",
+    "@typescript-eslint/prefer-as-const": "error",
+
+    // TypeScript — visibility tier
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    "@typescript-eslint/no-non-null-assertion": "warn",
+
+    // React — visibility tier (flag; fixing is follow-up work)
+    "react-hooks/exhaustive-deps": "warn",
+    "react/display-name": "warn",
+
+    // Next.js — visibility tier
+    "@next/next/no-img-element": "warn",
+
+    // General JavaScript — errors (catch real rot)
+    "no-debugger": "error",
+    "no-unreachable": "error",
+    "no-irregular-whitespace": "error",
+    "no-fallthrough": "error",
+    "no-redeclare": "error",
+    "no-useless-escape": "error",
+    "no-case-declarations": "error",
+    "no-mixed-spaces-and-tabs": "error",
+    "prefer-const": "error",
+    // allowEmptyCatch: our fallback chains use intentional `catch {}` —
+    // still flags empty `if`/`try` blocks.
+    "no-empty": ["error", { allowEmptyCatch: true }],
+
+    // console — visibility tier: console.warn/error are deliberate tagged
+    // server logging; bare console.log should migrate to a logger.
+    "no-console": ["warn", { allow: ["warn", "error", "info"] }],
   },
 }, {
   ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]

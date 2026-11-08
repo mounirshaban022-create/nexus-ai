@@ -39,6 +39,18 @@ const nextConfig: NextConfig = {
           // voice call into captions-only mode. Still gated by the iframe's
           // own allow="microphone" attribute.
           { key: "Permissions-Policy", value: "microphone=*, geolocation=()" },
+          // SECURITY (audit M7): report-only CSP — observes violations without
+          // breaking the app while we tune the policy. Backstops the OAuth
+          // result-page HTML builder and any future injection bug.
+          {
+            key: "Content-Security-Policy-Report-Only",
+            value:
+              "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+              "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; " +
+              "media-src 'self' data: blob: https:; font-src 'self' data: https:; " +
+              "connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; " +
+              "form-action 'self'; frame-ancestors *",
+          },
         ],
       },
     ];
